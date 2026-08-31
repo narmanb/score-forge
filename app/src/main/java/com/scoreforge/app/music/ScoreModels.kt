@@ -1,5 +1,6 @@
 package com.scoreforge.app.music
 
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.round
 
@@ -28,6 +29,7 @@ data class ScoreNote(
     override val startBeat: Float = 0f,
     val velocity: Int = 96,
     override val dotted: Boolean = false,
+    val tieToNext: Boolean = false,
 ) : ScoreEvent
 
 data class ScoreRest(
@@ -62,6 +64,52 @@ object ScoreTimeline {
     fun quantizeBeat(beat: Float, gridBeats: Float = EDIT_GRID_BEATS): Float {
         if (gridBeats <= 0f) return beat.coerceAtLeast(0f)
         return (round(beat.coerceAtLeast(0f) / gridBeats) * gridBeats).coerceAtLeast(0f)
+    }
+}
+
+/** Rules and helpers for ordinary notation ties between contiguous notes of the same pitch. */
+object ScoreTies {
+    private const val EPSILON = 0.001f
+
+    fun targetIndex(events: List<ScoreEvent>, sourceIndex: Int): Int? {
+        val source = events.getOrNull(sourceIndex) as? ScoreNote ?: return null
+        val targetBeat = source.startBeat + source.effectiveBeats
+        return events.indices
+            .asSequence()
+            .filter { it != sourceIndex }
+            .mapNotNull { index -> (events[index] as? ScoreNote)?.let { index to it } }
+            .filter { (_, note) ->
+                note.midiPitch == source.midiPitch && abs(note.startBeat - targetBeat) <= EPSILON
+            }
+            .minByOrNull { (index, _) -> index }
+            ?.first
+    }
+
+    fun hasValidTie(events: List<ScoreEvent>, sourceIndex: Int): Boolean {
+        val source = events.getOrNull(sourceIndex) as? ScoreNote ?: return false
+        return source.tieToNext && targetIndex(events, sourceIndex) != null
+    }
+
+    fun incomingTieSourceIndex(events: List<ScoreEvent>, targetIndex: Int): Int? {
+        val target = events.getOrNull(targetIndex) as? ScoreNote ?: return null
+        return events.indices.firstOrNull { sourceIndex ->
+            sourceIndex != targetIndex &&
+                (events[sourceIndex] as? ScoreNote)?.tieToNext == true &&
+                targetIndex(events, sourceIndex) == targetIndex &&
+                (events[sourceIndex] as ScoreNote).midiPitch == target.midiPitch
+        }
+    }
+
+    fun canToggle(events: List<ScoreEvent>, sourceIndex: Int): Boolean =
+        events.getOrNull(sourceIndex) is ScoreNote &&
+            ((events[sourceIndex] as ScoreNote).tieToNext || targetIndex(events, sourceIndex) != null)
+
+    fun toggle(events: List<ScoreEvent>, sourceIndex: Int): List<ScoreEvent>? {
+        val source = events.getOrNull(sourceIndex) as? ScoreNote ?: return null
+        if (!source.tieToNext && targetIndex(events, sourceIndex) == null) return null
+        return events.toMutableList().apply {
+            this[sourceIndex] = source.copy(tieToNext = !source.tieToNext)
+        }
     }
 }
 
