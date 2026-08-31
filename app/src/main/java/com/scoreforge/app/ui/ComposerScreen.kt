@@ -1,6 +1,9 @@
 package com.scoreforge.app.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -51,6 +55,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun ScoreForgeComposerScreen() {
     val context = LocalContext.current
+    val pageScrollState = rememberScrollState()
     val tracks = remember { mutableStateListOf(ScoreTracks.defaultTrack()) }
     val playback = remember { ScorePlaybackEngine() }
     val soundFontEngine = remember { SoundFontEngine.createOrNull() }
@@ -472,7 +477,12 @@ fun ScoreForgeComposerScreen() {
 
     MaterialTheme(colorScheme = darkColorScheme()) {
         Surface(modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding()
+                    .verticalScroll(pageScrollState),
+            ) {
                 HeaderBar(
                     projectName = projectName,
                     activeTrackName = activeTrack.name,
@@ -592,7 +602,7 @@ fun ScoreForgeComposerScreen() {
                         onMoveNote = ::moveActiveNote,
                         onMoveRest = ::moveActiveRest,
                         onDeleteEvent = ::deleteEvent,
-                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        modifier = Modifier.fillMaxWidth().height(300.dp),
                     )
 
                     ScoreEditorMode.PIANO_ROLL -> PianoRollEditor(
@@ -608,7 +618,7 @@ fun ScoreForgeComposerScreen() {
                         onBeginMove = { recordBeforeScoreEdit() },
                         onMoveNote = ::moveActiveNote,
                         onDeleteEvent = ::deleteEvent,
-                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        modifier = Modifier.fillMaxWidth().height(300.dp),
                     )
                 }
 
@@ -650,6 +660,8 @@ fun ScoreForgeComposerScreen() {
                         modifier = Modifier.fillMaxWidth().height(120.dp),
                     )
                 }
+
+                Spacer(modifier = Modifier.height(12.dp))
             }
         }
     }
@@ -682,12 +694,13 @@ private fun HeaderBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Column {
             Text("Score Forge", style = MaterialTheme.typography.titleLarge)
             Text(
                 "$projectName • $activeTrackName • $trackCount tracks • 4/4 • $bpm BPM • $measureCount measures • beat ${formatBeat(cursorBeat)} • $noteCount notes • $restCount rests",
@@ -726,7 +739,10 @@ private fun DurationSelector(
     onToggleTie: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -747,7 +763,6 @@ private fun DurationSelector(
         if (sharpInput) Button(onClick = onToggleSharpInput) { Text("Staff ♯") }
         else OutlinedButton(onClick = onToggleSharpInput) { Text("Staff ♯") }
 
-        Spacer(modifier = Modifier.weight(1f))
         Text(
             buildString {
                 append(if (sharpInput) "Staff tap enters sharps" else "Staff tap enters naturals")
