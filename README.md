@@ -1,33 +1,92 @@
 # Score Forge
 
-Score Forge is an Android-first, touch-focused music composition app built around traditional staff notation, virtual instruments, MIDI, SoundFonts, synths, samples, and full song arrangement.
+Score Forge is an Android-first, touch-focused music composition app built around traditional staff notation, a piano roll, multitouch performance, multi-track arrangement, SoundFonts, and project-based song editing.
 
-## Current foundation
+## Current version
 
-- Kotlin + Jetpack Compose Android app
-- Landscape-first touch interface
-- Traditional five-line staff editor prototype
-- Whole, half, quarter, eighth, and sixteenth note entry
-- Tap the staff to place notes
-- Drag existing staff notes vertically to change pitch
-- Two-octave touchscreen piano for step entry at any speed
-- Undo and clear controls
+**0.2.0**
 
-## Planned architecture
+## Current features
 
-- **Compose UI:** staff editor, piano, piano roll, mixer, track arrangement, instrument browser
-- **Score/sequencer core:** measures, tempo, time signatures, note events, playback timeline, project files
-- **Instrument engine:** SoundFont support through FluidSynth, synth voices, sampled instruments, one-shot sound effects
-- **Android audio:** low-latency native audio path, with Oboe planned for performance-sensitive playback
-- **MIDI:** touchscreen entry first, external USB/Bluetooth MIDI later
+### Composition and notation
 
-## Near-term roadmap
+- Traditional five-line staff editor
+- Piano-roll editor using the same underlying note data as the staff
+- Whole, half, quarter, eighth, and sixteenth notes and rests
+- Measure/barline display in 4/4
+- Tap-to-place notation with 1/16-note timing quantization
+- Drag notes horizontally to change time and vertically to change pitch
+- Drag rests horizontally in time
+- Long-press individual notes or rests to delete them
+- Sharp accidental entry and rendering
+- Chord step-entry mode
+- 100-step Undo/Redo history
 
-1. Establish a reliable Android CI build and downloadable debug APK.
-2. Expand staff editing: horizontal drag/reordering, rests, accidentals, dotted notes, ties, measures, clefs, key/time signatures.
-3. Add real-time piano input and multitouch chords alongside step entry.
-4. Add track management and a basic sequencer/playhead.
-5. Integrate real instrument playback and SoundFont importing.
-6. Add piano-roll editing, mixer controls, synths, samples, and arbitrary sound-effect tracks.
+### Touch input
 
-No third-party SoundFonts or commercial samples are bundled in the repository.
+- Multitouch on-screen piano
+- Independent note-on/note-off for held fingers and chords
+- Piano octave shifting
+- Optional Show/Hide Piano control for more editing space on phones
+- Staff and piano entry preview through the active instrument
+
+### Tracks and mixing
+
+- Up to 16 tracks
+- Rename, mute, solo, and delete tracks
+- Per-track instrument preset
+- Per-track volume and stereo pan
+- Mixer settings affect both SoundFont and fallback playback
+- Solo routing isolates soloed tracks during playback
+
+### Audio and instruments
+
+- Native FluidSynth integration through C++/JNI
+- Import `.sf2` and `.sf3` SoundFonts
+- Enumerates the presets actually present in imported SoundFonts
+- Direct preset picker with arbitrary SoundFont banks/programs
+- Separate live SoundFont engine for touchscreen performance
+- Separate score-rendering engine for arrangement playback
+- Built-in synthesized fallback voice when no SoundFont is loaded
+- Stereo multi-track playback
+
+### Projects and persistence
+
+- Automatic draft saving/restoration
+- Persistent imported SoundFont and selected preset
+- Project names
+- New Project
+- Save As `.sfp`
+- Open `.sfp`
+- Backward-compatible migration from the original single-track project format
+- Project files store tracks, score events, tempo, editor settings, instruments, volume, pan, mute, and solo state
+
+### Android
+
+- Kotlin + Jetpack Compose interface
+- Native C++ audio bridge
+- Landscape-first touch layout
+- Android API 26+ minimum
+- Automated GitHub Actions unit-test and APK builds
+
+## Architecture
+
+- **Compose UI:** staff, piano roll, touchscreen piano, track controls, mixer, project controls, SoundFont browser
+- **Music model:** timed score events, tracks, rests, notation state, quantized timeline, project codec
+- **Audio:** FluidSynth for SoundFont instruments plus a built-in fallback synthesizer
+- **Native bridge:** C++/JNI for FluidSynth access
+- **Persistence:** versioned `.sfp` project format plus automatic draft storage
+
+## Next priorities
+
+- Dotted notes and rests
+- Ties and slurs
+- Additional accidentals and notation spelling
+- Clefs, key signatures, and configurable time signatures
+- Better long-score scrolling/zooming
+- Note velocity editing
+- External USB/Bluetooth MIDI input
+- Sample/one-shot tracks, drum pads, and additional synthesized instruments
+- Export options such as MIDI and rendered audio
+
+No third-party SoundFonts or commercial samples are bundled in the repository. Users can import their own compatible SoundFont files.
