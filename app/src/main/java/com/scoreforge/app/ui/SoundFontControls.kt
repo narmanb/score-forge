@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
@@ -50,12 +49,13 @@ fun SoundFontControls(
     var presets by remember { mutableStateOf<List<SoundFontPreset>>(emptyList()) }
     var presetIndex by remember { mutableIntStateOf(-1) }
     var presetMenuExpanded by remember { mutableStateOf(false) }
+    var libraryMenuExpanded by remember { mutableStateOf(false) }
     var status by remember {
         mutableStateOf(
-            if (engine == null) "Native SoundFont engine unavailable" else "Built-in preview synth"
+            if (engine == null) "Native SoundFont engine unavailable" else "Loading instruments…"
         )
     }
-    var isImporting by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
 
     fun publishLoadedSoundFont(
         soundFont: ImportedSoundFont,
@@ -68,12 +68,13 @@ fun SoundFontControls(
         presets = discoveredPresets
         presetIndex = discoveredIndex
         presetMenuExpanded = false
+        libraryMenuExpanded = false
         status = when {
             restored && discoveredPresets.isNotEmpty() ->
-                "Restored • ${discoveredPresets.size} presets • live piano ready"
-            restored -> "Restored • default program"
-            discoveredPresets.isNotEmpty() -> "${discoveredPresets.size} presets • live piano ready"
-            else -> "Loaded • default program"
+                "${discoveredPresets.size} instruments ready"
+            restored -> "Default program ready"
+            discoveredPresets.isNotEmpty() -> "${discoveredPresets.size} instruments ready"
+            else -> "Default program ready"
         }
 
         SoundFontRepository.saveActiveSelection(context, soundFont, selectedPreset)
@@ -81,38 +82,126 @@ fun SoundFontControls(
         onSoundFontLoaded(soundFont, selectedPreset)
     }
 
-    LaunchedEffect(engine) {
-        if (engine == null) return@LaunchedEffect
-        val saved = SoundFontRepository.loadActiveSelection(context) ?: return@LaunchedEffect
+    fun loadSoundFont(
+        soundFont: ImportedSoundFont,
+        preferredBank: Int? = null,
+        preferredProgram: Int? = null,
+        restored: Boolean = false,
+    ) {
+        val activeEngine = engine ?: return
+        isLoading = true
+        presetMenuExpanded = false
+        libraryMenuExpanded = false
+        status = "Loading ${soundFont.displayName}…"
 
-        isImporting = true
-        status = "Restoring ${saved.soundFont.displayName}…"
-
-        thread(name = "ScoreForgeSoundFontRestore", isDaemon = true) {
-            val loaded = engine.loadSoundFont(saved.soundFont.localPath)
-            if (loaded && saved.bank != null && saved.program != null) {
-                engine.presets
-                    .firstOrNull { it.bank == saved.bank && it.program == saved.program }
-                    ?.let(engine::selectPreset)
+        thread(name = "ScoreForgeSoundFontLoad", isDaemon = true) {
+            val loaded = activeEngine.loadSoundFont(soundFont.localPath)
+            if (loaded && preferredBank != null && preferredProgram != null) {
+                activeEngine.presets
+                    .firstOrNull { it.bank == preferredBank && it.program == preferredProgram }
+                    ?.let(activeEngine::selectPreset)
             }
 
-            val discoveredPresets = if (loaded) engine.presets else emptyList()
-            val discoveredIndex = if (loaded) engine.selectedPresetIndex() else -1
-            val selectedPreset = if (loaded) engine.selectedPreset else null
+            val discoveredPresets = if (loaded) activeEngine.presets else emptyList()
+            val discoveredIndex = if (loaded) activeEngine.selectedPresetIndex() else -1
+            val selectedPreset = if (loaded) activeEngine.selectedPreset else null
 
             mainHandler.post {
-                isImporting = false
+                isLoading = false
                 if (loaded) {
                     publishLoadedSoundFont(
-                        soundFont = saved.soundFont,
+                        soundFont = soundFont,
                         discoveredPresets = discoveredPresets,
                         discoveredIndex = discoveredIndex,
                         selectedPreset = selectedPreset,
-                        restored = true,
+                        restored = restored,
                     )
                 } else {
-                    SoundFontRepository.clearActiveSelection(context)
-                    status = "Saved SoundFont could not be restored"
+                    status = "FluidSynth could not load ${soundFont.displayName}"
+                }
+            }
+        }
+    }
+
+    fun useStarterInstruments() {
+        val activeEngine = engine ?: return
+        isLoading = true
+        presetMenuExpanded = false
+        libraryMenuExpanded = false
+        status = "Loading starter instruments…"
+
+        thread(name = "ScoreForgeStarterSoundFont", isDaemon = true) {
+            val starterResult = SoundFontRepository.installBundledStarter(context)
+            val starter = starterResult.getOrNull()
+            val loaded = starter?.let { activeEngine.loadSoundFont(it.localPath) } == true
+            val discoveredPresets = if (loaded) activeEngine.presets else emptyList()
+            val discoveredIndex = if (loaded) activeEngine.selectedPresetIndex() else -1
+            val selectedPreset = if (loaded) activeEngine.selectedPreset else null
+            val error = starterResult.exceptionOrNull()?.message
+
+            mainHandler.post {
+                isLoading = false
+                if (loaded) {
+                    publishLoadedSoundFont(
+                        soundFont = checkNotNull(starter),
+                        discoveredPresets = discoveredPresets,
+                        discoveredIndex = discoveredIndex,
+                        selectedPreset = selectedPreset,
+                        restored = false,
+                    )
+                } else {
+                    status = error ?: "Starter instruments unavailable • preview synth active"
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(engine) {
+        val activeEngine = engine ?: return@LaunchedEffect
+        isLoading = true
+        status = "Loading instruments…"
+
+        thread(name = "ScoreForgeSoundFontRestore", isDaemon = true) {
+            val saved = SoundFontRepository.loadActiveSelection(context)
+            val starterResult = if (saved == null) {
+                SoundFontRepository.installBundledStarter(context)
+            } else {
+                null
+            }
+            val soundFont = saved?.soundFont ?: starterResult?.getOrNull()
+
+            if (soundFont == null) {
+                mainHandler.post {
+                    isLoading = false
+                    status = "Built-in preview synth"
+                }
+                return@thread
+            }
+
+            val loaded = activeEngine.loadSoundFont(soundFont.localPath)
+            if (loaded && saved?.bank != null && saved.program != null) {
+                activeEngine.presets
+                    .firstOrNull { it.bank == saved.bank && it.program == saved.program }
+                    ?.let(activeEngine::selectPreset)
+            }
+
+            val discoveredPresets = if (loaded) activeEngine.presets else emptyList()
+            val discoveredIndex = if (loaded) activeEngine.selectedPresetIndex() else -1
+            val selectedPreset = if (loaded) activeEngine.selectedPreset else null
+
+            mainHandler.post {
+                isLoading = false
+                if (loaded) {
+                    publishLoadedSoundFont(
+                        soundFont = soundFont,
+                        discoveredPresets = discoveredPresets,
+                        discoveredIndex = discoveredIndex,
+                        selectedPreset = selectedPreset,
+                        restored = saved != null,
+                    )
+                } else {
+                    if (saved != null) SoundFontRepository.clearActiveSelection(context)
+                    status = "SoundFont unavailable • preview synth active"
                 }
             }
         }
@@ -143,7 +232,7 @@ fun SoundFontControls(
                 SoundFontRepository.saveActiveSelection(context, it, selected)
             }
             LiveInstrumentBus.selectPreset(selected)
-            status = "${presets.size} presets"
+            status = "${presets.size} instruments ready"
         }
     }
 
@@ -152,8 +241,9 @@ fun SoundFontControls(
     ) { uri ->
         if (uri == null || engine == null) return@rememberLauncherForActivityResult
 
-        isImporting = true
+        isLoading = true
         presetMenuExpanded = false
+        libraryMenuExpanded = false
         status = "Importing SoundFont…"
 
         thread(name = "ScoreForgeSoundFontImport", isDaemon = true) {
@@ -166,7 +256,7 @@ fun SoundFontControls(
             val error = imported.exceptionOrNull()?.message
 
             mainHandler.post {
-                isImporting = false
+                isLoading = false
                 if (loaded) {
                     publishLoadedSoundFont(
                         soundFont = checkNotNull(importedFile),
@@ -187,7 +277,7 @@ fun SoundFontControls(
         if (engine.selectPresetAt(index)) {
             presetIndex = index
             val selected = presets[index]
-            status = "${presets.size} presets"
+            status = "${presets.size} instruments ready"
             currentSoundFont?.let {
                 SoundFontRepository.saveActiveSelection(context, it, selected)
             }
@@ -206,24 +296,20 @@ fun SoundFontControls(
     ) {
         Text("Instrument:", style = MaterialTheme.typography.labelLarge)
 
-        Button(
-            onClick = { launcher.launch(arrayOf("audio/*", "application/octet-stream", "*/*")) },
-            enabled = engine != null && !isImporting,
-        ) {
-            Text(if (currentSoundFont == null) "Import SoundFont" else "Change SoundFont")
-        }
-
         if (presets.isNotEmpty()) {
             OutlinedButton(
                 onClick = { selectPreset((presetIndex - 1).coerceAtLeast(0)) },
-                enabled = presetIndex > 0,
+                enabled = presetIndex > 0 && !isLoading,
             ) {
                 Text("◀")
             }
 
             Box {
-                OutlinedButton(onClick = { presetMenuExpanded = true }) {
-                    val selectedName = presets.getOrNull(presetIndex)?.displayName ?: "Choose preset"
+                OutlinedButton(
+                    onClick = { presetMenuExpanded = true },
+                    enabled = !isLoading,
+                ) {
+                    val selectedName = presets.getOrNull(presetIndex)?.displayName ?: "Choose instrument"
                     val position = if (presetIndex in presets.indices) {
                         "${presetIndex + 1}/${presets.size}"
                     } else {
@@ -250,12 +336,38 @@ fun SoundFontControls(
 
             OutlinedButton(
                 onClick = { selectPreset((presetIndex + 1).coerceAtMost(presets.lastIndex)) },
-                enabled = presetIndex in 0 until presets.lastIndex,
+                enabled = presetIndex in 0 until presets.lastIndex && !isLoading,
             ) {
                 Text("▶")
             }
         } else if (currentSoundFont != null) {
             Text("Default program", style = MaterialTheme.typography.labelLarge)
+        }
+
+        Box {
+            OutlinedButton(
+                onClick = { libraryMenuExpanded = true },
+                enabled = engine != null && !isLoading,
+            ) {
+                Text("Library")
+            }
+
+            DropdownMenu(
+                expanded = libraryMenuExpanded,
+                onDismissRequest = { libraryMenuExpanded = false },
+            ) {
+                DropdownMenuItem(
+                    text = { Text("Use ${SoundFontRepository.STARTER_DISPLAY_NAME}") },
+                    onClick = ::useStarterInstruments,
+                )
+                DropdownMenuItem(
+                    text = { Text("Import SoundFont…") },
+                    onClick = {
+                        libraryMenuExpanded = false
+                        launcher.launch(arrayOf("audio/*", "application/octet-stream", "*/*"))
+                    },
+                )
+            }
         }
 
         Text(
