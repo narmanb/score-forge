@@ -1,5 +1,7 @@
 package com.scoreforge.app.audio
 
+import com.scoreforge.app.music.ScoreNote
+import com.scoreforge.app.music.ScoreTimeline
 import java.io.Closeable
 
 /**
@@ -73,6 +75,86 @@ class SoundFontEngine private constructor(
         } else {
             NativeFluidSynth.renderStereo(handle, frames)
         }
+    }
+
+    /**
+     * Offline-renders the current SoundFont/program for a score. Keeping the entire scheduling
+     * pass under one lock prevents program changes or preview notes from corrupting the render.
+     * Long-term playback can become streamed; this is intentionally simple and deterministic
+     * for the first SoundFont milestone.
+     */
+    fun renderScore(
+        notes: List<ScoreNote>,
+        bpm: Int,
+        tailSeconds: Float = 0.45f,
+    ): ShortArray = synchronized(lock) {
+        if (handle == 0L || soundFontId < 0 || notes.isEmpty()) return@synchronized ShortArray(0)
+
+        data class MidiEvent(
+            val frame: Int,
+            val noteOn: Boolean,
+            val key: Int,
+            val velocity: Int,
+        )
+
+        val safeBpm = bpm.coerceIn(30, 300)
+        val secondsPerBeat = 60f / safeBpm
+        val totalFrames = (
+            (ScoreTimeline.endBeat(notes) * secondsPerBeat + tailSeconds.coerceAtLeast(0f)) * sampleRate
+            ).toInt().coerceAtLeast(1)
+
+        val events = buildList {
+            notes.forEach { note ->
+                val onFrame = (note.startBeat * secondsPerBeat * sampleRate).toInt().coerceAtLeast(0)
+                val offFrame = (
+                    (note.startBeat + note.duration.beats) * secondsPerBeat * sampleRate
+                    ).toInt().coerceAtLeast(onFrame + 1)
+                add(MidiEvent(onFrame, true, note.midiPitch, note.velocity))
+                add(MidiEvent(offFrame, false, note.midiPitch, 0))
+            }
+        }.sortedWith(
+            compareBy<MidiEvent> { it.frame }
+                .thenBy { if (it.noteOn) 1 else 0 }
+                .thenBy { it.key }
+        )
+
+        NativeFluidSynth.allNotesOff(handle, 0)
+        val output = ShortArray(totalFrames * 2)
+        var frameCursor = 0
+        var eventIndex = 0
+
+        fun renderIntoOutput(frameCount: Int) {
+            if (frameCount <= 0) return
+            val rendered = NativeFluidSynth.renderStereo(handle, frameCount)
+            val targetOffset = frameCursor * 2
+            val copyCount = minOf(rendered.size, output.size - targetOffset)
+            if (copyCount > 0) rendered.copyInto(output, targetOffset, 0, copyCount)
+            frameCursor += frameCount
+        }
+
+        while (eventIndex < events.size && frameCursor < totalFrames) {
+            val eventFrame = events[eventIndex].frame.coerceIn(frameCursor, totalFrames)
+            renderIntoOutput(eventFrame - frameCursor)
+
+            while (eventIndex < events.size && events[eventIndex].frame <= frameCursor) {
+                val event = events[eventIndex]
+                if (event.noteOn) {
+                    NativeFluidSynth.noteOn(
+                        handle,
+                        0,
+                        event.key.coerceIn(0, 127),
+                        event.velocity.coerceIn(1, 127),
+                    )
+                } else {
+                    NativeFluidSynth.noteOff(handle, 0, event.key.coerceIn(0, 127))
+                }
+                eventIndex++
+            }
+        }
+
+        renderIntoOutput(totalFrames - frameCursor)
+        NativeFluidSynth.allNotesOff(handle, 0)
+        output
     }
 
     override fun close() = synchronized(lock) {
