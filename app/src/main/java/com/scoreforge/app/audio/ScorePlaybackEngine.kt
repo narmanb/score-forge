@@ -266,7 +266,7 @@ class ScorePlaybackEngine {
         rightGain: Float,
     ) {
         val startSample = (note.startBeat * secondsPerBeat * sampleRate).toInt()
-        val noteSeconds = note.duration.beats * secondsPerBeat
+        val noteSeconds = note.effectiveBeats * secondsPerBeat
         val noteSamples = (noteSeconds * sampleRate).toInt().coerceAtLeast(1)
         val frequency = 440.0 * Math.pow(2.0, (note.midiPitch - 69) / 12.0)
         val velocityGain = note.velocity.coerceIn(1, 127) / 127f
@@ -308,7 +308,7 @@ class ScorePlaybackEngine {
 
         notes.forEach { note ->
             val startSample = (note.startBeat * secondsPerBeat * sampleRate).toInt()
-            val noteSeconds = note.duration.beats * secondsPerBeat
+            val noteSeconds = note.effectiveBeats * secondsPerBeat
             val noteSamples = (noteSeconds * sampleRate).toInt().coerceAtLeast(1)
             val frequency = 440.0 * Math.pow(2.0, (note.midiPitch - 69) / 12.0)
             val velocityGain = note.velocity.coerceIn(1, 127) / 127f
