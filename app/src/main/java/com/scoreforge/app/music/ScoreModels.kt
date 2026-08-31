@@ -86,4 +86,13 @@ object PitchNames {
         1, 3, 6, 8, 10 -> true
         else -> false
     }
+
+    /** Sharps the ordinary staff positions C, D, F, G and A; E and B remain natural. */
+    fun sharpenIfAvailable(midiPitch: Int): Int {
+        val safePitch = midiPitch.coerceIn(0, 127)
+        return when (safePitch % 12) {
+            0, 2, 5, 7, 9 -> (safePitch + 1).coerceAtMost(127)
+            else -> safePitch
+        }
+    }
 }
