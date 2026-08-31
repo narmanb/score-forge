@@ -2,6 +2,8 @@ package com.scoreforge.app.audio
 
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreTimeline
+import com.scoreforge.app.music.ScoreTrack
+import com.scoreforge.app.music.ScoreTracks
 import java.io.Closeable
 
 data class SoundFontPreset(
@@ -81,15 +83,20 @@ class SoundFontEngine private constructor(
 
     private fun selectPresetLocked(preset: SoundFontPreset, channel: Int): Boolean {
         if (handle == 0L || soundFontId < 0) return false
-        val result = NativeFluidSynth.selectPreset(
+        val result = selectPresetOnChannelLocked(preset, channel)
+        if (result) activePreset = preset
+        return result
+    }
+
+    private fun selectPresetOnChannelLocked(preset: SoundFontPreset, channel: Int): Boolean {
+        if (handle == 0L || soundFontId < 0) return false
+        return NativeFluidSynth.selectPreset(
             handle = handle,
             soundFontId = soundFontId,
             channel = channel.coerceIn(0, 15),
             bank = preset.bank.coerceAtLeast(0),
             program = preset.program.coerceIn(0, 127),
-        )
-        if (result == 0) activePreset = preset
-        return result == 0
+        ) == 0
     }
 
     fun noteOn(
@@ -139,38 +146,113 @@ class SoundFontEngine private constructor(
         throughBeat: Float = ScoreTimeline.endBeat(notes),
     ): ShortArray = synchronized(lock) {
         if (handle == 0L || soundFontId < 0 || notes.isEmpty()) return@synchronized ShortArray(0)
+        renderMidiEventsLocked(
+            channelNotes = listOf(ChannelNotes(channel = 0, notes = notes, preset = activePreset)),
+            bpm = bpm,
+            tailSeconds = tailSeconds,
+            throughBeat = throughBeat,
+        )
+    }
 
-        data class MidiEvent(
-            val frame: Int,
-            val noteOn: Boolean,
-            val key: Int,
-            val velocity: Int,
+    /**
+     * Renders up to 16 unmuted tracks at once, one MIDI channel per track. Each track may request
+     * its own bank/program from the loaded SoundFont. Missing/invalid requests fall back to the
+     * currently selected preset so old projects remain audible.
+     */
+    fun renderTracks(
+        tracks: List<ScoreTrack>,
+        bpm: Int,
+        tailSeconds: Float = 0.45f,
+        throughBeat: Float = ScoreTracks.endBeat(tracks),
+    ): ShortArray = synchronized(lock) {
+        if (handle == 0L || soundFontId < 0) return@synchronized ShortArray(0)
+
+        val originalPreset = activePreset
+        val channelNotes = tracks
+            .filterNot { it.muted }
+            .take(ScoreTracks.MAX_TRACKS)
+            .mapIndexedNotNull { channel, track ->
+                if (track.notes.isEmpty()) return@mapIndexedNotNull null
+                val requestedPreset = if (track.presetBank != null && track.presetProgram != null) {
+                    loadedPresets.firstOrNull {
+                        it.bank == track.presetBank && it.program == track.presetProgram
+                    }
+                } else {
+                    null
+                }
+                ChannelNotes(
+                    channel = channel,
+                    notes = track.notes,
+                    preset = requestedPreset ?: originalPreset ?: loadedPresets.firstOrNull(),
+                )
+            }
+
+        if (channelNotes.isEmpty()) return@synchronized ShortArray(0)
+        val pcm = renderMidiEventsLocked(
+            channelNotes = channelNotes,
+            bpm = bpm,
+            tailSeconds = tailSeconds,
+            throughBeat = maxOf(throughBeat, ScoreTracks.endBeat(tracks)),
         )
 
+        originalPreset?.let {
+            selectPresetOnChannelLocked(it, channel = 0)
+            activePreset = it
+        }
+        pcm
+    }
+
+    private data class ChannelNotes(
+        val channel: Int,
+        val notes: List<ScoreNote>,
+        val preset: SoundFontPreset?,
+    )
+
+    private data class MidiEvent(
+        val frame: Int,
+        val noteOn: Boolean,
+        val key: Int,
+        val velocity: Int,
+        val channel: Int,
+    )
+
+    private fun renderMidiEventsLocked(
+        channelNotes: List<ChannelNotes>,
+        bpm: Int,
+        tailSeconds: Float,
+        throughBeat: Float,
+    ): ShortArray {
         val safeBpm = bpm.coerceIn(30, 300)
         val secondsPerBeat = 60f / safeBpm
-        val scoreEndBeat = maxOf(ScoreTimeline.endBeat(notes), throughBeat.coerceAtLeast(0f))
+        val notesEndBeat = channelNotes.maxOfOrNull { ScoreTimeline.endBeat(it.notes) } ?: 0f
+        val scoreEndBeat = maxOf(notesEndBeat, throughBeat.coerceAtLeast(0f))
         val totalFrames = (
             (scoreEndBeat * secondsPerBeat + tailSeconds.coerceAtLeast(0f)) * sampleRate
             ).toInt().coerceAtLeast(1)
 
         val events = buildList {
-            notes.forEach { note ->
-                val onFrame = (note.startBeat * secondsPerBeat * sampleRate).toInt().coerceAtLeast(0)
-                val offFrame = (
-                    (note.startBeat + note.duration.beats) * secondsPerBeat * sampleRate
-                    ).toInt().coerceAtLeast(onFrame + 1)
-                add(MidiEvent(onFrame, true, note.midiPitch, note.velocity))
-                add(MidiEvent(offFrame, false, note.midiPitch, 0))
+            channelNotes.forEach { channelTrack ->
+                val channel = channelTrack.channel.coerceIn(0, 15)
+                channelTrack.notes.forEach { note ->
+                    val onFrame = (note.startBeat * secondsPerBeat * sampleRate).toInt().coerceAtLeast(0)
+                    val offFrame = (
+                        (note.startBeat + note.duration.beats) * secondsPerBeat * sampleRate
+                        ).toInt().coerceAtLeast(onFrame + 1)
+                    add(MidiEvent(onFrame, true, note.midiPitch, note.velocity, channel))
+                    add(MidiEvent(offFrame, false, note.midiPitch, 0, channel))
+                }
             }
         }.sortedWith(
             compareBy<MidiEvent> { it.frame }
                 .thenBy { if (it.noteOn) 1 else 0 }
+                .thenBy { it.channel }
                 .thenBy { it.key }
         )
 
-        NativeFluidSynth.allNotesOff(handle, 0)
-        activePreset?.let { selectPresetLocked(it, channel = 0) }
+        repeat(16) { NativeFluidSynth.allNotesOff(handle, it) }
+        channelNotes.forEach { track ->
+            track.preset?.let { selectPresetOnChannelLocked(it, track.channel) }
+        }
 
         val output = ShortArray(totalFrames * 2)
         var frameCursor = 0
@@ -194,25 +276,29 @@ class SoundFontEngine private constructor(
                 if (event.noteOn) {
                     NativeFluidSynth.noteOn(
                         handle,
-                        0,
+                        event.channel,
                         event.key.coerceIn(0, 127),
                         event.velocity.coerceIn(1, 127),
                     )
                 } else {
-                    NativeFluidSynth.noteOff(handle, 0, event.key.coerceIn(0, 127))
+                    NativeFluidSynth.noteOff(
+                        handle,
+                        event.channel,
+                        event.key.coerceIn(0, 127),
+                    )
                 }
                 eventIndex++
             }
         }
 
         renderIntoOutput(totalFrames - frameCursor)
-        NativeFluidSynth.allNotesOff(handle, 0)
-        output
+        repeat(16) { NativeFluidSynth.allNotesOff(handle, it) }
+        return output
     }
 
     override fun close() = synchronized(lock) {
         if (handle != 0L) {
-            NativeFluidSynth.allNotesOff(handle, 0)
+            repeat(16) { NativeFluidSynth.allNotesOff(handle, it) }
             NativeFluidSynth.destroy(handle)
             handle = 0L
             soundFontId = -1
