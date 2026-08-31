@@ -53,6 +53,7 @@ fun ScoreForgeComposerScreen() {
     var isPlaying by remember { mutableStateOf(false) }
     var cursorBeat by remember { mutableStateOf(0f) }
     var chordMode by remember { mutableStateOf(false) }
+    var pianoOctaveShift by remember { mutableIntStateOf(0) }
     var draftLoaded by remember { mutableStateOf(false) }
 
     val noteCount = events.count { it is ScoreNote }
@@ -69,11 +70,19 @@ fun ScoreForgeComposerScreen() {
             bpm = restored.bpm
             cursorBeat = restored.cursorBeat
             selectedDuration = restored.selectedDuration
+            pianoOctaveShift = restored.pianoOctaveShift
         }
         draftLoaded = true
     }
 
-    LaunchedEffect(draftLoaded, draftEvents, bpm, cursorBeat, selectedDuration) {
+    LaunchedEffect(
+        draftLoaded,
+        draftEvents,
+        bpm,
+        cursorBeat,
+        selectedDuration,
+        pianoOctaveShift,
+    ) {
         if (!draftLoaded) return@LaunchedEffect
         delay(250L)
         val snapshot = ScoreProjectSnapshot(
@@ -81,6 +90,7 @@ fun ScoreForgeComposerScreen() {
             bpm = bpm,
             cursorBeat = cursorBeat,
             selectedDuration = selectedDuration,
+            pianoOctaveShift = pianoOctaveShift,
         )
         withContext(Dispatchers.IO) {
             ScoreProjectRepository.saveDraft(context, snapshot)
@@ -123,6 +133,11 @@ fun ScoreForgeComposerScreen() {
     fun stopPlayback() {
         playback.stop()
         isPlaying = false
+    }
+
+    fun changePianoOctave(delta: Int) {
+        LiveInstrumentBus.allNotesOff()
+        pianoOctaveShift = (pianoOctaveShift + delta).coerceIn(-4, 3)
     }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
@@ -202,6 +217,7 @@ fun ScoreForgeComposerScreen() {
 
                 MultitouchPianoKeyboard(
                     chordMode = chordMode,
+                    octaveShift = pianoOctaveShift,
                     onToggleChordMode = {
                         LiveInstrumentBus.allNotesOff()
                         if (chordMode) {
@@ -219,6 +235,8 @@ fun ScoreForgeComposerScreen() {
                             ScoreTimeline.endBeat(events),
                         )
                     },
+                    onOctaveDown = { changePianoOctave(-1) },
+                    onOctaveUp = { changePianoOctave(1) },
                     onPitchDown = { pitch ->
                         insertNote(pitch, preview = false)
                         if (!LiveInstrumentBus.noteOn(pitch, velocity = 96)) {
