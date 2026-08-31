@@ -106,7 +106,8 @@ object ScoreProjectCodec {
                     .append(event.duration.name).append('\t')
                     .append(event.startBeat.coerceAtLeast(0f)).append('\t')
                     .append(event.velocity.coerceIn(1, 127)).append('\t')
-                    .append(if (event.dotted) 1 else 0).append('\n')
+                    .append(if (event.dotted) 1 else 0).append('\t')
+                    .append(if (event.tieToNext) 1 else 0).append('\n')
 
                 is ScoreRest -> append("R\t")
                     .append(event.duration.name).append('\t')
@@ -257,7 +258,8 @@ object ScoreProjectCodec {
         val startBeat = parts[3].toFloatOrNull()?.takeIf { it >= 0f } ?: return null
         val velocity = parts[4].toIntOrNull()?.takeIf { it in 1..127 } ?: return null
         val dotted = parts.getOrNull(5) == "1"
-        return ScoreNote(pitch, duration, startBeat, velocity, dotted)
+        val tieToNext = parts.getOrNull(6) == "1"
+        return ScoreNote(pitch, duration, startBeat, velocity, dotted, tieToNext)
     }
 
     private fun decodeRest(parts: List<String>): ScoreRest? {
