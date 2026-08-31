@@ -11,33 +11,43 @@ enum class NoteDuration(val beats: Float, val displayName: String) {
     SIXTEENTH(0.25f, "16th")
 }
 
+sealed interface ScoreEvent {
+    val duration: NoteDuration
+    val startBeat: Float
+}
+
 data class ScoreNote(
     val midiPitch: Int,
-    val duration: NoteDuration,
-    val startBeat: Float = 0f,
+    override val duration: NoteDuration,
+    override val startBeat: Float = 0f,
     val velocity: Int = 96,
-)
+) : ScoreEvent
+
+data class ScoreRest(
+    override val duration: NoteDuration,
+    override val startBeat: Float = 0f,
+) : ScoreEvent
 
 object ScoreTimeline {
     const val BEATS_PER_MEASURE = 4f
     const val EDIT_GRID_BEATS = 0.25f
 
-    fun endBeat(notes: List<ScoreNote>): Float =
-        notes.maxOfOrNull { it.startBeat + it.duration.beats } ?: 0f
+    fun endBeat(events: List<ScoreEvent>): Float =
+        events.maxOfOrNull { it.startBeat + it.duration.beats } ?: 0f
 
-    fun nextBeat(notes: List<ScoreNote>): Float = endBeat(notes)
+    fun nextBeat(events: List<ScoreEvent>): Float = endBeat(events)
 
-    fun measureCount(notes: List<ScoreNote>, throughBeat: Float = endBeat(notes)): Int {
-        val furthestBeat = maxOf(endBeat(notes), throughBeat, BEATS_PER_MEASURE)
+    fun measureCount(events: List<ScoreEvent>, throughBeat: Float = endBeat(events)): Int {
+        val furthestBeat = maxOf(endBeat(events), throughBeat, BEATS_PER_MEASURE)
         return ceil(furthestBeat / BEATS_PER_MEASURE).toInt()
     }
 
     fun visibleBeats(
-        notes: List<ScoreNote>,
+        events: List<ScoreEvent>,
         minimumMeasures: Int = 4,
-        throughBeat: Float = endBeat(notes),
+        throughBeat: Float = endBeat(events),
     ): Float {
-        val measures = maxOf(measureCount(notes, throughBeat), minimumMeasures)
+        val measures = maxOf(measureCount(events, throughBeat), minimumMeasures)
         return measures * BEATS_PER_MEASURE
     }
 
