@@ -41,6 +41,8 @@ import com.scoreforge.app.music.ScoreProjectRepository
 import com.scoreforge.app.music.ScoreProjectSnapshot
 import com.scoreforge.app.music.ScoreRest
 import com.scoreforge.app.music.ScoreTimeline
+import com.scoreforge.app.music.ScoreTrack
+import com.scoreforge.app.music.ScoreTracks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
@@ -48,14 +50,14 @@ import kotlinx.coroutines.withContext
 @Composable
 fun ScoreForgeComposerScreen() {
     val context = LocalContext.current
-    val events = remember { mutableStateListOf<ScoreEvent>() }
+    val tracks = remember { mutableStateListOf(ScoreTracks.defaultTrack()) }
     val playback = remember { ScorePlaybackEngine() }
     val soundFontEngine = remember { SoundFontEngine.createOrNull() }
     val editHistory = remember { ScoreEditHistory() }
+    var activeTrackIndex by remember { mutableIntStateOf(0) }
     var selectedDuration by remember { mutableStateOf(NoteDuration.QUARTER) }
     var bpm by remember { mutableIntStateOf(120) }
     var isPlaying by remember { mutableStateOf(false) }
-    var cursorBeat by remember { mutableStateOf(0f) }
     var chordMode by remember { mutableStateOf(false) }
     var pianoOctaveShift by remember { mutableIntStateOf(0) }
     var staffSharpInput by remember { mutableStateOf(false) }
@@ -63,19 +65,46 @@ fun ScoreForgeComposerScreen() {
     var canUndo by remember { mutableStateOf(false) }
     var canRedo by remember { mutableStateOf(false) }
 
-    val noteCount = events.count { it is ScoreNote }
-    val restCount = events.count { it is ScoreRest }
-    val draftEvents = events.toList()
+    val safeActiveTrackIndex = activeTrackIndex.coerceIn(0, tracks.lastIndex)
+    val activeTrack = tracks[safeActiveTrackIndex]
+    val activeEvents = activeTrack.events
+    val activeCursorBeat = activeTrack.cursorBeat
+    val activeNoteCount = activeEvents.count { it is ScoreNote }
+    val activeRestCount = activeEvents.count { it is ScoreRest }
+    val draftTracks = tracks.map { it.copy(events = it.events.toList()) }
+    val arrangementEndBeat = tracks.maxOfOrNull { ScoreTimeline.endBeat(it.events) } ?: 0f
+    val playableNoteCount = tracks.filterNot { it.muted }.sumOf { track ->
+        track.events.count { it is ScoreNote }
+    }
 
     fun syncHistoryButtons() {
         canUndo = editHistory.canUndo
         canRedo = editHistory.canRedo
     }
 
-    fun currentEditState(): ScoreEditState = ScoreEditState(
-        events = events.toList(),
-        cursorBeat = cursorBeat,
-    )
+    fun activeIndex(): Int = activeTrackIndex.coerceIn(0, tracks.lastIndex)
+
+    fun currentTrack(): ScoreTrack = tracks[activeIndex()]
+
+    fun replaceTrack(index: Int, updated: ScoreTrack) {
+        if (index in tracks.indices) tracks[index] = updated.normalized()
+    }
+
+    fun replaceActiveTrack(transform: (ScoreTrack) -> ScoreTrack) {
+        val index = activeIndex()
+        replaceTrack(index, transform(tracks[index]))
+    }
+
+    fun currentEditState(): ScoreEditState {
+        val index = activeIndex()
+        val current = tracks[index]
+        return ScoreEditState(
+            events = current.events,
+            cursorBeat = current.cursorBeat,
+            tracks = tracks.map { it.copy(events = it.events.toList()) },
+            activeTrackIndex = index,
+        )
+    }
 
     fun recordBeforeScoreEdit() {
         editHistory.recordBeforeChange(currentEditState())
@@ -83,9 +112,12 @@ fun ScoreForgeComposerScreen() {
     }
 
     fun restoreEditState(state: ScoreEditState) {
-        events.clear()
-        events.addAll(state.events)
-        cursorBeat = state.cursorBeat
+        val restoredTracks = state.tracks.ifEmpty { listOf(ScoreTracks.defaultTrack()) }
+            .take(ScoreTracks.MAX_TRACKS)
+            .map { it.normalized() }
+        tracks.clear()
+        tracks.addAll(restoredTracks)
+        activeTrackIndex = state.activeTrackIndex.coerceIn(0, tracks.lastIndex)
     }
 
     LaunchedEffect(Unit) {
@@ -93,10 +125,11 @@ fun ScoreForgeComposerScreen() {
             ScoreProjectRepository.loadDraft(context)
         }
         if (restored != null) {
-            events.clear()
-            events.addAll(restored.events)
+            val restoredTracks = restored.effectiveTracks()
+            tracks.clear()
+            tracks.addAll(restoredTracks)
+            activeTrackIndex = restored.activeTrackIndex.coerceIn(0, tracks.lastIndex)
             bpm = restored.bpm
-            cursorBeat = restored.cursorBeat
             selectedDuration = restored.selectedDuration
             pianoOctaveShift = restored.pianoOctaveShift
             staffSharpInput = restored.staffSharpInput
@@ -108,22 +141,26 @@ fun ScoreForgeComposerScreen() {
 
     LaunchedEffect(
         draftLoaded,
-        draftEvents,
+        draftTracks,
+        activeTrackIndex,
         bpm,
-        cursorBeat,
         selectedDuration,
         pianoOctaveShift,
         staffSharpInput,
     ) {
-        if (!draftLoaded) return@LaunchedEffect
+        if (!draftLoaded || draftTracks.isEmpty()) return@LaunchedEffect
         delay(250L)
+        val safeIndex = activeTrackIndex.coerceIn(0, draftTracks.lastIndex)
+        val active = draftTracks[safeIndex]
         val snapshot = ScoreProjectSnapshot(
-            events = draftEvents,
+            events = active.events,
             bpm = bpm,
-            cursorBeat = cursorBeat,
+            cursorBeat = active.cursorBeat,
             selectedDuration = selectedDuration,
             pianoOctaveShift = pianoOctaveShift,
             staffSharpInput = staffSharpInput,
+            tracks = draftTracks,
+            activeTrackIndex = safeIndex,
         )
         withContext(Dispatchers.IO) {
             ScoreProjectRepository.saveDraft(context, snapshot)
@@ -163,26 +200,32 @@ fun ScoreForgeComposerScreen() {
 
     fun insertNoteAt(pitch: Int, startBeat: Float, preview: Boolean, advanceCursor: Boolean) {
         recordBeforeScoreEdit()
+        val track = currentTrack()
         val quantizedStart = ScoreTimeline.quantizeBeat(startBeat)
-        events.add(
-            ScoreNote(
-                midiPitch = pitch,
-                duration = selectedDuration,
-                startBeat = quantizedStart,
-            )
+        val note = ScoreNote(
+            midiPitch = pitch,
+            duration = selectedDuration,
+            startBeat = quantizedStart,
         )
-        if (preview) playback.previewPitch(pitch)
-        if (advanceCursor && !chordMode) {
-            cursorBeat = quantizedStart + selectedDuration.beats
-        } else {
-            cursorBeat = maxOf(cursorBeat, quantizedStart + selectedDuration.beats)
+        val nextCursor = when {
+            advanceCursor && chordMode -> track.cursorBeat
+            advanceCursor -> quantizedStart + selectedDuration.beats
+            else -> maxOf(track.cursorBeat, quantizedStart + selectedDuration.beats)
         }
+        replaceActiveTrack {
+            it.copy(
+                events = it.events + note,
+                cursorBeat = nextCursor,
+            )
+        }
+        if (preview) playback.previewPitch(pitch)
     }
 
     fun insertStepNote(pitch: Int, preview: Boolean) {
+        val track = currentTrack()
         insertNoteAt(
             pitch = pitch,
-            startBeat = cursorBeat,
+            startBeat = track.cursorBeat,
             preview = preview,
             advanceCursor = true,
         )
@@ -191,13 +234,17 @@ fun ScoreForgeComposerScreen() {
     fun insertRest() {
         recordBeforeScoreEdit()
         LiveInstrumentBus.allNotesOff()
-        events.add(
-            ScoreRest(
-                duration = selectedDuration,
-                startBeat = cursorBeat,
-            )
+        val track = currentTrack()
+        val rest = ScoreRest(
+            duration = selectedDuration,
+            startBeat = track.cursorBeat,
         )
-        cursorBeat += selectedDuration.beats
+        replaceActiveTrack {
+            it.copy(
+                events = it.events + rest,
+                cursorBeat = track.cursorBeat + selectedDuration.beats,
+            )
+        }
     }
 
     fun changePianoOctave(delta: Int) {
@@ -208,10 +255,72 @@ fun ScoreForgeComposerScreen() {
     fun deleteEvent(eventIndex: Int) {
         stopPlayback()
         LiveInstrumentBus.allNotesOff()
-        if (eventIndex in events.indices) {
+        val track = currentTrack()
+        if (eventIndex in track.events.indices) {
             recordBeforeScoreEdit()
-            events.removeAt(eventIndex)
-            if (!chordMode) cursorBeat = ScoreTimeline.endBeat(events)
+            val updatedEvents = track.events.toMutableList().apply { removeAt(eventIndex) }
+            replaceActiveTrack {
+                it.copy(
+                    events = updatedEvents,
+                    cursorBeat = if (chordMode) {
+                        it.cursorBeat
+                    } else {
+                        ScoreTimeline.endBeat(updatedEvents)
+                    },
+                )
+            }
+        }
+    }
+
+    fun selectTrack(index: Int) {
+        if (index !in tracks.indices || index == activeIndex()) return
+        stopPlayback()
+        LiveInstrumentBus.allNotesOff()
+        activeTrackIndex = index
+    }
+
+    fun addTrack() {
+        if (tracks.size >= ScoreTracks.MAX_TRACKS) return
+        stopPlayback()
+        LiveInstrumentBus.allNotesOff()
+        recordBeforeScoreEdit()
+        val preset = soundFontEngine?.selectedPreset
+        val newTrack = ScoreTracks.newTrack(tracks).copy(
+            presetBank = preset?.bank,
+            presetProgram = preset?.program,
+        )
+        tracks.add(newTrack)
+        activeTrackIndex = tracks.lastIndex
+        syncHistoryButtons()
+    }
+
+    fun toggleActiveTrackMute() {
+        stopPlayback()
+        LiveInstrumentBus.allNotesOff()
+        recordBeforeScoreEdit()
+        replaceActiveTrack { it.copy(muted = !it.muted) }
+    }
+
+    fun deleteActiveTrack() {
+        if (tracks.size <= 1) return
+        stopPlayback()
+        LiveInstrumentBus.allNotesOff()
+        recordBeforeScoreEdit()
+        val index = activeIndex()
+        tracks.removeAt(index)
+        activeTrackIndex = index.coerceAtMost(tracks.lastIndex)
+        syncHistoryButtons()
+    }
+
+    fun setActiveTrackPreset(bank: Int, program: Int, recordHistory: Boolean) {
+        val track = currentTrack()
+        if (track.presetBank == bank && track.presetProgram == program) return
+        if (recordHistory) recordBeforeScoreEdit()
+        replaceActiveTrack {
+            it.copy(
+                presetBank = bank,
+                presetProgram = program,
+            )
         }
     }
 
@@ -219,42 +328,75 @@ fun ScoreForgeComposerScreen() {
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
                 HeaderBar(
-                    noteCount = noteCount,
-                    restCount = restCount,
-                    measureCount = ScoreTimeline.measureCount(events, cursorBeat),
+                    activeTrackName = activeTrack.name,
+                    trackCount = tracks.size,
+                    noteCount = activeNoteCount,
+                    restCount = activeRestCount,
+                    measureCount = ScoreTimeline.measureCount(emptyList(), arrangementEndBeat),
                     bpm = bpm,
-                    cursorBeat = cursorBeat,
+                    cursorBeat = activeCursorBeat,
                     isPlaying = isPlaying,
                     canUndo = canUndo,
                     canRedo = canRedo,
+                    canPlay = playableNoteCount > 0,
                     onTempoDown = { bpm = (bpm - 5).coerceAtLeast(30) },
                     onTempoUp = { bpm = (bpm + 5).coerceAtMost(300) },
                     onPlay = {
-                        val notes = events.filterIsInstance<ScoreNote>()
-                        if (notes.isNotEmpty()) {
+                        if (playableNoteCount > 0) {
                             isPlaying = true
-                            playback.playScore(
-                                notes = notes,
+                            playback.playTracks(
+                                tracks = tracks,
                                 bpm = bpm,
-                                throughBeat = ScoreTimeline.endBeat(events),
+                                throughBeat = ScoreTracks.endBeat(tracks),
                             ) { isPlaying = false }
                         }
                     },
                     onStop = ::stopPlayback,
                     onUndo = ::undoScore,
                     onRedo = ::redoScore,
-                    onClear = {
-                        if (events.isNotEmpty()) {
+                    onClearTrack = {
+                        val track = currentTrack()
+                        if (track.events.isNotEmpty()) {
                             stopPlayback()
                             LiveInstrumentBus.allNotesOff()
                             recordBeforeScoreEdit()
-                            events.clear()
-                            cursorBeat = 0f
+                            replaceActiveTrack {
+                                it.copy(events = emptyList(), cursorBeat = 0f)
+                            }
                         }
                     },
                 )
 
-                SoundFontControls(engine = soundFontEngine)
+                TrackControls(
+                    tracks = tracks,
+                    activeTrackIndex = safeActiveTrackIndex,
+                    onSelectTrack = ::selectTrack,
+                    onAddTrack = ::addTrack,
+                    onToggleMute = ::toggleActiveTrackMute,
+                    onDeleteTrack = ::deleteActiveTrack,
+                )
+
+                SoundFontControls(
+                    engine = soundFontEngine,
+                    requestedPresetBank = activeTrack.presetBank,
+                    requestedPresetProgram = activeTrack.presetProgram,
+                    onSoundFontLoaded = { _, preset ->
+                        if (preset != null) {
+                            setActiveTrackPreset(
+                                bank = preset.bank,
+                                program = preset.program,
+                                recordHistory = false,
+                            )
+                        }
+                    },
+                    onPresetSelected = { preset ->
+                        setActiveTrackPreset(
+                            bank = preset.bank,
+                            program = preset.program,
+                            recordHistory = true,
+                        )
+                    },
+                )
 
                 DurationSelector(
                     selected = selectedDuration,
@@ -265,9 +407,9 @@ fun ScoreForgeComposerScreen() {
                 )
 
                 ScoreStaffEditor(
-                    events = events,
+                    events = activeEvents,
                     selectedDuration = selectedDuration,
-                    cursorBeat = cursorBeat,
+                    cursorBeat = activeCursorBeat,
                     onAddPitch = { naturalPitch, tappedBeat ->
                         val pitch = if (staffSharpInput) {
                             PitchNames.sharpenIfAvailable(naturalPitch)
@@ -283,20 +425,44 @@ fun ScoreForgeComposerScreen() {
                     },
                     onBeginMove = { recordBeforeScoreEdit() },
                     onMoveNote = { eventIndex, pitch, startBeat ->
-                        val note = events.getOrNull(eventIndex) as? ScoreNote
+                        val track = currentTrack()
+                        val note = track.events.getOrNull(eventIndex) as? ScoreNote
                         if (note != null) {
-                            events[eventIndex] = note.copy(
-                                midiPitch = pitch,
-                                startBeat = startBeat,
-                            )
-                            if (!chordMode) cursorBeat = ScoreTimeline.endBeat(events)
+                            val updatedEvents = track.events.toMutableList().apply {
+                                this[eventIndex] = note.copy(
+                                    midiPitch = pitch,
+                                    startBeat = startBeat,
+                                )
+                            }
+                            replaceActiveTrack {
+                                it.copy(
+                                    events = updatedEvents,
+                                    cursorBeat = if (chordMode) {
+                                        it.cursorBeat
+                                    } else {
+                                        ScoreTimeline.endBeat(updatedEvents)
+                                    },
+                                )
+                            }
                         }
                     },
                     onMoveRest = { eventIndex, startBeat ->
-                        val rest = events.getOrNull(eventIndex) as? ScoreRest
+                        val track = currentTrack()
+                        val rest = track.events.getOrNull(eventIndex) as? ScoreRest
                         if (rest != null) {
-                            events[eventIndex] = rest.copy(startBeat = startBeat)
-                            if (!chordMode) cursorBeat = ScoreTimeline.endBeat(events)
+                            val updatedEvents = track.events.toMutableList().apply {
+                                this[eventIndex] = rest.copy(startBeat = startBeat)
+                            }
+                            replaceActiveTrack {
+                                it.copy(
+                                    events = updatedEvents,
+                                    cursorBeat = if (chordMode) {
+                                        it.cursorBeat
+                                    } else {
+                                        ScoreTimeline.endBeat(updatedEvents)
+                                    },
+                                )
+                            }
                         }
                     },
                     onDeleteEvent = ::deleteEvent,
@@ -310,20 +476,29 @@ fun ScoreForgeComposerScreen() {
                     octaveShift = pianoOctaveShift,
                     onToggleChordMode = {
                         LiveInstrumentBus.allNotesOff()
+                        val track = currentTrack()
                         if (chordMode) {
                             chordMode = false
-                            cursorBeat = maxOf(cursorBeat, ScoreTimeline.endBeat(events))
+                            replaceActiveTrack {
+                                it.copy(cursorBeat = maxOf(it.cursorBeat, ScoreTimeline.endBeat(it.events)))
+                            }
                         } else {
                             chordMode = true
-                            cursorBeat = ScoreTimeline.endBeat(events)
+                            replaceActiveTrack {
+                                it.copy(cursorBeat = ScoreTimeline.endBeat(track.events))
+                            }
                         }
                     },
                     onAdvanceChord = {
                         LiveInstrumentBus.allNotesOff()
-                        cursorBeat = maxOf(
-                            cursorBeat + selectedDuration.beats,
-                            ScoreTimeline.endBeat(events),
-                        )
+                        replaceActiveTrack {
+                            it.copy(
+                                cursorBeat = maxOf(
+                                    it.cursorBeat + selectedDuration.beats,
+                                    ScoreTimeline.endBeat(it.events),
+                                )
+                            )
+                        }
                     },
                     onOctaveDown = { changePianoOctave(-1) },
                     onOctaveUp = { changePianoOctave(1) },
@@ -345,6 +520,8 @@ fun ScoreForgeComposerScreen() {
 
 @Composable
 private fun HeaderBar(
+    activeTrackName: String,
+    trackCount: Int,
     noteCount: Int,
     restCount: Int,
     measureCount: Int,
@@ -353,13 +530,14 @@ private fun HeaderBar(
     isPlaying: Boolean,
     canUndo: Boolean,
     canRedo: Boolean,
+    canPlay: Boolean,
     onTempoDown: () -> Unit,
     onTempoUp: () -> Unit,
     onPlay: () -> Unit,
     onStop: () -> Unit,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
-    onClear: () -> Unit,
+    onClearTrack: () -> Unit,
 ) {
     val eventCount = noteCount + restCount
 
@@ -374,7 +552,7 @@ private fun HeaderBar(
         Column(modifier = Modifier.weight(1f)) {
             Text("Score Forge", style = MaterialTheme.typography.titleLarge)
             Text(
-                "Untitled • Piano • 4/4 • $bpm BPM • $measureCount measures • beat ${formatBeat(cursorBeat)} • $noteCount notes • $restCount rests",
+                "Untitled • $activeTrackName • $trackCount tracks • 4/4 • $bpm BPM • $measureCount measures • beat ${formatBeat(cursorBeat)} • $noteCount notes • $restCount rests",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -387,12 +565,12 @@ private fun HeaderBar(
         if (isPlaying) {
             Button(onClick = onStop) { Text("Stop") }
         } else {
-            Button(onClick = onPlay, enabled = noteCount > 0) { Text("Play") }
+            Button(onClick = onPlay, enabled = canPlay) { Text("Play") }
         }
 
         OutlinedButton(onClick = onUndo, enabled = canUndo) { Text("Undo") }
         OutlinedButton(onClick = onRedo, enabled = canRedo) { Text("Redo") }
-        OutlinedButton(onClick = onClear, enabled = eventCount > 0) { Text("Clear") }
+        OutlinedButton(onClick = onClearTrack, enabled = eventCount > 0) { Text("Clear Track") }
     }
 }
 
