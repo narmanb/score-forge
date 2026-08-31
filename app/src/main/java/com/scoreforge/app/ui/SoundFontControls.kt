@@ -37,6 +37,8 @@ import kotlin.concurrent.thread
 @Composable
 fun SoundFontControls(
     engine: SoundFontEngine?,
+    requestedPresetBank: Int? = null,
+    requestedPresetProgram: Int? = null,
     onSoundFontLoaded: (ImportedSoundFont, SoundFontPreset?) -> Unit = { _, _ -> },
     onPresetSelected: (SoundFontPreset) -> Unit = {},
     modifier: Modifier = Modifier,
@@ -112,6 +114,35 @@ fun SoundFontControls(
                     status = "Saved SoundFont could not be restored"
                 }
             }
+        }
+    }
+
+    /**
+     * Switching Score Forge tracks should switch the live piano and preset display too, but must
+     * not call onPresetSelected because that callback represents a user edit to the active track.
+     */
+    LaunchedEffect(
+        engine,
+        currentSoundFont?.localPath,
+        presets,
+        requestedPresetBank,
+        requestedPresetProgram,
+    ) {
+        if (engine == null || presets.isEmpty()) return@LaunchedEffect
+        val bank = requestedPresetBank ?: return@LaunchedEffect
+        val program = requestedPresetProgram ?: return@LaunchedEffect
+        val requestedIndex = presets.indexOfFirst { it.bank == bank && it.program == program }
+        if (requestedIndex < 0 || requestedIndex == presetIndex) return@LaunchedEffect
+
+        if (engine.selectPresetAt(requestedIndex)) {
+            presetIndex = requestedIndex
+            presetMenuExpanded = false
+            val selected = presets[requestedIndex]
+            currentSoundFont?.let {
+                SoundFontRepository.saveActiveSelection(context, it, selected)
+            }
+            LiveInstrumentBus.selectPreset(selected)
+            status = "${presets.size} presets"
         }
     }
 
