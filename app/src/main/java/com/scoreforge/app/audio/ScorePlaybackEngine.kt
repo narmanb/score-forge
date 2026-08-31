@@ -2,7 +2,6 @@ package com.scoreforge.app.audio
 
 import android.media.AudioAttributes
 import android.media.AudioFormat
-import android.media.AudioManager
 import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
@@ -24,6 +23,18 @@ class ScorePlaybackEngine {
     @Volatile
     private var generation = 0
 
+    @Volatile
+    private var soundFontEngine: SoundFontEngine? = null
+
+    private data class RenderedAudio(
+        val pcm: ShortArray,
+        val channels: Int,
+    )
+
+    fun setSoundFontEngine(engine: SoundFontEngine?) {
+        soundFontEngine = engine
+    }
+
     fun playScore(
         notes: List<ScoreNote>,
         bpm: Int,
@@ -40,20 +51,21 @@ class ScorePlaybackEngine {
         val safeBpm = bpm.coerceIn(30, 300)
 
         thread(name = "ScoreForgePlayback", isDaemon = true) {
-            val pcm = renderScore(snapshot, safeBpm)
-            if (myGeneration != generation || pcm.isEmpty()) return@thread
+            val rendered = renderBestAvailable(snapshot, safeBpm)
+            if (myGeneration != generation || rendered.pcm.isEmpty()) return@thread
 
-            val track = createStaticTrack(pcm)
+            val track = createStaticTrack(rendered.pcm, rendered.channels)
             if (myGeneration != generation) {
                 track.release()
                 return@thread
             }
 
             activeTrack = track
-            track.write(pcm, 0, pcm.size)
+            track.write(rendered.pcm, 0, rendered.pcm.size)
             track.play()
 
-            val durationMs = ((pcm.size.toDouble() / sampleRate) * 1000.0).toLong() + 80L
+            val frames = rendered.pcm.size.toDouble() / rendered.channels.coerceAtLeast(1)
+            val durationMs = (frames / sampleRate * 1000.0).toLong() + 80L
             try {
                 Thread.sleep(durationMs)
             } catch (_: InterruptedException) {
@@ -80,10 +92,12 @@ class ScorePlaybackEngine {
             )
         )
 
+        // Keep previews independent from offline SoundFont rendering for now. This lightweight
+        // voice is low-overhead and avoids mutating a SoundFont synth while a score is rendering.
         thread(name = "ScoreForgePreview", isDaemon = true) {
-            val pcm = renderScore(preview, bpm = 240, tailSeconds = 0.08f)
+            val pcm = renderFallbackScore(preview, bpm = 240, tailSeconds = 0.08f)
             if (pcm.isEmpty()) return@thread
-            val track = createStaticTrack(pcm)
+            val track = createStaticTrack(pcm, channels = 1)
             track.write(pcm, 0, pcm.size)
             track.play()
             try {
@@ -103,7 +117,16 @@ class ScorePlaybackEngine {
 
     fun release() = stop()
 
-    private fun createStaticTrack(pcm: ShortArray): AudioTrack =
+    private fun renderBestAvailable(notes: List<ScoreNote>, bpm: Int): RenderedAudio {
+        val soundFont = soundFontEngine
+        if (soundFont != null && soundFont.hasSoundFont) {
+            val pcm = soundFont.renderScore(notes, bpm)
+            if (pcm.isNotEmpty()) return RenderedAudio(pcm, channels = 2)
+        }
+        return RenderedAudio(renderFallbackScore(notes, bpm), channels = 1)
+    }
+
+    private fun createStaticTrack(pcm: ShortArray, channels: Int): AudioTrack =
         AudioTrack.Builder()
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -115,7 +138,13 @@ class ScorePlaybackEngine {
                 AudioFormat.Builder()
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                     .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                    .setChannelMask(
+                        if (channels == 2) {
+                            AudioFormat.CHANNEL_OUT_STEREO
+                        } else {
+                            AudioFormat.CHANNEL_OUT_MONO
+                        }
+                    )
                     .build()
             )
             .setBufferSizeInBytes(pcm.size * 2)
@@ -135,7 +164,7 @@ class ScorePlaybackEngine {
         }
     }
 
-    private fun renderScore(
+    private fun renderFallbackScore(
         notes: List<ScoreNote>,
         bpm: Int,
         tailSeconds: Float = 0.35f,
@@ -166,9 +195,6 @@ class ScorePlaybackEngine {
                 val decay = exp((-1.8f * t).toDouble()).toFloat()
                 val phase = 2.0 * PI * frequency * t
 
-                // A lightweight harmonic voice for the first playable milestone.
-                // The engine boundary is intentionally separate so FluidSynth/SoundFonts
-                // can replace this oscillator without changing score/timeline code.
                 val timbre =
                     sin(phase).toFloat() * 0.72f +
                         sin(phase * 2.0).toFloat() * 0.20f +
