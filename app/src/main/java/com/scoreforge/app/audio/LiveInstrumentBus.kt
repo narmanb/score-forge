@@ -18,6 +18,10 @@ object LiveInstrumentBus {
         player.selectPreset(preset)
     }
 
+    fun setMixer(volume: Int, pan: Int) {
+        player.setMixer(volume, pan)
+    }
+
     fun previewPitch(midiPitch: Int, velocity: Int = 92): Boolean =
         player.playOneShot(midiPitch, velocity)
 
