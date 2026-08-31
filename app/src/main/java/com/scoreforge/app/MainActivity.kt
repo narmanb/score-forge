@@ -30,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -45,9 +46,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import com.scoreforge.app.audio.ScorePlaybackEngine
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
 import com.scoreforge.app.music.ScoreNote
+import com.scoreforge.app.music.ScoreTimeline
 import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
@@ -60,15 +63,56 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun ScoreForgeApp() {
     val notes = remember { mutableStateListOf<ScoreNote>() }
+    val playback = remember { ScorePlaybackEngine() }
     var selectedDuration by remember { mutableStateOf(NoteDuration.QUARTER) }
+    var bpm by remember { mutableIntStateOf(120) }
+    var isPlaying by remember { mutableStateOf(false) }
+
+    DisposableEffect(Unit) {
+        onDispose { playback.release() }
+    }
+
+    fun addNote(pitch: Int) {
+        notes.add(
+            ScoreNote(
+                midiPitch = pitch,
+                duration = selectedDuration,
+                startBeat = ScoreTimeline.nextBeat(notes),
+            )
+        )
+        playback.previewPitch(pitch)
+    }
+
+    fun stopPlayback() {
+        playback.stop()
+        isPlaying = false
+    }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
                 HeaderBar(
                     noteCount = notes.size,
-                    onUndo = { if (notes.isNotEmpty()) notes.removeAt(notes.lastIndex) },
-                    onClear = notes::clear,
+                    measureCount = ScoreTimeline.measureCount(notes),
+                    bpm = bpm,
+                    isPlaying = isPlaying,
+                    onTempoDown = { bpm = (bpm - 5).coerceAtLeast(30) },
+                    onTempoUp = { bpm = (bpm + 5).coerceAtMost(300) },
+                    onPlay = {
+                        if (notes.isNotEmpty()) {
+                            isPlaying = true
+                            playback.playScore(notes.toList(), bpm) { isPlaying = false }
+                        }
+                    },
+                    onStop = ::stopPlayback,
+                    onUndo = {
+                        stopPlayback()
+                        if (notes.isNotEmpty()) notes.removeAt(notes.lastIndex)
+                    },
+                    onClear = {
+                        stopPlayback()
+                        notes.clear()
+                    },
                 )
 
                 DurationSelector(
@@ -79,15 +123,20 @@ private fun ScoreForgeApp() {
                 StaffEditor(
                     notes = notes,
                     selectedDuration = selectedDuration,
+                    onAddPitch = ::addNote,
+                    onMoveNote = { index, pitch ->
+                        if (index in notes.indices) {
+                            notes[index] = notes[index].copy(midiPitch = pitch)
+                            playback.previewPitch(pitch)
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
                 )
 
                 PianoKeyboard(
-                    onPitchPressed = { pitch ->
-                        notes.add(ScoreNote(pitch, selectedDuration))
-                    },
+                    onPitchPressed = ::addNote,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(138.dp),
@@ -100,6 +149,13 @@ private fun ScoreForgeApp() {
 @Composable
 private fun HeaderBar(
     noteCount: Int,
+    measureCount: Int,
+    bpm: Int,
+    isPlaying: Boolean,
+    onTempoDown: () -> Unit,
+    onTempoUp: () -> Unit,
+    onPlay: () -> Unit,
+    onStop: () -> Unit,
     onUndo: () -> Unit,
     onClear: () -> Unit,
 ) {
@@ -109,16 +165,27 @@ private fun HeaderBar(
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text("Score Forge", style = MaterialTheme.typography.titleLarge)
             Text(
-                "Untitled • Piano • 4/4 • 120 BPM • $noteCount notes",
+                "Untitled • Piano • 4/4 • $bpm BPM • $measureCount measures • $noteCount notes",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+
+        OutlinedButton(onClick = onTempoDown) { Text("−5") }
+        Text("$bpm", style = MaterialTheme.typography.labelLarge)
+        OutlinedButton(onClick = onTempoUp) { Text("+5") }
+
+        if (isPlaying) {
+            Button(onClick = onStop) { Text("Stop") }
+        } else {
+            Button(onClick = onPlay, enabled = noteCount > 0) { Text("Play") }
+        }
+
         OutlinedButton(onClick = onUndo, enabled = noteCount > 0) { Text("Undo") }
         OutlinedButton(onClick = onClear, enabled = noteCount > 0) { Text("Clear") }
     }
@@ -139,18 +206,14 @@ private fun DurationSelector(
         Text("Note:", style = MaterialTheme.typography.labelLarge)
         NoteDuration.entries.forEach { duration ->
             if (duration == selected) {
-                Button(onClick = { onSelected(duration) }) {
-                    Text(duration.displayName)
-                }
+                Button(onClick = { onSelected(duration) }) { Text(duration.displayName) }
             } else {
-                OutlinedButton(onClick = { onSelected(duration) }) {
-                    Text(duration.displayName)
-                }
+                OutlinedButton(onClick = { onSelected(duration) }) { Text(duration.displayName) }
             }
         }
         Spacer(modifier = Modifier.weight(1f))
         Text(
-            "Tap staff or piano • Drag notes vertically",
+            "Step entry • Tap staff/piano • Drag pitch • Play score",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -159,11 +222,15 @@ private fun DurationSelector(
 
 @Composable
 private fun StaffEditor(
-    notes: MutableList<ScoreNote>,
+    notes: List<ScoreNote>,
     selectedDuration: NoteDuration,
+    onAddPitch: (Int) -> Unit,
+    onMoveNote: (Int, Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var draggingIndex by remember { mutableIntStateOf(-1) }
+    val visibleBeats = ScoreTimeline.visibleBeats(notes)
+    val endBeat = ScoreTimeline.endBeat(notes)
 
     Box(
         modifier = modifier
@@ -177,15 +244,10 @@ private fun StaffEditor(
                 .padding(horizontal = 8.dp)
                 .pointerInput(notes.size, selectedDuration) {
                     detectTapGestures { position ->
-                        notes.add(
-                            ScoreNote(
-                                midiPitch = pitchFromY(position.y, size.height.toFloat()),
-                                duration = selectedDuration,
-                            )
-                        )
+                        onAddPitch(pitchFromY(position.y, size.height.toFloat()))
                     }
                 }
-                .pointerInput(notes.size) {
+                .pointerInput(notes.size, visibleBeats) {
                     detectDragGestures(
                         onDragStart = { position ->
                             draggingIndex = nearestNoteIndex(
@@ -193,15 +255,16 @@ private fun StaffEditor(
                                 point = position,
                                 width = size.width.toFloat(),
                                 height = size.height.toFloat(),
+                                visibleBeats = visibleBeats,
                             )
                         },
                         onDragEnd = { draggingIndex = -1 },
                         onDragCancel = { draggingIndex = -1 },
                     ) { change, _ ->
                         if (draggingIndex in notes.indices) {
-                            val old = notes[draggingIndex]
-                            notes[draggingIndex] = old.copy(
-                                midiPitch = pitchFromY(change.position.y, size.height.toFloat())
+                            onMoveNote(
+                                draggingIndex,
+                                pitchFromY(change.position.y, size.height.toFloat()),
                             )
                         }
                     }
@@ -210,18 +273,28 @@ private fun StaffEditor(
             val staffTop = size.height * 0.24f
             val lineSpacing = size.height * 0.11f
             val staffBottom = staffTop + lineSpacing * 4f
-            val left = 22f
-            val right = size.width - 12f
+            val left = 24f
+            val right = size.width - 14f
 
             repeat(5) { line ->
                 val y = staffTop + lineSpacing * line
                 drawLine(Color(0xFF202020), Offset(left, y), Offset(right, y), 2f)
             }
-            drawLine(Color(0xFF202020), Offset(left, staffTop), Offset(left, staffBottom), 2f)
-            drawLine(Color(0xFF202020), Offset(right, staffTop), Offset(right, staffBottom), 2f)
 
-            notes.forEachIndexed { index, note ->
-                val x = noteX(index, notes.size, size.width)
+            var measureBeat = 0f
+            while (measureBeat <= visibleBeats + 0.001f) {
+                val x = beatX(measureBeat, visibleBeats, size.width)
+                drawLine(
+                    color = Color(0xFF383838),
+                    start = Offset(x, staffTop),
+                    end = Offset(x, staffBottom),
+                    strokeWidth = if (measureBeat == 0f || measureBeat >= visibleBeats) 2.4f else 1.4f,
+                )
+                measureBeat += ScoreTimeline.BEATS_PER_MEASURE
+            }
+
+            notes.forEach { note ->
+                val x = beatX(note.startBeat + 0.12f, visibleBeats, size.width)
                 val y = noteY(note.midiPitch, staffBottom, lineSpacing)
                 drawLedgerLines(x, y, staffTop, staffBottom, lineSpacing)
 
@@ -251,8 +324,26 @@ private fun StaffEditor(
                             Offset(x + 17f, stemTop + lineSpacing * 0.6f),
                             2.5f,
                         )
+                        if (note.duration == NoteDuration.SIXTEENTH) {
+                            drawLine(
+                                Color(0xFF111111),
+                                Offset(x + 7f, stemTop + 5f),
+                                Offset(x + 17f, stemTop + lineSpacing * 0.6f + 5f),
+                                2.5f,
+                            )
+                        }
                     }
                 }
+            }
+
+            if (endBeat > 0f) {
+                val cursorX = beatX(endBeat, visibleBeats, size.width)
+                drawLine(
+                    color = Color(0xFF777777),
+                    start = Offset(cursorX, staffTop - lineSpacing * 0.65f),
+                    end = Offset(cursorX, staffBottom + lineSpacing * 0.65f),
+                    strokeWidth = 1.5f,
+                )
             }
         }
 
@@ -269,10 +360,11 @@ private fun StaffEditor(
     }
 }
 
-private fun noteX(index: Int, count: Int, width: Float): Float {
-    val usable = (width - 92f).coerceAtLeast(1f)
-    val slots = (count + 1).coerceAtLeast(8)
-    return 58f + usable * (index + 1f) / slots
+private fun beatX(beat: Float, visibleBeats: Float, width: Float): Float {
+    val left = 30f
+    val right = 20f
+    val usable = (width - left - right).coerceAtLeast(1f)
+    return left + usable * (beat.coerceIn(0f, visibleBeats) / visibleBeats.coerceAtLeast(1f))
 }
 
 private fun noteY(midiPitch: Int, staffBottom: Float, lineSpacing: Float): Float {
@@ -305,6 +397,7 @@ private fun nearestNoteIndex(
     point: Offset,
     width: Float,
     height: Float,
+    visibleBeats: Float,
 ): Int {
     if (notes.isEmpty()) return -1
     val staffTop = height * 0.24f
@@ -314,7 +407,7 @@ private fun nearestNoteIndex(
     var nearest = -1
     var bestDistanceSquared = Float.MAX_VALUE
     notes.forEachIndexed { index, note ->
-        val dx = point.x - noteX(index, notes.size, width)
+        val dx = point.x - beatX(note.startBeat + 0.12f, visibleBeats, width)
         val dy = point.y - noteY(note.midiPitch, staffBottom, lineSpacing)
         val distanceSquared = dx * dx + dy * dy
         if (distanceSquared < bestDistanceSquared) {
@@ -371,7 +464,7 @@ private fun PianoKeyboard(
                 .padding(horizontal = 12.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("Piano step entry", style = MaterialTheme.typography.labelLarge)
+            Text("Piano step entry + preview", style = MaterialTheme.typography.labelLarge)
             Spacer(modifier = Modifier.weight(1f))
             Text(
                 "C4–B5",
