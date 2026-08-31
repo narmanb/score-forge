@@ -33,13 +33,20 @@ import com.scoreforge.app.music.PitchNames
 @Composable
 fun MultitouchPianoKeyboard(
     chordMode: Boolean,
+    octaveShift: Int,
     onToggleChordMode: () -> Unit,
     onAdvanceChord: () -> Unit,
+    onOctaveDown: () -> Unit,
+    onOctaveUp: () -> Unit,
     onPitchDown: (Int) -> Unit,
     onPitchUp: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val activePitchCounts = remember { mutableStateMapOf<Int, Int>() }
+    val safeOctaveShift = octaveShift.coerceIn(-4, 3)
+    val pitchOffset = safeOctaveShift * 12
+
+    fun actualPitch(layoutPitch: Int): Int = (layoutPitch + pitchOffset).coerceIn(0, 127)
 
     fun activatePitch(pitch: Int) {
         val previous = activePitchCounts[pitch] ?: 0
@@ -70,6 +77,12 @@ fun MultitouchPianoKeyboard(
                 style = MaterialTheme.typography.labelLarge,
             )
             Spacer(modifier = Modifier.weight(1f))
+            OutlinedButton(onClick = onOctaveDown, enabled = safeOctaveShift > -4) {
+                Text("Oct −")
+            }
+            OutlinedButton(onClick = onOctaveUp, enabled = safeOctaveShift < 3) {
+                Text("Oct +")
+            }
             OutlinedButton(onClick = onToggleChordMode) {
                 Text(if (chordMode) "Chord: On" else "Chord: Off")
             }
@@ -77,7 +90,7 @@ fun MultitouchPianoKeyboard(
                 Text("Next")
             }
             Text(
-                "C4–B5",
+                "${PitchNames.name(actualPitch(60))}–${PitchNames.name(actualPitch(83))}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -88,7 +101,7 @@ fun MultitouchPianoKeyboard(
                 .fillMaxWidth()
                 .weight(1f)
                 .padding(horizontal = 12.dp, vertical = 3.dp)
-                .pointerInput(chordMode) {
+                .pointerInput(chordMode, pitchOffset) {
                     val pointerPitches = mutableMapOf<PointerId, Int>()
 
                     try {
@@ -104,7 +117,7 @@ fun MultitouchPianoKeyboard(
                                             y = change.position.y,
                                             width = size.width.toFloat(),
                                             height = size.height.toFloat(),
-                                        )
+                                        )?.let(::actualPitch)
                                         if (newPitch != null) {
                                             pointerPitches[change.id] = newPitch
                                             activatePitch(newPitch)
@@ -116,7 +129,7 @@ fun MultitouchPianoKeyboard(
                                             y = change.position.y,
                                             width = size.width.toFloat(),
                                             height = size.height.toFloat(),
-                                        )
+                                        )?.let(::actualPitch)
                                         if (newPitch != oldPitch) {
                                             if (oldPitch != null) deactivatePitch(oldPitch)
                                             if (newPitch != null) {
@@ -143,7 +156,8 @@ fun MultitouchPianoKeyboard(
             val whiteKeyWidth = maxWidth / PianoTouchLayout.whitePitches.size
 
             Row(modifier = Modifier.fillMaxSize()) {
-                PianoTouchLayout.whitePitches.forEach { pitch ->
+                PianoTouchLayout.whitePitches.forEach { layoutPitch ->
+                    val pitch = actualPitch(layoutPitch)
                     val active = activePitchCounts.containsKey(pitch)
                     Box(
                         modifier = Modifier
@@ -164,7 +178,8 @@ fun MultitouchPianoKeyboard(
             }
 
             PianoTouchLayout.blackKeys.forEach { key ->
-                val active = activePitchCounts.containsKey(key.midiPitch)
+                val pitch = actualPitch(key.midiPitch)
+                val active = activePitchCounts.containsKey(pitch)
                 Box(
                     modifier = Modifier
                         .offset(x = whiteKeyWidth * (key.whiteIndex + PianoTouchLayout.BLACK_KEY_X_OFFSET_FRACTION))
