@@ -24,6 +24,38 @@ object SoundFontRepository {
     private const val KEY_PROGRAM = "active_program"
     private const val NO_PRESET = -1
 
+    const val STARTER_DISPLAY_NAME = "Starter Instruments"
+    private const val STARTER_FILE_NAME = "FluidR3Mono_GM.sf3"
+    private const val STARTER_ASSET_PATH = "soundfonts/$STARTER_FILE_NAME"
+
+    /**
+     * Installs the SoundFont bundled with release APKs into app-private storage so FluidSynth can
+     * open it by filesystem path. Development builds without the optional asset fail gracefully
+     * and continue using Score Forge's fallback preview synth.
+     */
+    fun installBundledStarter(context: Context): Result<ImportedSoundFont> = runCatching {
+        val folder = File(context.filesDir, "soundfonts").apply { mkdirs() }
+        val destination = File(folder, STARTER_FILE_NAME)
+
+        if (!destination.isFile || destination.length() == 0L) {
+            if (destination.exists()) destination.delete()
+            context.assets.open(STARTER_ASSET_PATH).use { input ->
+                destination.outputStream().buffered().use { output ->
+                    input.copyTo(output)
+                }
+            }
+        }
+
+        require(destination.isFile && destination.length() > 0L) {
+            "Bundled starter instruments could not be installed."
+        }
+
+        ImportedSoundFont(
+            displayName = STARTER_DISPLAY_NAME,
+            localPath = destination.absolutePath,
+        )
+    }
+
     fun importToAppStorage(context: Context, uri: Uri): Result<ImportedSoundFont> = runCatching {
         val displayName = queryDisplayName(context, uri)
             ?.takeIf { it.isNotBlank() }
