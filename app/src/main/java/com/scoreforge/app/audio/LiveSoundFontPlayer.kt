@@ -4,6 +4,7 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
+import com.scoreforge.app.music.ScoreTrack
 import java.io.Closeable
 import kotlin.concurrent.thread
 
@@ -37,6 +38,12 @@ class LiveSoundFontPlayer(
     @Volatile
     private var desiredPreset: SoundFontPreset? = null
 
+    @Volatile
+    private var desiredVolume: Int = ScoreTrack.DEFAULT_VOLUME
+
+    @Volatile
+    private var desiredPan: Int = ScoreTrack.CENTER_PAN
+
     val isReady: Boolean
         get() = engine?.hasSoundFont == true && running
 
@@ -60,6 +67,7 @@ class LiveSoundFontPlayer(
                     .firstOrNull { it.bank == wanted.bank && it.program == wanted.program }
                     ?.let(candidate::selectPreset)
             }
+            candidate.setChannelMixer(desiredVolume, desiredPan)
 
             synchronized(stateLock) {
                 if (generation != loadGeneration) {
@@ -81,6 +89,12 @@ class LiveSoundFontPlayer(
                 .firstOrNull { it.bank == preset.bank && it.program == preset.program }
                 ?.let(current::selectPreset)
         }
+    }
+
+    fun setMixer(volume: Int, pan: Int) {
+        desiredVolume = volume.coerceIn(ScoreTrack.MIN_VOLUME, ScoreTrack.MAX_VOLUME)
+        desiredPan = pan.coerceIn(ScoreTrack.MIN_PAN, ScoreTrack.MAX_PAN)
+        engine?.setChannelMixer(desiredVolume, desiredPan)
     }
 
     fun noteOn(midiPitch: Int, velocity: Int = 96): Boolean =
