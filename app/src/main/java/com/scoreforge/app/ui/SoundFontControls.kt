@@ -60,7 +60,7 @@ fun SoundFontControls(
         thread(name = "ScoreForgeSoundFontImport", isDaemon = true) {
             val imported = SoundFontRepository.importToAppStorage(context, uri)
             val importedFile = imported.getOrNull()
-            val loaded = importedFile != null && engine.loadSoundFont(importedFile.localPath)
+            val loaded = importedFile?.let { engine.loadSoundFont(it.localPath) } == true
             val discoveredPresets = if (loaded) engine.presets else emptyList()
             val discoveredIndex = if (loaded) engine.selectedPresetIndex() else -1
             val selectedPreset = if (loaded) engine.selectedPreset else null
@@ -68,16 +68,17 @@ fun SoundFontControls(
 
             mainHandler.post {
                 isImporting = false
-                if (loaded && importedFile != null) {
-                    soundFontName = importedFile.displayName
+                if (loaded) {
+                    val loadedFile = checkNotNull(importedFile)
+                    soundFontName = loadedFile.displayName
                     presets = discoveredPresets
                     presetIndex = discoveredIndex
                     status = when {
-                        discoveredPresets.isNotEmpty() -> "${discoveredPresets.size} presets • live piano readying"
+                        discoveredPresets.isNotEmpty() -> "${discoveredPresets.size} presets • live piano ready"
                         else -> "Loaded • default program"
                     }
-                    LiveInstrumentBus.loadSoundFont(importedFile, selectedPreset)
-                    onSoundFontLoaded(importedFile, selectedPreset)
+                    LiveInstrumentBus.loadSoundFont(loadedFile, selectedPreset)
+                    onSoundFontLoaded(loadedFile, selectedPreset)
                 } else {
                     status = error ?: "FluidSynth could not load that SoundFont"
                 }
