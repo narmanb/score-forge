@@ -83,6 +83,10 @@ class ScorePlaybackEngine {
     }
 
     fun previewPitch(midiPitch: Int) {
+        // Imported SoundFonts use a dedicated continuously-rendering FluidSynth instance so the
+        // touchscreen/staff preview is immediate and independent from full-score rendering.
+        if (LiveInstrumentBus.previewPitch(midiPitch, velocity = 82)) return
+
         val preview = listOf(
             ScoreNote(
                 midiPitch = midiPitch,
@@ -92,8 +96,8 @@ class ScorePlaybackEngine {
             )
         )
 
-        // Keep previews independent from offline SoundFont rendering for now. This lightweight
-        // voice is low-overhead and avoids mutating a SoundFont synth while a score is rendering.
+        // No SoundFont loaded yet: retain the tiny built-in voice so Score Forge is still audible
+        // immediately after installation.
         thread(name = "ScoreForgePreview", isDaemon = true) {
             val pcm = renderFallbackScore(preview, bpm = 240, tailSeconds = 0.08f)
             if (pcm.isEmpty()) return@thread
