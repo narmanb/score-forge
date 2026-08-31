@@ -45,14 +45,14 @@ data class ScoreProjectSnapshot(
     fun effectiveActiveTrackIndex(): Int =
         activeTrackIndex.coerceIn(0, effectiveTracks().lastIndex)
 
-    fun safeProjectName(): String = sanitizeProjectName(projectName)
+    fun safeProjectName(): String = cleanProjectName(projectName)
 
     companion object {
-        fun sanitizeProjectName(name: String): String = sanitizeProjectName(name)
+        fun sanitizeProjectName(name: String): String = cleanProjectName(name)
     }
 }
 
-private fun sanitizeProjectName(name: String): String =
+private fun cleanProjectName(name: String): String =
     name.replace('\t', ' ')
         .replace('\n', ' ')
         .replace('\r', ' ')
@@ -139,7 +139,7 @@ object ScoreProjectCodec {
         lines.forEach { line ->
             val parts = line.split('\t')
             when (parts.firstOrNull()) {
-                "PROJECT_NAME" -> projectName = sanitizeProjectName(parts.getOrNull(1).orEmpty())
+                "PROJECT_NAME" -> projectName = cleanProjectName(parts.getOrNull(1).orEmpty())
                 "BPM" -> parts.getOrNull(1)?.toIntOrNull()?.let { bpm = it.coerceIn(30, 300) }
                 "DURATION" -> parseDuration(parts.getOrNull(1))?.let { selectedDuration = it }
                 "PIANO_OCTAVE" -> parts.getOrNull(1)?.toIntOrNull()?.let {
