@@ -55,6 +55,7 @@ fun ScoreForgeComposerScreen() {
     val soundFontEngine = remember { SoundFontEngine.createOrNull() }
     val editHistory = remember { ScoreEditHistory() }
     var activeTrackIndex by remember { mutableIntStateOf(0) }
+    var projectName by remember { mutableStateOf("Untitled") }
     var selectedDuration by remember { mutableStateOf(NoteDuration.QUARTER) }
     var bpm by remember { mutableIntStateOf(120) }
     var isPlaying by remember { mutableStateOf(false) }
@@ -95,6 +96,23 @@ fun ScoreForgeComposerScreen() {
         replaceTrack(index, transform(tracks[index]))
     }
 
+    fun currentProjectSnapshot(): ScoreProjectSnapshot {
+        val frozenTracks = tracks.map { it.copy(events = it.events.toList()) }
+        val index = activeTrackIndex.coerceIn(0, frozenTracks.lastIndex)
+        val current = frozenTracks[index]
+        return ScoreProjectSnapshot(
+            events = current.events,
+            bpm = bpm,
+            cursorBeat = current.cursorBeat,
+            selectedDuration = selectedDuration,
+            pianoOctaveShift = pianoOctaveShift,
+            staffSharpInput = staffSharpInput,
+            tracks = frozenTracks,
+            activeTrackIndex = index,
+            projectName = projectName,
+        )
+    }
+
     fun currentEditState(): ScoreEditState {
         val index = activeIndex()
         val current = tracks[index]
@@ -120,22 +138,31 @@ fun ScoreForgeComposerScreen() {
         activeTrackIndex = state.activeTrackIndex.coerceIn(0, tracks.lastIndex)
     }
 
+    fun applyProjectSnapshot(snapshot: ScoreProjectSnapshot, clearHistory: Boolean) {
+        val restoredTracks = snapshot.effectiveTracks()
+        tracks.clear()
+        tracks.addAll(restoredTracks)
+        activeTrackIndex = snapshot.effectiveActiveTrackIndex()
+        projectName = snapshot.safeProjectName()
+        bpm = snapshot.bpm.coerceIn(30, 300)
+        selectedDuration = snapshot.selectedDuration
+        pianoOctaveShift = snapshot.pianoOctaveShift.coerceIn(-4, 3)
+        staffSharpInput = snapshot.staffSharpInput
+        chordMode = false
+        if (clearHistory) editHistory.clear()
+        syncHistoryButtons()
+    }
+
     LaunchedEffect(Unit) {
         val restored = withContext(Dispatchers.IO) {
             ScoreProjectRepository.loadDraft(context)
         }
         if (restored != null) {
-            val restoredTracks = restored.effectiveTracks()
-            tracks.clear()
-            tracks.addAll(restoredTracks)
-            activeTrackIndex = restored.activeTrackIndex.coerceIn(0, tracks.lastIndex)
-            bpm = restored.bpm
-            selectedDuration = restored.selectedDuration
-            pianoOctaveShift = restored.pianoOctaveShift
-            staffSharpInput = restored.staffSharpInput
+            applyProjectSnapshot(restored, clearHistory = true)
+        } else {
+            editHistory.clear()
+            syncHistoryButtons()
         }
-        editHistory.clear()
-        syncHistoryButtons()
         draftLoaded = true
     }
 
@@ -143,6 +170,7 @@ fun ScoreForgeComposerScreen() {
         draftLoaded,
         draftTracks,
         activeTrackIndex,
+        projectName,
         bpm,
         selectedDuration,
         pianoOctaveShift,
@@ -150,18 +178,7 @@ fun ScoreForgeComposerScreen() {
     ) {
         if (!draftLoaded || draftTracks.isEmpty()) return@LaunchedEffect
         delay(250L)
-        val safeIndex = activeTrackIndex.coerceIn(0, draftTracks.lastIndex)
-        val active = draftTracks[safeIndex]
-        val snapshot = ScoreProjectSnapshot(
-            events = active.events,
-            bpm = bpm,
-            cursorBeat = active.cursorBeat,
-            selectedDuration = selectedDuration,
-            pianoOctaveShift = pianoOctaveShift,
-            staffSharpInput = staffSharpInput,
-            tracks = draftTracks,
-            activeTrackIndex = safeIndex,
-        )
+        val snapshot = currentProjectSnapshot()
         withContext(Dispatchers.IO) {
             ScoreProjectRepository.saveDraft(context, snapshot)
         }
@@ -180,6 +197,16 @@ fun ScoreForgeComposerScreen() {
     fun stopPlayback() {
         playback.stop()
         isPlaying = false
+    }
+
+    fun openProject(snapshot: ScoreProjectSnapshot) {
+        stopPlayback()
+        LiveInstrumentBus.allNotesOff()
+        applyProjectSnapshot(snapshot, clearHistory = true)
+    }
+
+    fun renameProject(name: String) {
+        projectName = ScoreProjectSnapshot.sanitizeProjectName(name)
     }
 
     fun undoScore() {
@@ -335,6 +362,7 @@ fun ScoreForgeComposerScreen() {
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
                 HeaderBar(
+                    projectName = projectName,
                     activeTrackName = activeTrack.name,
                     trackCount = tracks.size,
                     noteCount = activeNoteCount,
@@ -372,6 +400,13 @@ fun ScoreForgeComposerScreen() {
                             }
                         }
                     },
+                )
+
+                ProjectFileControls(
+                    projectName = projectName,
+                    snapshotProvider = ::currentProjectSnapshot,
+                    onRenameProject = ::renameProject,
+                    onOpenProject = ::openProject,
                 )
 
                 TrackControls(
@@ -528,6 +563,7 @@ fun ScoreForgeComposerScreen() {
 
 @Composable
 private fun HeaderBar(
+    projectName: String,
     activeTrackName: String,
     trackCount: Int,
     noteCount: Int,
@@ -560,7 +596,7 @@ private fun HeaderBar(
         Column(modifier = Modifier.weight(1f)) {
             Text("Score Forge", style = MaterialTheme.typography.titleLarge)
             Text(
-                "Untitled • $activeTrackName • $trackCount tracks • 4/4 • $bpm BPM • $measureCount measures • beat ${formatBeat(cursorBeat)} • $noteCount notes • $restCount rests",
+                "$projectName • $activeTrackName • $trackCount tracks • 4/4 • $bpm BPM • $measureCount measures • beat ${formatBeat(cursorBeat)} • $noteCount notes • $restCount rests",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
