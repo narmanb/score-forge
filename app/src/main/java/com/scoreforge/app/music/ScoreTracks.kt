@@ -6,6 +6,8 @@ package com.scoreforge.app.music
  * Preset bank/program refer to the currently loaded SoundFont. Keeping the reference as numbers
  * avoids coupling the music model to the Android/native audio classes and lets the project format
  * survive even when the SoundFont itself is temporarily unavailable.
+ *
+ * Mixer values deliberately mirror MIDI conventions: volume is 0..127 and pan is -64..63.
  */
 data class ScoreTrack(
     val id: Int,
@@ -15,6 +17,9 @@ data class ScoreTrack(
     val presetBank: Int? = null,
     val presetProgram: Int? = null,
     val muted: Boolean = false,
+    val solo: Boolean = false,
+    val volume: Int = DEFAULT_VOLUME,
+    val pan: Int = CENTER_PAN,
 ) {
     val notes: List<ScoreNote>
         get() = events.filterIsInstance<ScoreNote>()
@@ -29,7 +34,18 @@ data class ScoreTrack(
         cursorBeat = maxOf(cursorBeat.coerceAtLeast(0f), ScoreTimeline.endBeat(events)),
         presetBank = presetBank?.coerceAtLeast(0),
         presetProgram = presetProgram?.coerceIn(0, 127),
+        volume = volume.coerceIn(MIN_VOLUME, MAX_VOLUME),
+        pan = pan.coerceIn(MIN_PAN, MAX_PAN),
     )
+
+    companion object {
+        const val MIN_VOLUME = 0
+        const val MAX_VOLUME = 127
+        const val DEFAULT_VOLUME = 100
+        const val MIN_PAN = -64
+        const val MAX_PAN = 63
+        const val CENTER_PAN = 0
+    }
 }
 
 object ScoreTracks {
@@ -45,9 +61,18 @@ object ScoreTracks {
         return ScoreTrack(id = id, name = "Track $id")
     }
 
+    /**
+     * Mixer routing semantics: mute always wins. When at least one non-muted track is soloed,
+     * only non-muted solo tracks are audible. Otherwise every non-muted track is audible.
+     */
+    fun audibleTracks(tracks: List<ScoreTrack>): List<ScoreTrack> {
+        val unmuted = tracks.filterNot { it.muted }.take(MAX_TRACKS)
+        return if (unmuted.any { it.solo }) unmuted.filter { it.solo } else unmuted
+    }
+
     fun endBeat(tracks: List<ScoreTrack>): Float =
-        tracks.filterNot { it.muted }.maxOfOrNull { ScoreTimeline.endBeat(it.events) } ?: 0f
+        audibleTracks(tracks).maxOfOrNull { ScoreTimeline.endBeat(it.events) } ?: 0f
 
     fun allNotes(tracks: List<ScoreTrack>): List<ScoreNote> =
-        tracks.filterNot { it.muted }.flatMap { it.notes }
+        audibleTracks(tracks).flatMap { it.notes }
 }
