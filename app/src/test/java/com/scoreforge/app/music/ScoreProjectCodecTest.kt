@@ -1,7 +1,9 @@
 package com.scoreforge.app.music
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ScoreProjectCodecTest {
@@ -17,6 +19,7 @@ class ScoreProjectCodecTest {
             cursorBeat = 3.5f,
             selectedDuration = NoteDuration.SIXTEENTH,
             pianoOctaveShift = -2,
+            staffSharpInput = true,
         )
 
         assertEquals(original, ScoreProjectCodec.decode(ScoreProjectCodec.encode(original)))
@@ -31,6 +34,7 @@ class ScoreProjectCodecTest {
             CURSOR\t2.0
             DURATION\tEIGHTH
             PIANO_OCTAVE\t99
+            STAFF_SHARP\t1
             N\t60\tQUARTER\t0.0\t96
             N\t999\tQUARTER\t1.0\t96
             R\tNOT_A_DURATION\t1.0
@@ -42,12 +46,13 @@ class ScoreProjectCodecTest {
         assertEquals(90, decoded.bpm)
         assertEquals(NoteDuration.EIGHTH, decoded.selectedDuration)
         assertEquals(3, decoded.pianoOctaveShift)
+        assertTrue(decoded.staffSharpInput)
         assertEquals(1, decoded.events.size)
         assertEquals(2f, decoded.cursorBeat, 0.0001f)
     }
 
     @Test
-    fun olderVersionOneDraftWithoutOctaveStillDefaultsToMiddleRange() {
+    fun olderVersionOneDraftWithoutNewEditorFieldsUsesSafeDefaults() {
         val decoded = ScoreProjectCodec.decode(
             """
             SCOREFORGE\t1
@@ -58,6 +63,7 @@ class ScoreProjectCodecTest {
 
         requireNotNull(decoded)
         assertEquals(0, decoded.pianoOctaveShift)
+        assertFalse(decoded.staffSharpInput)
     }
 
     @Test
