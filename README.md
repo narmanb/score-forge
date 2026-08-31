@@ -13,6 +13,7 @@ Score Forge is an Android-first, touch-focused music composition app built aroun
 - Traditional five-line staff editor
 - Piano-roll editor using the same underlying note data as the staff
 - Whole, half, quarter, eighth, and sixteenth notes and rests
+- Dotted notes and dotted rests with correct 1.5× timing, playback, staff rendering, piano-roll length, and project persistence
 - Measure/barline display in 4/4
 - Tap-to-place notation with 1/16-note timing quantization
 - Drag notes horizontally to change time and vertically to change pitch
@@ -59,7 +60,7 @@ Score Forge is an Android-first, touch-focused music composition app built aroun
 - Save As `.sfp`
 - Open `.sfp`
 - Backward-compatible migration from the original single-track project format
-- Project files store tracks, score events, tempo, editor settings, instruments, volume, pan, mute, and solo state
+- Project files store tracks, score events, tempo, editor settings, dotted input/events, instruments, volume, pan, mute, and solo state
 
 ### Android
 
@@ -79,7 +80,6 @@ Score Forge is an Android-first, touch-focused music composition app built aroun
 
 ## Next priorities
 
-- Dotted notes and rests
 - Ties and slurs
 - Additional accidentals and notation spelling
 - Clefs, key signatures, and configurable time signatures
