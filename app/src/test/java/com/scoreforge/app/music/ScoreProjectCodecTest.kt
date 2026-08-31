@@ -11,13 +11,14 @@ class ScoreProjectCodecTest {
     fun roundTripPreservesScoreAndEditorState() {
         val original = ScoreProjectSnapshot(
             events = listOf(
-                ScoreNote(60, NoteDuration.QUARTER, startBeat = 0f, velocity = 88),
-                ScoreRest(NoteDuration.EIGHTH, startBeat = 1f),
-                ScoreNote(64, NoteDuration.HALF, startBeat = 1.5f, velocity = 101),
+                ScoreNote(60, NoteDuration.QUARTER, startBeat = 0f, velocity = 88, dotted = true),
+                ScoreRest(NoteDuration.EIGHTH, startBeat = 1.5f, dotted = true),
+                ScoreNote(64, NoteDuration.HALF, startBeat = 2.25f, velocity = 101),
             ),
             bpm = 146,
-            cursorBeat = 3.5f,
+            cursorBeat = 4.25f,
             selectedDuration = NoteDuration.SIXTEENTH,
+            selectedDotted = true,
             pianoOctaveShift = -2,
             staffSharpInput = true,
             projectName = "Night Drive",
@@ -32,8 +33,8 @@ class ScoreProjectCodecTest {
             ScoreTrack(
                 id = 1,
                 name = "Piano",
-                events = listOf(ScoreNote(60, NoteDuration.QUARTER, 0f)),
-                cursorBeat = 1f,
+                events = listOf(ScoreNote(60, NoteDuration.QUARTER, 0f, dotted = true)),
+                cursorBeat = 1.5f,
                 presetBank = 0,
                 presetProgram = 0,
                 volume = 87,
@@ -43,10 +44,10 @@ class ScoreProjectCodecTest {
                 id = 2,
                 name = "Lead Synth",
                 events = listOf(
-                    ScoreRest(NoteDuration.HALF, 0f),
-                    ScoreNote(76, NoteDuration.HALF, 2f, velocity = 110),
+                    ScoreRest(NoteDuration.HALF, 0f, dotted = true),
+                    ScoreNote(76, NoteDuration.HALF, 3f, velocity = 110),
                 ),
-                cursorBeat = 4f,
+                cursorBeat = 5f,
                 presetBank = 2,
                 presetProgram = 41,
                 muted = true,
@@ -74,12 +75,14 @@ class ScoreProjectCodecTest {
         assertTrue(decoded.tracks[1].solo)
         assertEquals(119, decoded.tracks[1].volume)
         assertEquals(31, decoded.tracks[1].pan)
+        assertTrue((decoded.tracks[0].events.single() as ScoreNote).dotted)
+        assertTrue((decoded.tracks[1].events.first() as ScoreRest).dotted)
         assertEquals("Boss Theme", decoded.projectName)
         assertEquals(original, decoded)
     }
 
     @Test
-    fun projectNameIsSanitizedAndOldV2WithoutMixerDefaultsSafely() {
+    fun projectNameIsSanitizedAndOldV2WithoutMixerOrDotsDefaultsSafely() {
         val dirty = ScoreProjectSnapshot(
             events = emptyList(),
             projectName = "  My\tSong\nName  ",
@@ -92,12 +95,15 @@ class ScoreProjectCodecTest {
             SCOREFORGE\t2
             BPM\t120
             ACTIVE_TRACK\t0
-            TRACK\t1\tTrack 1\t0.0\t0\t-1\t-1
+            TRACK\t1\tTrack 1\t1.0\t0\t-1\t-1
+            N\t60\tQUARTER\t0.0\t96
             END_TRACK
             """.trimIndent().replace("\\t", "\t")
         )
         requireNotNull(oldV2)
         assertEquals("Untitled", oldV2.projectName)
+        assertFalse(oldV2.selectedDotted)
+        assertFalse((oldV2.tracks.single().events.single() as ScoreNote).dotted)
         assertFalse(oldV2.tracks.single().solo)
         assertEquals(ScoreTrack.DEFAULT_VOLUME, oldV2.tracks.single().volume)
         assertEquals(ScoreTrack.CENTER_PAN, oldV2.tracks.single().pan)
@@ -121,6 +127,7 @@ class ScoreProjectCodecTest {
         assertEquals(decoded.events, decoded.tracks.single().events)
         assertEquals(3f, decoded.tracks.single().cursorBeat, 0.0001f)
         assertEquals(118, decoded.bpm)
+        assertFalse(decoded.selectedDotted)
         assertEquals("Untitled", decoded.projectName)
     }
 
@@ -163,6 +170,7 @@ class ScoreProjectCodecTest {
         requireNotNull(decoded)
         assertEquals(0, decoded.pianoOctaveShift)
         assertFalse(decoded.staffSharpInput)
+        assertFalse(decoded.selectedDotted)
         assertEquals(1, decoded.tracks.size)
         assertEquals("Untitled", decoded.projectName)
     }
