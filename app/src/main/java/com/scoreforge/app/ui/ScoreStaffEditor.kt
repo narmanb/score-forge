@@ -31,6 +31,7 @@ import com.scoreforge.app.music.PitchNames
 import com.scoreforge.app.music.ScoreEvent
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreRest
+import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
 import kotlin.math.abs
 
@@ -39,7 +40,9 @@ fun ScoreStaffEditor(
     events: List<ScoreEvent>,
     selectedDuration: NoteDuration,
     cursorBeat: Float,
+    selectedEventIndex: Int,
     onAddPitch: (pitch: Int, startBeat: Float) -> Unit,
+    onSelectEvent: (eventIndex: Int) -> Unit,
     onBeginMove: (eventIndex: Int) -> Unit,
     onMoveNote: (eventIndex: Int, pitch: Int, startBeat: Float) -> Unit,
     onMoveRest: (eventIndex: Int, startBeat: Float) -> Unit,
@@ -59,7 +62,7 @@ fun ScoreStaffEditor(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 8.dp)
-                .pointerInput(events.size, selectedDuration, cursorBeat, visibleBeats) {
+                .pointerInput(events, selectedDuration, cursorBeat, visibleBeats) {
                     detectTapGestures(
                         onLongPress = { position ->
                             val eventIndex = nearestEditableEventIndex(
@@ -72,6 +75,18 @@ fun ScoreStaffEditor(
                             if (eventIndex >= 0) onDeleteEvent(eventIndex)
                         },
                         onTap = { position ->
+                            val existingIndex = nearestEditableEventIndex(
+                                events = events,
+                                point = position,
+                                width = size.width.toFloat(),
+                                height = size.height.toFloat(),
+                                visibleBeats = visibleBeats,
+                            )
+                            if (existingIndex >= 0) {
+                                onSelectEvent(existingIndex)
+                                return@detectTapGestures
+                            }
+
                             val pitch = pitchFromY(position.y, size.height.toFloat())
                             val startBeat = ScoreTimeline.quantizeBeat(
                                 StaffTimeMapping.beatAtX(
@@ -84,7 +99,7 @@ fun ScoreStaffEditor(
                         },
                     )
                 }
-                .pointerInput(events.size, visibleBeats) {
+                .pointerInput(events, visibleBeats) {
                     detectDragGestures(
                         onDragStart = { position ->
                             draggingEventIndex = nearestEditableEventIndex(
@@ -94,7 +109,10 @@ fun ScoreStaffEditor(
                                 height = size.height.toFloat(),
                                 visibleBeats = visibleBeats,
                             )
-                            if (draggingEventIndex >= 0) onBeginMove(draggingEventIndex)
+                            if (draggingEventIndex >= 0) {
+                                onSelectEvent(draggingEventIndex)
+                                onBeginMove(draggingEventIndex)
+                            }
                         },
                         onDragEnd = { draggingEventIndex = -1 },
                         onDragCancel = { draggingEventIndex = -1 },
@@ -148,7 +166,7 @@ fun ScoreStaffEditor(
                 measureBeat += ScoreTimeline.BEATS_PER_MEASURE
             }
 
-            events.forEach { event ->
+            events.forEachIndexed { index, event ->
                 when (event) {
                     is ScoreNote -> drawScoreNote(
                         note = event,
@@ -156,6 +174,7 @@ fun ScoreStaffEditor(
                         staffTop = staffTop,
                         staffBottom = staffBottom,
                         lineSpacing = lineSpacing,
+                        selected = index == selectedEventIndex,
                     )
 
                     is ScoreRest -> drawScoreRest(
@@ -163,8 +182,16 @@ fun ScoreStaffEditor(
                         visibleBeats = visibleBeats,
                         staffTop = staffTop,
                         lineSpacing = lineSpacing,
+                        selected = index == selectedEventIndex,
                     )
                 }
+            }
+
+            events.forEachIndexed { sourceIndex, event ->
+                if (event !is ScoreNote || !ScoreTies.hasValidTie(events, sourceIndex)) return@forEachIndexed
+                val targetIndex = ScoreTies.targetIndex(events, sourceIndex) ?: return@forEachIndexed
+                val target = events.getOrNull(targetIndex) as? ScoreNote ?: return@forEachIndexed
+                drawTieCurve(event, target, visibleBeats, staffBottom, lineSpacing)
             }
 
             val cursorX = StaffTimeMapping.xAtBeat(cursorBeat, visibleBeats, size.width)
@@ -179,9 +206,7 @@ fun ScoreStaffEditor(
         if (events.isEmpty()) {
             Text(
                 "Tap a pitch + beat to place a ${selectedDuration.displayName.lowercase()} note, use Rest above, or play the piano below.",
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(10.dp),
+                modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp),
                 color = Color(0xFF555555),
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -195,27 +220,31 @@ private fun DrawScope.drawScoreNote(
     staffTop: Float,
     staffBottom: Float,
     lineSpacing: Float,
+    selected: Boolean,
 ) {
     val x = StaffTimeMapping.xAtBeat(note.startBeat + 0.10f, visibleBeats, size.width)
     val y = noteY(note.midiPitch, staffBottom, lineSpacing)
     drawLedgerLines(x, y, staffTop, staffBottom, lineSpacing)
 
-    if (PitchNames.hasSharp(note.midiPitch)) {
-        drawSharpAccidental(x = x - 20f, y = y)
+    if (selected) {
+        drawCircle(
+            color = Color(0xFF5B78A5),
+            radius = 14f,
+            center = Offset(x, y),
+            style = Stroke(width = 2.5f),
+        )
     }
+
+    if (PitchNames.hasSharp(note.midiPitch)) drawSharpAccidental(x = x - 20f, y = y)
 
     val filled = note.duration != NoteDuration.WHOLE && note.duration != NoteDuration.HALF
     if (filled) {
-        drawOval(
-            Color(0xFF111111),
-            topLeft = Offset(x - 8f, y - 5.5f),
-            size = Size(16f, 11f),
-        )
+        drawOval(Color(0xFF111111), Offset(x - 8f, y - 5.5f), Size(16f, 11f))
     } else {
         drawOval(
             Color(0xFF111111),
-            topLeft = Offset(x - 8f, y - 5.5f),
-            size = Size(16f, 11f),
+            Offset(x - 8f, y - 5.5f),
+            Size(16f, 11f),
             style = Stroke(2.5f),
         )
     }
@@ -242,12 +271,28 @@ private fun DrawScope.drawScoreNote(
     }
 
     if (note.dotted) {
-        drawCircle(
-            color = Color(0xFF111111),
-            radius = 3.2f,
-            center = Offset(x + 16f, y),
-        )
+        drawCircle(Color(0xFF111111), 3.2f, Offset(x + 16f, y))
     }
+}
+
+private fun DrawScope.drawTieCurve(
+    source: ScoreNote,
+    target: ScoreNote,
+    visibleBeats: Float,
+    staffBottom: Float,
+    lineSpacing: Float,
+) {
+    val sourceX = StaffTimeMapping.xAtBeat(source.startBeat + 0.16f, visibleBeats, size.width)
+    val targetX = StaffTimeMapping.xAtBeat(target.startBeat + 0.04f, visibleBeats, size.width)
+    val sourceY = noteY(source.midiPitch, staffBottom, lineSpacing)
+    val targetY = noteY(target.midiPitch, staffBottom, lineSpacing)
+    val baseline = maxOf(sourceY, targetY) + lineSpacing * 0.62f
+    val controlY = baseline + lineSpacing * 0.72f
+    val path = Path().apply {
+        moveTo(sourceX, baseline)
+        quadraticBezierTo((sourceX + targetX) / 2f, controlY, targetX, baseline)
+    }
+    drawPath(path, Color(0xFF111111), style = Stroke(width = 2.2f))
 }
 
 private fun DrawScope.drawSharpAccidental(x: Float, y: Float) {
@@ -263,28 +308,28 @@ private fun DrawScope.drawScoreRest(
     visibleBeats: Float,
     staffTop: Float,
     lineSpacing: Float,
+    selected: Boolean,
 ) {
     val x = StaffTimeMapping.xAtBeat(rest.startBeat + 0.10f, visibleBeats, size.width)
     val middleY = staffTop + lineSpacing * 2f
     val ink = Color(0xFF111111)
 
+    if (selected) {
+        drawCircle(
+            color = Color(0xFF5B78A5),
+            radius = 16f,
+            center = Offset(x, middleY),
+            style = Stroke(width = 2.5f),
+        )
+    }
+
     when (rest.duration) {
         NoteDuration.WHOLE -> {
             val lineY = staffTop + lineSpacing
-            drawRect(
-                color = ink,
-                topLeft = Offset(x - 9f, lineY),
-                size = Size(18f, 6f),
-            )
+            drawRect(ink, Offset(x - 9f, lineY), Size(18f, 6f))
         }
 
-        NoteDuration.HALF -> {
-            drawRect(
-                color = ink,
-                topLeft = Offset(x - 9f, middleY - 6f),
-                size = Size(18f, 6f),
-            )
-        }
+        NoteDuration.HALF -> drawRect(ink, Offset(x - 9f, middleY - 6f), Size(18f, 6f))
 
         NoteDuration.QUARTER -> {
             val path = Path().apply {
@@ -302,17 +347,8 @@ private fun DrawScope.drawScoreRest(
             val stemTop = middleY - lineSpacing * 0.95f
             val stemBottom = middleY + lineSpacing * 0.70f
             drawLine(ink, Offset(x + 2f, stemTop), Offset(x + 2f, stemBottom), 3f)
-            drawOval(
-                color = ink,
-                topLeft = Offset(x - 5f, stemBottom - 3f),
-                size = Size(10f, 7f),
-            )
-            drawLine(
-                ink,
-                Offset(x + 2f, stemTop),
-                Offset(x + 12f, stemTop + lineSpacing * 0.38f),
-                3f,
-            )
+            drawOval(ink, Offset(x - 5f, stemBottom - 3f), Size(10f, 7f))
+            drawLine(ink, Offset(x + 2f, stemTop), Offset(x + 12f, stemTop + lineSpacing * 0.38f), 3f)
             if (rest.duration == NoteDuration.SIXTEENTH) {
                 drawLine(
                     ink,
@@ -324,13 +360,7 @@ private fun DrawScope.drawScoreRest(
         }
     }
 
-    if (rest.dotted) {
-        drawCircle(
-            color = ink,
-            radius = 3.2f,
-            center = Offset(x + 16f, middleY),
-        )
-    }
+    if (rest.dotted) drawCircle(ink, 3.2f, Offset(x + 16f, middleY))
 }
 
 private fun noteY(midiPitch: Int, staffBottom: Float, lineSpacing: Float): Float {
