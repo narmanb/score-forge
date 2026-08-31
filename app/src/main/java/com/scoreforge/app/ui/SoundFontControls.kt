@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.scoreforge.app.audio.ImportedSoundFont
+import com.scoreforge.app.audio.LiveInstrumentBus
 import com.scoreforge.app.audio.SoundFontEngine
 import com.scoreforge.app.audio.SoundFontRepository
 import com.scoreforge.app.audio.SoundFontPreset
@@ -75,6 +76,7 @@ fun SoundFontControls(
                         discoveredPresets.isNotEmpty() -> "${discoveredPresets.size} presets • live piano readying"
                         else -> "Loaded • default program"
                     }
+                    LiveInstrumentBus.loadSoundFont(importedFile, selectedPreset)
                     onSoundFontLoaded(importedFile, selectedPreset)
                 } else {
                     status = error ?: "FluidSynth could not load that SoundFont"
@@ -88,6 +90,7 @@ fun SoundFontControls(
         if (engine.selectPresetAt(index)) {
             presetIndex = index
             status = "${presets.size} presets"
+            LiveInstrumentBus.selectPreset(presets[index])
             onPresetSelected(presets[index])
         }
     }
