@@ -32,6 +32,48 @@ class ScoreEditHistoryTest {
     }
 
     @Test
+    fun undoRestoresMultipleTracksAndActiveTrack() {
+        val first = ScoreTrack(
+            id = 1,
+            name = "Piano",
+            events = listOf(ScoreNote(60, NoteDuration.QUARTER, 0f)),
+            cursorBeat = 1f,
+        )
+        val second = ScoreTrack(
+            id = 2,
+            name = "Strings",
+            events = listOf(ScoreNote(67, NoteDuration.HALF, 2f)),
+            cursorBeat = 4f,
+            muted = true,
+        )
+        val before = ScoreEditState(
+            events = second.events,
+            cursorBeat = second.cursorBeat,
+            tracks = listOf(first, second),
+            activeTrackIndex = 1,
+        )
+        val afterSecond = second.copy(
+            events = second.events + ScoreRest(NoteDuration.QUARTER, 4f),
+            cursorBeat = 5f,
+        )
+        val after = ScoreEditState(
+            events = afterSecond.events,
+            cursorBeat = afterSecond.cursorBeat,
+            tracks = listOf(first, afterSecond),
+            activeTrackIndex = 1,
+        )
+        val history = ScoreEditHistory()
+
+        history.recordBeforeChange(before)
+        val restored = requireNotNull(history.undo(after))
+
+        assertEquals(2, restored.tracks.size)
+        assertEquals(1, restored.activeTrackIndex)
+        assertEquals(second, restored.tracks[1])
+        assertTrue(restored.tracks[1].muted)
+    }
+
+    @Test
     fun newEditClearsRedoBranch() {
         val history = ScoreEditHistory()
         val empty = state()
