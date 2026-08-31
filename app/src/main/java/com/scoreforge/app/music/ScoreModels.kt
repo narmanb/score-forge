@@ -8,12 +8,18 @@ enum class NoteDuration(val beats: Float, val displayName: String) {
     HALF(2f, "Half"),
     QUARTER(1f, "Quarter"),
     EIGHTH(0.5f, "Eighth"),
-    SIXTEENTH(0.25f, "16th")
+    SIXTEENTH(0.25f, "16th");
+
+    fun effectiveBeats(dotted: Boolean): Float = beats * if (dotted) 1.5f else 1f
 }
 
 sealed interface ScoreEvent {
     val duration: NoteDuration
     val startBeat: Float
+    val dotted: Boolean
+
+    val effectiveBeats: Float
+        get() = duration.effectiveBeats(dotted)
 }
 
 data class ScoreNote(
@@ -21,11 +27,13 @@ data class ScoreNote(
     override val duration: NoteDuration,
     override val startBeat: Float = 0f,
     val velocity: Int = 96,
+    override val dotted: Boolean = false,
 ) : ScoreEvent
 
 data class ScoreRest(
     override val duration: NoteDuration,
     override val startBeat: Float = 0f,
+    override val dotted: Boolean = false,
 ) : ScoreEvent
 
 object ScoreTimeline {
@@ -33,7 +41,7 @@ object ScoreTimeline {
     const val EDIT_GRID_BEATS = 0.25f
 
     fun endBeat(events: List<ScoreEvent>): Float =
-        events.maxOfOrNull { it.startBeat + it.duration.beats } ?: 0f
+        events.maxOfOrNull { it.startBeat + it.effectiveBeats } ?: 0f
 
     fun nextBeat(events: List<ScoreEvent>): Float = endBeat(events)
 
