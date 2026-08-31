@@ -16,6 +16,7 @@ class ScoreProjectCodecTest {
             bpm = 146,
             cursorBeat = 3.5f,
             selectedDuration = NoteDuration.SIXTEENTH,
+            pianoOctaveShift = -2,
         )
 
         assertEquals(original, ScoreProjectCodec.decode(ScoreProjectCodec.encode(original)))
@@ -29,6 +30,7 @@ class ScoreProjectCodecTest {
             BPM\t90
             CURSOR\t2.0
             DURATION\tEIGHTH
+            PIANO_OCTAVE\t99
             N\t60\tQUARTER\t0.0\t96
             N\t999\tQUARTER\t1.0\t96
             R\tNOT_A_DURATION\t1.0
@@ -39,8 +41,23 @@ class ScoreProjectCodecTest {
         requireNotNull(decoded)
         assertEquals(90, decoded.bpm)
         assertEquals(NoteDuration.EIGHTH, decoded.selectedDuration)
+        assertEquals(3, decoded.pianoOctaveShift)
         assertEquals(1, decoded.events.size)
         assertEquals(2f, decoded.cursorBeat, 0.0001f)
+    }
+
+    @Test
+    fun olderVersionOneDraftWithoutOctaveStillDefaultsToMiddleRange() {
+        val decoded = ScoreProjectCodec.decode(
+            """
+            SCOREFORGE\t1
+            BPM\t120
+            N\t60\tQUARTER\t0.0\t96
+            """.trimIndent().replace("\\t", "\t")
+        )
+
+        requireNotNull(decoded)
+        assertEquals(0, decoded.pianoOctaveShift)
     }
 
     @Test
