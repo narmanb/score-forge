@@ -39,7 +39,7 @@ fun ScoreStaffEditor(
     events: List<ScoreEvent>,
     selectedDuration: NoteDuration,
     cursorBeat: Float,
-    onAddPitch: (Int) -> Unit,
+    onAddPitch: (pitch: Int, startBeat: Float) -> Unit,
     onBeginMove: (eventIndex: Int) -> Unit,
     onMoveNote: (eventIndex: Int, pitch: Int, startBeat: Float) -> Unit,
     onMoveRest: (eventIndex: Int, startBeat: Float) -> Unit,
@@ -72,7 +72,15 @@ fun ScoreStaffEditor(
                             if (eventIndex >= 0) onDeleteEvent(eventIndex)
                         },
                         onTap = { position ->
-                            onAddPitch(pitchFromY(position.y, size.height.toFloat()))
+                            val pitch = pitchFromY(position.y, size.height.toFloat())
+                            val startBeat = ScoreTimeline.quantizeBeat(
+                                StaffTimeMapping.beatAtX(
+                                    x = position.x,
+                                    visibleBeats = visibleBeats,
+                                    width = size.width.toFloat(),
+                                )
+                            )
+                            onAddPitch(pitch, startBeat)
                         },
                     )
                 }
@@ -94,7 +102,7 @@ fun ScoreStaffEditor(
                         val event = events.getOrNull(draggingEventIndex) ?: return@detectDragGestures
                         val latestStart = (visibleBeats - event.duration.beats).coerceAtLeast(0f)
                         val movedBeat = ScoreTimeline.quantizeBeat(
-                            beatFromX(
+                            StaffTimeMapping.beatAtX(
                                 x = change.position.x,
                                 visibleBeats = visibleBeats,
                                 width = size.width.toFloat(),
@@ -130,7 +138,7 @@ fun ScoreStaffEditor(
 
             var measureBeat = 0f
             while (measureBeat <= visibleBeats + 0.001f) {
-                val x = beatX(measureBeat, visibleBeats, size.width)
+                val x = StaffTimeMapping.xAtBeat(measureBeat, visibleBeats, size.width)
                 drawLine(
                     color = Color(0xFF383838),
                     start = Offset(x, staffTop),
@@ -159,7 +167,7 @@ fun ScoreStaffEditor(
                 }
             }
 
-            val cursorX = beatX(cursorBeat, visibleBeats, size.width)
+            val cursorX = StaffTimeMapping.xAtBeat(cursorBeat, visibleBeats, size.width)
             drawLine(
                 color = Color(0xFF5E6A73),
                 start = Offset(cursorX, staffTop - lineSpacing * 0.70f),
@@ -170,7 +178,7 @@ fun ScoreStaffEditor(
 
         if (events.isEmpty()) {
             Text(
-                "Tap the staff to place a ${selectedDuration.displayName.lowercase()} note, use Rest above, or play the piano below.",
+                "Tap a pitch + beat to place a ${selectedDuration.displayName.lowercase()} note, use Rest above, or play the piano below.",
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(10.dp),
@@ -188,7 +196,7 @@ private fun DrawScope.drawScoreNote(
     staffBottom: Float,
     lineSpacing: Float,
 ) {
-    val x = beatX(note.startBeat + 0.10f, visibleBeats, size.width)
+    val x = StaffTimeMapping.xAtBeat(note.startBeat + 0.10f, visibleBeats, size.width)
     val y = noteY(note.midiPitch, staffBottom, lineSpacing)
     drawLedgerLines(x, y, staffTop, staffBottom, lineSpacing)
 
@@ -248,7 +256,7 @@ private fun DrawScope.drawScoreRest(
     staffTop: Float,
     lineSpacing: Float,
 ) {
-    val x = beatX(rest.startBeat + 0.10f, visibleBeats, size.width)
+    val x = StaffTimeMapping.xAtBeat(rest.startBeat + 0.10f, visibleBeats, size.width)
     val middleY = staffTop + lineSpacing * 2f
     val ink = Color(0xFF111111)
 
@@ -309,21 +317,6 @@ private fun DrawScope.drawScoreRest(
     }
 }
 
-private fun beatX(beat: Float, visibleBeats: Float, width: Float): Float {
-    val left = 30f
-    val right = 20f
-    val usable = (width - left - right).coerceAtLeast(1f)
-    return left + usable * (beat.coerceIn(0f, visibleBeats) / visibleBeats.coerceAtLeast(1f))
-}
-
-private fun beatFromX(x: Float, visibleBeats: Float, width: Float): Float {
-    val left = 30f
-    val right = 20f
-    val usable = (width - left - right).coerceAtLeast(1f)
-    val fraction = ((x - left) / usable).coerceIn(0f, 1f)
-    return fraction * visibleBeats
-}
-
 private fun noteY(midiPitch: Int, staffBottom: Float, lineSpacing: Float): Float {
     val e4Diatonic = 4 * 7 + 2
     val steps = PitchNames.diatonicPosition(midiPitch) - e4Diatonic
@@ -368,7 +361,7 @@ private fun nearestEditableEventIndex(
     var nearest = -1
     var bestDistanceSquared = Float.MAX_VALUE
     events.forEachIndexed { index, event ->
-        val x = beatX(event.startBeat + 0.10f, visibleBeats, width)
+        val x = StaffTimeMapping.xAtBeat(event.startBeat + 0.10f, visibleBeats, width)
         val y = when (event) {
             is ScoreNote -> noteY(event.midiPitch, staffBottom, lineSpacing)
             is ScoreRest -> restY
