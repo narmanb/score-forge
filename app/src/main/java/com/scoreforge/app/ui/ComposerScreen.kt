@@ -57,6 +57,7 @@ fun ScoreForgeComposerScreen() {
     var activeTrackIndex by remember { mutableIntStateOf(0) }
     var projectName by remember { mutableStateOf("Untitled") }
     var selectedDuration by remember { mutableStateOf(NoteDuration.QUARTER) }
+    var selectedDotted by remember { mutableStateOf(false) }
     var bpm by remember { mutableIntStateOf(120) }
     var isPlaying by remember { mutableStateOf(false) }
     var chordMode by remember { mutableStateOf(false) }
@@ -91,6 +92,8 @@ fun ScoreForgeComposerScreen() {
 
     fun currentTrack(): ScoreTrack = tracks[activeIndex()]
 
+    fun selectedInputBeats(): Float = selectedDuration.effectiveBeats(selectedDotted)
+
     fun replaceTrack(index: Int, updated: ScoreTrack) {
         if (index in tracks.indices) tracks[index] = updated.normalized()
     }
@@ -109,6 +112,7 @@ fun ScoreForgeComposerScreen() {
             bpm = bpm,
             cursorBeat = current.cursorBeat,
             selectedDuration = selectedDuration,
+            selectedDotted = selectedDotted,
             pianoOctaveShift = pianoOctaveShift,
             staffSharpInput = staffSharpInput,
             tracks = frozenTracks,
@@ -151,6 +155,7 @@ fun ScoreForgeComposerScreen() {
         projectName = snapshot.safeProjectName()
         bpm = snapshot.bpm.coerceIn(30, 300)
         selectedDuration = snapshot.selectedDuration
+        selectedDotted = snapshot.selectedDotted
         pianoOctaveShift = snapshot.pianoOctaveShift.coerceIn(-4, 3)
         staffSharpInput = snapshot.staffSharpInput
         chordMode = false
@@ -179,6 +184,7 @@ fun ScoreForgeComposerScreen() {
         projectName,
         bpm,
         selectedDuration,
+        selectedDotted,
         pianoOctaveShift,
         staffSharpInput,
     ) {
@@ -229,6 +235,7 @@ fun ScoreForgeComposerScreen() {
                 bpm = 120,
                 cursorBeat = 0f,
                 selectedDuration = NoteDuration.QUARTER,
+                selectedDotted = false,
                 pianoOctaveShift = 0,
                 staffSharpInput = false,
                 tracks = listOf(blankTrack),
@@ -263,15 +270,17 @@ fun ScoreForgeComposerScreen() {
         recordBeforeScoreEdit()
         val track = currentTrack()
         val quantizedStart = ScoreTimeline.quantizeBeat(startBeat)
+        val inputBeats = selectedInputBeats()
         val note = ScoreNote(
             midiPitch = pitch,
             duration = selectedDuration,
             startBeat = quantizedStart,
+            dotted = selectedDotted,
         )
         val nextCursor = when {
             advanceCursor && chordMode -> track.cursorBeat
-            advanceCursor -> quantizedStart + selectedDuration.beats
-            else -> maxOf(track.cursorBeat, quantizedStart + selectedDuration.beats)
+            advanceCursor -> quantizedStart + inputBeats
+            else -> maxOf(track.cursorBeat, quantizedStart + inputBeats)
         }
         replaceActiveTrack {
             it.copy(
@@ -296,14 +305,16 @@ fun ScoreForgeComposerScreen() {
         recordBeforeScoreEdit()
         LiveInstrumentBus.allNotesOff()
         val track = currentTrack()
+        val inputBeats = selectedInputBeats()
         val rest = ScoreRest(
             duration = selectedDuration,
             startBeat = track.cursorBeat,
+            dotted = selectedDotted,
         )
         replaceActiveTrack {
             it.copy(
                 events = it.events + rest,
-                cursorBeat = track.cursorBeat + selectedDuration.beats,
+                cursorBeat = track.cursorBeat + inputBeats,
             )
         }
     }
@@ -558,8 +569,10 @@ fun ScoreForgeComposerScreen() {
 
                 DurationSelector(
                     selected = selectedDuration,
+                    dotted = selectedDotted,
                     sharpInput = staffSharpInput,
                     onSelected = { selectedDuration = it },
+                    onToggleDotted = { selectedDotted = !selectedDotted },
                     onInsertRest = ::insertRest,
                     onToggleSharpInput = { staffSharpInput = !staffSharpInput },
                 )
@@ -647,7 +660,7 @@ fun ScoreForgeComposerScreen() {
                             replaceActiveTrack {
                                 it.copy(
                                     cursorBeat = maxOf(
-                                        it.cursorBeat + selectedDuration.beats,
+                                        it.cursorBeat + selectedInputBeats(),
                                         ScoreTimeline.endBeat(it.events),
                                     )
                                 )
@@ -735,8 +748,10 @@ private fun formatBeat(beat: Float): String =
 @Composable
 private fun DurationSelector(
     selected: NoteDuration,
+    dotted: Boolean,
     sharpInput: Boolean,
     onSelected: (NoteDuration) -> Unit,
+    onToggleDotted: () -> Unit,
     onInsertRest: () -> Unit,
     onToggleSharpInput: () -> Unit,
 ) {
@@ -756,7 +771,13 @@ private fun DurationSelector(
             }
         }
 
-        Button(onClick = onInsertRest) { Text("Rest") }
+        if (dotted) {
+            Button(onClick = onToggleDotted) { Text("Dot •") }
+        } else {
+            OutlinedButton(onClick = onToggleDotted) { Text("Dot") }
+        }
+
+        Button(onClick = onInsertRest) { Text(if (dotted) "Dotted Rest" else "Rest") }
 
         if (sharpInput) {
             Button(onClick = onToggleSharpInput) { Text("Staff ♯") }
@@ -766,10 +787,10 @@ private fun DurationSelector(
 
         Spacer(modifier = Modifier.weight(1f))
         Text(
-            if (sharpInput) {
-                "Staff tap enters sharps at tapped beat • drag to move • long-press delete"
-            } else {
-                "Staff tap enters naturals at tapped beat • drag to move • long-press delete"
+            buildString {
+                append(if (sharpInput) "Staff tap enters sharps" else "Staff tap enters naturals")
+                if (dotted) append(" • dotted input on")
+                append(" • drag to move • long-press delete")
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
