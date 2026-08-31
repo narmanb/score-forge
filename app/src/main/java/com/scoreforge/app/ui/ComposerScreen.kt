@@ -62,6 +62,7 @@ fun ScoreForgeComposerScreen() {
     var chordMode by remember { mutableStateOf(false) }
     var pianoOctaveShift by remember { mutableIntStateOf(0) }
     var staffSharpInput by remember { mutableStateOf(false) }
+    var editorMode by remember { mutableStateOf(ScoreEditorMode.STAFF) }
     var draftLoaded by remember { mutableStateOf(false) }
     var canUndo by remember { mutableStateOf(false) }
     var canRedo by remember { mutableStateOf(false) }
@@ -331,6 +332,45 @@ fun ScoreForgeComposerScreen() {
         }
     }
 
+    fun moveActiveNote(eventIndex: Int, pitch: Int, startBeat: Float) {
+        val track = currentTrack()
+        val note = track.events.getOrNull(eventIndex) as? ScoreNote ?: return
+        val updatedEvents = track.events.toMutableList().apply {
+            this[eventIndex] = note.copy(
+                midiPitch = pitch,
+                startBeat = startBeat,
+            )
+        }
+        replaceActiveTrack {
+            it.copy(
+                events = updatedEvents,
+                cursorBeat = if (chordMode) {
+                    it.cursorBeat
+                } else {
+                    ScoreTimeline.endBeat(updatedEvents)
+                },
+            )
+        }
+    }
+
+    fun moveActiveRest(eventIndex: Int, startBeat: Float) {
+        val track = currentTrack()
+        val rest = track.events.getOrNull(eventIndex) as? ScoreRest ?: return
+        val updatedEvents = track.events.toMutableList().apply {
+            this[eventIndex] = rest.copy(startBeat = startBeat)
+        }
+        replaceActiveTrack {
+            it.copy(
+                events = updatedEvents,
+                cursorBeat = if (chordMode) {
+                    it.cursorBeat
+                } else {
+                    ScoreTimeline.endBeat(updatedEvents)
+                },
+            )
+        }
+    }
+
     fun selectTrack(index: Int) {
         if (index !in tracks.indices || index == activeIndex()) return
         stopPlayback()
@@ -523,70 +563,59 @@ fun ScoreForgeComposerScreen() {
                     onToggleSharpInput = { staffSharpInput = !staffSharpInput },
                 )
 
-                ScoreStaffEditor(
-                    events = activeEvents,
-                    selectedDuration = selectedDuration,
-                    cursorBeat = activeCursorBeat,
-                    onAddPitch = { naturalPitch, tappedBeat ->
-                        val pitch = if (staffSharpInput) {
-                            PitchNames.sharpenIfAvailable(naturalPitch)
-                        } else {
-                            naturalPitch
-                        }
-                        insertNoteAt(
-                            pitch = pitch,
-                            startBeat = tappedBeat,
-                            preview = true,
-                            advanceCursor = false,
-                        )
-                    },
-                    onBeginMove = { recordBeforeScoreEdit() },
-                    onMoveNote = { eventIndex, pitch, startBeat ->
-                        val track = currentTrack()
-                        val note = track.events.getOrNull(eventIndex) as? ScoreNote
-                        if (note != null) {
-                            val updatedEvents = track.events.toMutableList().apply {
-                                this[eventIndex] = note.copy(
-                                    midiPitch = pitch,
-                                    startBeat = startBeat,
-                                )
-                            }
-                            replaceActiveTrack {
-                                it.copy(
-                                    events = updatedEvents,
-                                    cursorBeat = if (chordMode) {
-                                        it.cursorBeat
-                                    } else {
-                                        ScoreTimeline.endBeat(updatedEvents)
-                                    },
-                                )
-                            }
-                        }
-                    },
-                    onMoveRest = { eventIndex, startBeat ->
-                        val track = currentTrack()
-                        val rest = track.events.getOrNull(eventIndex) as? ScoreRest
-                        if (rest != null) {
-                            val updatedEvents = track.events.toMutableList().apply {
-                                this[eventIndex] = rest.copy(startBeat = startBeat)
-                            }
-                            replaceActiveTrack {
-                                it.copy(
-                                    events = updatedEvents,
-                                    cursorBeat = if (chordMode) {
-                                        it.cursorBeat
-                                    } else {
-                                        ScoreTimeline.endBeat(updatedEvents)
-                                    },
-                                )
-                            }
-                        }
-                    },
-                    onDeleteEvent = ::deleteEvent,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
+                EditorModeControls(
+                    mode = editorMode,
+                    onModeChanged = { editorMode = it },
                 )
+
+                when (editorMode) {
+                    ScoreEditorMode.STAFF -> ScoreStaffEditor(
+                        events = activeEvents,
+                        selectedDuration = selectedDuration,
+                        cursorBeat = activeCursorBeat,
+                        onAddPitch = { naturalPitch, tappedBeat ->
+                            val pitch = if (staffSharpInput) {
+                                PitchNames.sharpenIfAvailable(naturalPitch)
+                            } else {
+                                naturalPitch
+                            }
+                            insertNoteAt(
+                                pitch = pitch,
+                                startBeat = tappedBeat,
+                                preview = true,
+                                advanceCursor = false,
+                            )
+                        },
+                        onBeginMove = { recordBeforeScoreEdit() },
+                        onMoveNote = ::moveActiveNote,
+                        onMoveRest = ::moveActiveRest,
+                        onDeleteEvent = ::deleteEvent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                    )
+
+                    ScoreEditorMode.PIANO_ROLL -> PianoRollEditor(
+                        events = activeEvents,
+                        selectedDuration = selectedDuration,
+                        cursorBeat = activeCursorBeat,
+                        octaveShift = pianoOctaveShift,
+                        onAddPitch = { pitch, tappedBeat ->
+                            insertNoteAt(
+                                pitch = pitch,
+                                startBeat = tappedBeat,
+                                preview = true,
+                                advanceCursor = false,
+                            )
+                        },
+                        onBeginMove = { recordBeforeScoreEdit() },
+                        onMoveNote = ::moveActiveNote,
+                        onDeleteEvent = ::deleteEvent,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
+                    )
+                }
 
                 MultitouchPianoKeyboard(
                     chordMode = chordMode,
