@@ -38,4 +38,20 @@ class ScoreTimelineTest {
 
         assertEquals(20f, ScoreTimeline.visibleBeats(notes), 0.0001f)
     }
+
+    @Test
+    fun cursorCanExpandTimelineBeyondLastNote() {
+        assertEquals(
+            20f,
+            ScoreTimeline.visibleBeats(emptyList(), throughBeat = 17f),
+            0.0001f,
+        )
+    }
+
+    @Test
+    fun editingTimeSnapsToSixteenthNoteGrid() {
+        assertEquals(1.25f, ScoreTimeline.quantizeBeat(1.18f), 0.0001f)
+        assertEquals(1.0f, ScoreTimeline.quantizeBeat(1.08f), 0.0001f)
+        assertEquals(0f, ScoreTimeline.quantizeBeat(-2f), 0.0001f)
+    }
 }
