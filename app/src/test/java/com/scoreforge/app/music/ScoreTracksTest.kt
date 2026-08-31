@@ -36,13 +36,51 @@ class ScoreTracksTest {
     }
 
     @Test
-    fun normalizationRepairsCursorAndUnsafeName() {
+    fun soloRestrictsAudibleTracksAndMuteStillWins() {
+        val normal = ScoreTrack(
+            id = 1,
+            name = "Normal",
+            events = listOf(ScoreNote(61, NoteDuration.QUARTER, 0f)),
+        )
+        val solo = ScoreTrack(
+            id = 2,
+            name = "Solo",
+            solo = true,
+            events = listOf(ScoreNote(62, NoteDuration.QUARTER, 0f)),
+        )
+        val mutedSolo = ScoreTrack(
+            id = 3,
+            name = "Muted Solo",
+            muted = true,
+            solo = true,
+            events = listOf(ScoreNote(63, NoteDuration.QUARTER, 0f)),
+        )
+
+        val tracks = listOf(normal, solo, mutedSolo)
+        assertEquals(listOf(2), ScoreTracks.audibleTracks(tracks).map { it.id })
+        assertEquals(listOf(62), ScoreTracks.allNotes(tracks).map { it.midiPitch })
+    }
+
+    @Test
+    fun withoutSoloEveryUnmutedTrackIsAudible() {
+        val tracks = listOf(
+            ScoreTrack(id = 1, name = "One"),
+            ScoreTrack(id = 2, name = "Two", muted = true),
+            ScoreTrack(id = 3, name = "Three"),
+        )
+        assertEquals(listOf(1, 3), ScoreTracks.audibleTracks(tracks).map { it.id })
+    }
+
+    @Test
+    fun normalizationRepairsCursorNamePresetAndMixerValues() {
         val track = ScoreTrack(
             id = 3,
             name = "  Lead\tSynth\n ",
             cursorBeat = 0f,
             presetBank = -5,
             presetProgram = 900,
+            volume = 999,
+            pan = -999,
             events = listOf(ScoreRest(NoteDuration.HALF, startBeat = 4f)),
         ).normalized()
 
@@ -50,7 +88,10 @@ class ScoreTracksTest {
         assertEquals(6f, track.cursorBeat, 0.0001f)
         assertEquals(0, track.presetBank)
         assertEquals(127, track.presetProgram)
+        assertEquals(ScoreTrack.MAX_VOLUME, track.volume)
+        assertEquals(ScoreTrack.MIN_PAN, track.pan)
         assertFalse(track.muted)
+        assertFalse(track.solo)
         assertTrue(track.events.isNotEmpty())
     }
 }
