@@ -294,6 +294,13 @@ fun ScoreForgeComposerScreen() {
         syncHistoryButtons()
     }
 
+    fun renameActiveTrack(name: String) {
+        val safeName = name.replace('\t', ' ').replace('\n', ' ').trim().take(80)
+        if (safeName.isBlank() || safeName == currentTrack().name) return
+        recordBeforeScoreEdit()
+        replaceActiveTrack { it.copy(name = safeName) }
+    }
+
     fun toggleActiveTrackMute() {
         stopPlayback()
         LiveInstrumentBus.allNotesOff()
@@ -372,6 +379,7 @@ fun ScoreForgeComposerScreen() {
                     activeTrackIndex = safeActiveTrackIndex,
                     onSelectTrack = ::selectTrack,
                     onAddTrack = ::addTrack,
+                    onRenameTrack = ::renameActiveTrack,
                     onToggleMute = ::toggleActiveTrackMute,
                     onDeleteTrack = ::deleteActiveTrack,
                 )
