@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "com.scoreforge.app"
     compileSdk = 36
+    ndkVersion = "28.2.13676358"
 
     defaultConfig {
         applicationId = "com.scoreforge.app"
@@ -13,6 +14,12 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17"
+            }
+        }
     }
 
     buildTypes {
@@ -28,6 +35,14 @@ android {
 
     buildFeatures {
         compose = true
+        prefab = true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 }
 
@@ -37,6 +52,8 @@ dependencies {
     implementation("androidx.compose.ui:ui:1.11.4")
     implementation("androidx.compose.ui:ui-tooling-preview:1.11.4")
     implementation("androidx.compose.material3:material3:1.4.0")
+
+    implementation("net.volcanomobile.fluidsynth-android:fluidsynth-android:2.4.6")
 
     debugImplementation("androidx.compose.ui:ui-tooling:1.11.4")
 
