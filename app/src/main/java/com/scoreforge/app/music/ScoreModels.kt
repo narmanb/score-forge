@@ -1,6 +1,7 @@
 package com.scoreforge.app.music
 
 import kotlin.math.ceil
+import kotlin.math.round
 
 enum class NoteDuration(val beats: Float, val displayName: String) {
     WHOLE(4f, "Whole"),
@@ -19,18 +20,30 @@ data class ScoreNote(
 
 object ScoreTimeline {
     const val BEATS_PER_MEASURE = 4f
+    const val EDIT_GRID_BEATS = 0.25f
 
     fun endBeat(notes: List<ScoreNote>): Float =
         notes.maxOfOrNull { it.startBeat + it.duration.beats } ?: 0f
 
     fun nextBeat(notes: List<ScoreNote>): Float = endBeat(notes)
 
-    fun measureCount(notes: List<ScoreNote>): Int =
-        ceil(endBeat(notes).coerceAtLeast(BEATS_PER_MEASURE) / BEATS_PER_MEASURE).toInt()
+    fun measureCount(notes: List<ScoreNote>, throughBeat: Float = endBeat(notes)): Int {
+        val furthestBeat = maxOf(endBeat(notes), throughBeat, BEATS_PER_MEASURE)
+        return ceil(furthestBeat / BEATS_PER_MEASURE).toInt()
+    }
 
-    fun visibleBeats(notes: List<ScoreNote>, minimumMeasures: Int = 4): Float {
-        val measures = maxOf(measureCount(notes), minimumMeasures)
+    fun visibleBeats(
+        notes: List<ScoreNote>,
+        minimumMeasures: Int = 4,
+        throughBeat: Float = endBeat(notes),
+    ): Float {
+        val measures = maxOf(measureCount(notes, throughBeat), minimumMeasures)
         return measures * BEATS_PER_MEASURE
+    }
+
+    fun quantizeBeat(beat: Float, gridBeats: Float = EDIT_GRID_BEATS): Float {
+        if (gridBeats <= 0f) return beat.coerceAtLeast(0f)
+        return (round(beat.coerceAtLeast(0f) / gridBeats) * gridBeats).coerceAtLeast(0f)
     }
 }
 
