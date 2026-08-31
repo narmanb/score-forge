@@ -89,7 +89,11 @@ fun ScoreStaffEditor(
                         when (event) {
                             is ScoreNote -> onMoveNote(
                                 draggingEventIndex,
-                                pitchFromY(change.position.y, size.height.toFloat()),
+                                pitchFromY(
+                                    y = change.position.y,
+                                    height = size.height.toFloat(),
+                                    preferSharp = PitchNames.hasSharp(event.midiPitch),
+                                ),
                                 movedBeat,
                             )
 
@@ -173,6 +177,10 @@ private fun DrawScope.drawScoreNote(
     val y = noteY(note.midiPitch, staffBottom, lineSpacing)
     drawLedgerLines(x, y, staffTop, staffBottom, lineSpacing)
 
+    if (PitchNames.hasSharp(note.midiPitch)) {
+        drawSharpAccidental(x = x - 20f, y = y)
+    }
+
     val filled = note.duration != NoteDuration.WHOLE && note.duration != NoteDuration.HALF
     if (filled) {
         drawOval(
@@ -209,6 +217,14 @@ private fun DrawScope.drawScoreNote(
             }
         }
     }
+}
+
+private fun DrawScope.drawSharpAccidental(x: Float, y: Float) {
+    val ink = Color(0xFF111111)
+    drawLine(ink, Offset(x - 3f, y - 12f), Offset(x - 5f, y + 12f), 2.2f)
+    drawLine(ink, Offset(x + 4f, y - 12f), Offset(x + 2f, y + 12f), 2.2f)
+    drawLine(ink, Offset(x - 8f, y - 4f), Offset(x + 7f, y - 7f), 2.5f)
+    drawLine(ink, Offset(x - 9f, y + 5f), Offset(x + 6f, y + 2f), 2.5f)
 }
 
 private fun DrawScope.drawScoreRest(
@@ -299,7 +315,7 @@ private fun noteY(midiPitch: Int, staffBottom: Float, lineSpacing: Float): Float
     return staffBottom - steps * (lineSpacing / 2f)
 }
 
-private fun pitchFromY(y: Float, height: Float): Int {
+private fun pitchFromY(y: Float, height: Float, preferSharp: Boolean = false): Int {
     val staffTop = height * 0.24f
     val lineSpacing = height * 0.11f
     val staffBottom = staffTop + lineSpacing * 4f
@@ -310,7 +326,11 @@ private fun pitchFromY(y: Float, height: Float): Int {
     var bestDistance = Int.MAX_VALUE
     for (pitch in 36..96) {
         val distance = abs(PitchNames.diatonicPosition(pitch) - target)
-        if (distance < bestDistance || (distance == bestDistance && !PitchNames.hasSharp(pitch))) {
+        val pitchIsSharp = PitchNames.hasSharp(pitch)
+        val bestIsSharp = PitchNames.hasSharp(bestPitch)
+        val preferredSpelling = if (preferSharp) pitchIsSharp && !bestIsSharp else !pitchIsSharp && bestIsSharp
+
+        if (distance < bestDistance || (distance == bestDistance && preferredSpelling)) {
             bestDistance = distance
             bestPitch = pitch
         }
