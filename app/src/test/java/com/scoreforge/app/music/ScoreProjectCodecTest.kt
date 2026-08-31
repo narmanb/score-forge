@@ -27,7 +27,7 @@ class ScoreProjectCodecTest {
     }
 
     @Test
-    fun versionTwoRoundTripPreservesMultipleTracksPresetsAndProjectName() {
+    fun versionTwoRoundTripPreservesTracksPresetsMixerAndProjectName() {
         val tracks = listOf(
             ScoreTrack(
                 id = 1,
@@ -36,6 +36,8 @@ class ScoreProjectCodecTest {
                 cursorBeat = 1f,
                 presetBank = 0,
                 presetProgram = 0,
+                volume = 87,
+                pan = -22,
             ),
             ScoreTrack(
                 id = 2,
@@ -48,6 +50,9 @@ class ScoreProjectCodecTest {
                 presetBank = 2,
                 presetProgram = 41,
                 muted = true,
+                solo = true,
+                volume = 119,
+                pan = 31,
             ),
         )
         val original = ScoreProjectSnapshot(
@@ -66,12 +71,15 @@ class ScoreProjectCodecTest {
         assertEquals(2, decoded.tracks[1].presetBank)
         assertEquals(41, decoded.tracks[1].presetProgram)
         assertTrue(decoded.tracks[1].muted)
+        assertTrue(decoded.tracks[1].solo)
+        assertEquals(119, decoded.tracks[1].volume)
+        assertEquals(31, decoded.tracks[1].pan)
         assertEquals("Boss Theme", decoded.projectName)
         assertEquals(original, decoded)
     }
 
     @Test
-    fun projectNameIsSanitizedAndOldV2WithoutNameDefaultsToUntitled() {
+    fun projectNameIsSanitizedAndOldV2WithoutMixerDefaultsSafely() {
         val dirty = ScoreProjectSnapshot(
             events = emptyList(),
             projectName = "  My\tSong\nName  ",
@@ -90,6 +98,9 @@ class ScoreProjectCodecTest {
         )
         requireNotNull(oldV2)
         assertEquals("Untitled", oldV2.projectName)
+        assertFalse(oldV2.tracks.single().solo)
+        assertEquals(ScoreTrack.DEFAULT_VOLUME, oldV2.tracks.single().volume)
+        assertEquals(ScoreTrack.CENTER_PAN, oldV2.tracks.single().pan)
     }
 
     @Test
