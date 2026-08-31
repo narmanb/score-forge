@@ -17,6 +17,7 @@ internal object NativeFluidSynth {
         program: Int,
     ): Int
     external fun programChange(handle: Long, channel: Int, program: Int): Int
+    external fun controlChange(handle: Long, channel: Int, controller: Int, value: Int): Int
     external fun noteOn(handle: Long, channel: Int, key: Int, velocity: Int): Int
     external fun noteOff(handle: Long, channel: Int, key: Int): Int
     external fun allNotesOff(handle: Long, channel: Int)
