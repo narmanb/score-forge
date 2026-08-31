@@ -63,6 +63,7 @@ fun ScoreForgeComposerScreen() {
     var pianoOctaveShift by remember { mutableIntStateOf(0) }
     var staffSharpInput by remember { mutableStateOf(false) }
     var editorMode by remember { mutableStateOf(ScoreEditorMode.STAFF) }
+    var showPianoKeyboard by remember { mutableStateOf(true) }
     var draftLoaded by remember { mutableStateOf(false) }
     var canUndo by remember { mutableStateOf(false) }
     var canRedo by remember { mutableStateOf(false) }
@@ -565,7 +566,12 @@ fun ScoreForgeComposerScreen() {
 
                 EditorModeControls(
                     mode = editorMode,
+                    showPianoKeyboard = showPianoKeyboard,
                     onModeChanged = { editorMode = it },
+                    onTogglePianoKeyboard = {
+                        LiveInstrumentBus.allNotesOff()
+                        showPianoKeyboard = !showPianoKeyboard
+                    },
                 )
 
                 when (editorMode) {
@@ -617,48 +623,50 @@ fun ScoreForgeComposerScreen() {
                     )
                 }
 
-                MultitouchPianoKeyboard(
-                    chordMode = chordMode,
-                    octaveShift = pianoOctaveShift,
-                    onToggleChordMode = {
-                        LiveInstrumentBus.allNotesOff()
-                        val track = currentTrack()
-                        if (chordMode) {
-                            chordMode = false
-                            replaceActiveTrack {
-                                it.copy(cursorBeat = maxOf(it.cursorBeat, ScoreTimeline.endBeat(it.events)))
+                if (showPianoKeyboard) {
+                    MultitouchPianoKeyboard(
+                        chordMode = chordMode,
+                        octaveShift = pianoOctaveShift,
+                        onToggleChordMode = {
+                            LiveInstrumentBus.allNotesOff()
+                            val track = currentTrack()
+                            if (chordMode) {
+                                chordMode = false
+                                replaceActiveTrack {
+                                    it.copy(cursorBeat = maxOf(it.cursorBeat, ScoreTimeline.endBeat(it.events)))
+                                }
+                            } else {
+                                chordMode = true
+                                replaceActiveTrack {
+                                    it.copy(cursorBeat = ScoreTimeline.endBeat(track.events))
+                                }
                             }
-                        } else {
-                            chordMode = true
+                        },
+                        onAdvanceChord = {
+                            LiveInstrumentBus.allNotesOff()
                             replaceActiveTrack {
-                                it.copy(cursorBeat = ScoreTimeline.endBeat(track.events))
-                            }
-                        }
-                    },
-                    onAdvanceChord = {
-                        LiveInstrumentBus.allNotesOff()
-                        replaceActiveTrack {
-                            it.copy(
-                                cursorBeat = maxOf(
-                                    it.cursorBeat + selectedDuration.beats,
-                                    ScoreTimeline.endBeat(it.events),
+                                it.copy(
+                                    cursorBeat = maxOf(
+                                        it.cursorBeat + selectedDuration.beats,
+                                        ScoreTimeline.endBeat(it.events),
+                                    )
                                 )
-                            )
-                        }
-                    },
-                    onOctaveDown = { changePianoOctave(-1) },
-                    onOctaveUp = { changePianoOctave(1) },
-                    onPitchDown = { pitch ->
-                        insertStepNote(pitch, preview = false)
-                        if (!LiveInstrumentBus.noteOn(pitch, velocity = 96)) {
-                            playback.previewPitch(pitch)
-                        }
-                    },
-                    onPitchUp = { pitch -> LiveInstrumentBus.noteOff(pitch) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(150.dp),
-                )
+                            }
+                        },
+                        onOctaveDown = { changePianoOctave(-1) },
+                        onOctaveUp = { changePianoOctave(1) },
+                        onPitchDown = { pitch ->
+                            insertStepNote(pitch, preview = false)
+                            if (!LiveInstrumentBus.noteOn(pitch, velocity = 96)) {
+                                playback.previewPitch(pitch)
+                            }
+                        },
+                        onPitchUp = { pitch -> LiveInstrumentBus.noteOff(pitch) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(120.dp),
+                    )
+                }
             }
         }
     }
