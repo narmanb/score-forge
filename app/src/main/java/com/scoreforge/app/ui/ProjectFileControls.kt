@@ -53,7 +53,7 @@ fun ProjectFileControls(
             status = "Saving…"
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    context.contentResolver.openOutputStream(uri, "wt").use { output ->
+                    context.contentResolver.openOutputStream(uri, "w").use { output ->
                         requireNotNull(output) { "Could not open the selected file for writing." }
                         output.bufferedWriter().use { writer ->
                             writer.write(ScoreProjectCodec.encode(snapshot))
