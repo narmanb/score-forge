@@ -1,5 +1,7 @@
 package com.scoreforge.app.music
 
+import kotlin.math.ceil
+
 enum class NoteDuration(val beats: Float, val displayName: String) {
     WHOLE(4f, "Whole"),
     HALF(2f, "Half"),
@@ -11,8 +13,26 @@ enum class NoteDuration(val beats: Float, val displayName: String) {
 data class ScoreNote(
     val midiPitch: Int,
     val duration: NoteDuration,
+    val startBeat: Float = 0f,
     val velocity: Int = 96,
 )
+
+object ScoreTimeline {
+    const val BEATS_PER_MEASURE = 4f
+
+    fun endBeat(notes: List<ScoreNote>): Float =
+        notes.maxOfOrNull { it.startBeat + it.duration.beats } ?: 0f
+
+    fun nextBeat(notes: List<ScoreNote>): Float = endBeat(notes)
+
+    fun measureCount(notes: List<ScoreNote>): Int =
+        ceil(endBeat(notes).coerceAtLeast(BEATS_PER_MEASURE) / BEATS_PER_MEASURE).toInt()
+
+    fun visibleBeats(notes: List<ScoreNote>, minimumMeasures: Int = 4): Float {
+        val measures = maxOf(measureCount(notes), minimumMeasures)
+        return measures * BEATS_PER_MEASURE
+    }
+}
 
 object PitchNames {
     private val names = arrayOf("C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B")
