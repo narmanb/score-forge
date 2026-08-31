@@ -32,9 +32,9 @@ jobs:
 
       - name: Install stable development signing key
         run: |
-          mkdir -p "$HOME/.android"
-          base64 --decode ci/score-forge-dev.keystore.b64 > "$HOME/.android/debug.keystore"
-          chmod 600 "$HOME/.android/debug.keystore"
+          mkdir -p "$HOME/.config/.android"
+          base64 --decode ci/score-forge-dev.keystore.b64 > "$HOME/.config/.android/debug.keystore"
+          chmod 600 "$HOME/.config/.android/debug.keystore"
 
       - name: Set up Gradle 9.5
         uses: gradle/actions/setup-gradle@v4
