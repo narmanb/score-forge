@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.ScoreNote
+import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
 import com.scoreforge.app.music.ScoreTrack
 import com.scoreforge.app.music.ScoreTracks
@@ -182,11 +183,7 @@ class ScorePlaybackEngine {
                     .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
                     .setSampleRate(sampleRate)
                     .setChannelMask(
-                        if (channels == 2) {
-                            AudioFormat.CHANNEL_OUT_STEREO
-                        } else {
-                            AudioFormat.CHANNEL_OUT_MONO
-                        }
+                        if (channels == 2) AudioFormat.CHANNEL_OUT_STEREO else AudioFormat.CHANNEL_OUT_MONO
                     )
                     .build()
             )
@@ -203,7 +200,7 @@ class ScorePlaybackEngine {
         try {
             track.release()
         } catch (_: Exception) {
-            // AudioTrack.release() is best-effort during rapid transport changes.
+            // Best-effort during rapid transport changes.
         }
     }
 
@@ -230,10 +227,15 @@ class ScorePlaybackEngine {
             val panAngle = ((panNorm + 1f) * (PI.toFloat() / 4f)).coerceIn(0f, PI.toFloat() / 2f)
             val leftGain = cos(panAngle) * volumeGain
             val rightGain = sin(panAngle) * volumeGain
+            val notes = track.notes
 
-            track.notes.forEach { note ->
+            notes.forEachIndexed { index, note ->
+                if (ScoreTies.isContinuation(notes, index)) return@forEachIndexed
+                val end = ScoreTies.chainEndBeat(notes, index).takeIf { it > note.startBeat }
+                    ?: (note.startBeat + note.effectiveBeats)
                 renderFallbackNote(
                     note = note,
+                    durationBeats = end - note.startBeat,
                     secondsPerBeat = secondsPerBeat,
                     left = left,
                     right = right,
@@ -244,9 +246,7 @@ class ScorePlaybackEngine {
         }
 
         var peak = 0f
-        for (i in left.indices) {
-            peak = maxOf(peak, kotlin.math.abs(left[i]), kotlin.math.abs(right[i]))
-        }
+        for (i in left.indices) peak = maxOf(peak, kotlin.math.abs(left[i]), kotlin.math.abs(right[i]))
         val normalization = if (peak > 0.92f) 0.92f / peak else 1f
 
         return ShortArray(totalFrames * 2) { sampleIndex ->
@@ -259,6 +259,7 @@ class ScorePlaybackEngine {
 
     private fun renderFallbackNote(
         note: ScoreNote,
+        durationBeats: Float,
         secondsPerBeat: Float,
         left: FloatArray,
         right: FloatArray,
@@ -266,7 +267,7 @@ class ScorePlaybackEngine {
         rightGain: Float,
     ) {
         val startSample = (note.startBeat * secondsPerBeat * sampleRate).toInt()
-        val noteSeconds = note.effectiveBeats * secondsPerBeat
+        val noteSeconds = durationBeats.coerceAtLeast(0.001f) * secondsPerBeat
         val noteSamples = (noteSeconds * sampleRate).toInt().coerceAtLeast(1)
         val frequency = 440.0 * Math.pow(2.0, (note.midiPitch - 69) / 12.0)
         val velocityGain = note.velocity.coerceIn(1, 127) / 127f
@@ -306,9 +307,12 @@ class ScorePlaybackEngine {
         val totalSamples = (totalSeconds * sampleRate).toInt().coerceAtLeast(1)
         val mix = FloatArray(totalSamples)
 
-        notes.forEach { note ->
+        notes.forEachIndexed { index, note ->
+            if (ScoreTies.isContinuation(notes, index)) return@forEachIndexed
+            val chainEnd = ScoreTies.chainEndBeat(notes, index).takeIf { it > note.startBeat }
+                ?: (note.startBeat + note.effectiveBeats)
             val startSample = (note.startBeat * secondsPerBeat * sampleRate).toInt()
-            val noteSeconds = note.effectiveBeats * secondsPerBeat
+            val noteSeconds = (chainEnd - note.startBeat) * secondsPerBeat
             val noteSamples = (noteSeconds * sampleRate).toInt().coerceAtLeast(1)
             val frequency = 440.0 * Math.pow(2.0, (note.midiPitch - 69) / 12.0)
             val velocityGain = note.velocity.coerceIn(1, 127) / 127f
@@ -316,19 +320,16 @@ class ScorePlaybackEngine {
             for (i in 0 until noteSamples) {
                 val target = startSample + i
                 if (target !in mix.indices) break
-
                 val t = i.toFloat() / sampleRate
                 val remaining = (noteSamples - i).toFloat() / sampleRate
                 val attack = (t / 0.012f).coerceIn(0f, 1f)
                 val release = (remaining / 0.07f).coerceIn(0f, 1f)
                 val decay = exp((-1.8f * t).toDouble()).toFloat()
                 val phase = 2.0 * PI * frequency * t
-
                 val timbre =
                     sin(phase).toFloat() * 0.72f +
                         sin(phase * 2.0).toFloat() * 0.20f +
                         sin(phase * 3.0).toFloat() * 0.08f
-
                 mix[target] += timbre * attack * release * decay * velocityGain * 0.55f
             }
         }
