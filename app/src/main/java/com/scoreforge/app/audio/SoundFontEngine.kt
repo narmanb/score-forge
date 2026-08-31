@@ -1,6 +1,7 @@
 package com.scoreforge.app.audio
 
 import com.scoreforge.app.music.ScoreNote
+import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
 import com.scoreforge.app.music.ScoreTrack
 import com.scoreforge.app.music.ScoreTracks
@@ -15,12 +16,6 @@ data class SoundFontPreset(
         get() = if (bank == 0) name else "$name (bank $bank)"
 }
 
-/**
- * Thin managed wrapper around the native FluidSynth instance.
- *
- * A caller provides a local filesystem path to an .sf2/.sf3 file. Score Forge then enumerates
- * the presets actually present in that file rather than assuming a General MIDI-only layout.
- */
 class SoundFontEngine private constructor(
     val sampleRate: Int,
     private var handle: Long,
@@ -153,7 +148,6 @@ class SoundFontEngine private constructor(
         if (handle != 0L) NativeFluidSynth.allNotesOff(handle, channel.coerceIn(0, 15))
     }
 
-    /** Returns interleaved stereo 16-bit PCM: L, R, L, R... */
     fun renderStereo(frames: Int): ShortArray = synchronized(lock) {
         if (handle == 0L || soundFontId < 0 || frames <= 0) {
             ShortArray(0)
@@ -162,10 +156,6 @@ class SoundFontEngine private constructor(
         }
     }
 
-    /**
-     * Offline-renders the current SoundFont/preset for a score. [throughBeat] can extend the
-     * rendered transport beyond the final sounding note, which preserves explicit trailing rests.
-     */
     fun renderScore(
         notes: List<ScoreNote>,
         bpm: Int,
@@ -189,10 +179,6 @@ class SoundFontEngine private constructor(
         )
     }
 
-    /**
-     * Renders up to 16 audible tracks at once, one MIDI channel per track. Each track may request
-     * its own bank/program and carries independent volume/pan mixer controls.
-     */
     fun renderTracks(
         tracks: List<ScoreTrack>,
         bpm: Int,
@@ -271,13 +257,16 @@ class SoundFontEngine private constructor(
         val events = buildList {
             channelNotes.forEach { channelTrack ->
                 val channel = channelTrack.channel.coerceIn(0, 15)
-                channelTrack.notes.forEach { note ->
+                val notes = channelTrack.notes
+                notes.forEachIndexed { index, note ->
+                    val suppressOn = ScoreTies.isContinuation(notes, index)
+                    val suppressOff = ScoreTies.hasValidTie(notes, index)
                     val onFrame = (note.startBeat * secondsPerBeat * sampleRate).toInt().coerceAtLeast(0)
                     val offFrame = (
                         (note.startBeat + note.effectiveBeats) * secondsPerBeat * sampleRate
                         ).toInt().coerceAtLeast(onFrame + 1)
-                    add(MidiEvent(onFrame, true, note.midiPitch, note.velocity, channel))
-                    add(MidiEvent(offFrame, false, note.midiPitch, 0, channel))
+                    if (!suppressOn) add(MidiEvent(onFrame, true, note.midiPitch, note.velocity, channel))
+                    if (!suppressOff) add(MidiEvent(offFrame, false, note.midiPitch, 0, channel))
                 }
             }
         }.sortedWith(
