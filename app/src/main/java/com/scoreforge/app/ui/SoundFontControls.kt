@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.scoreforge.app.audio.ImportedSoundFont
 import com.scoreforge.app.audio.SoundFontEngine
 import com.scoreforge.app.audio.SoundFontRepository
 import com.scoreforge.app.audio.SoundFontPreset
@@ -31,6 +32,8 @@ import kotlin.concurrent.thread
 @Composable
 fun SoundFontControls(
     engine: SoundFontEngine?,
+    onSoundFontLoaded: (ImportedSoundFont, SoundFontPreset?) -> Unit = { _, _ -> },
+    onPresetSelected: (SoundFontPreset) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -59,6 +62,7 @@ fun SoundFontControls(
             val loaded = importedFile != null && engine.loadSoundFont(importedFile.localPath)
             val discoveredPresets = if (loaded) engine.presets else emptyList()
             val discoveredIndex = if (loaded) engine.selectedPresetIndex() else -1
+            val selectedPreset = if (loaded) engine.selectedPreset else null
             val error = imported.exceptionOrNull()?.message
 
             mainHandler.post {
@@ -68,9 +72,10 @@ fun SoundFontControls(
                     presets = discoveredPresets
                     presetIndex = discoveredIndex
                     status = when {
-                        discoveredPresets.isNotEmpty() -> "${discoveredPresets.size} presets"
+                        discoveredPresets.isNotEmpty() -> "${discoveredPresets.size} presets • live piano readying"
                         else -> "Loaded • default program"
                     }
+                    onSoundFontLoaded(importedFile, selectedPreset)
                 } else {
                     status = error ?: "FluidSynth could not load that SoundFont"
                 }
@@ -83,6 +88,7 @@ fun SoundFontControls(
         if (engine.selectPresetAt(index)) {
             presetIndex = index
             status = "${presets.size} presets"
+            onPresetSelected(presets[index])
         }
     }
 
