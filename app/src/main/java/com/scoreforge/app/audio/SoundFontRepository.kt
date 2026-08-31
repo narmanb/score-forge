@@ -10,7 +10,20 @@ data class ImportedSoundFont(
     val localPath: String,
 )
 
+data class SavedSoundFontSelection(
+    val soundFont: ImportedSoundFont,
+    val bank: Int?,
+    val program: Int?,
+)
+
 object SoundFontRepository {
+    private const val PREFS_NAME = "score_forge_soundfont"
+    private const val KEY_PATH = "active_path"
+    private const val KEY_NAME = "active_name"
+    private const val KEY_BANK = "active_bank"
+    private const val KEY_PROGRAM = "active_program"
+    private const val NO_PRESET = -1
+
     fun importToAppStorage(context: Context, uri: Uri): Result<ImportedSoundFont> = runCatching {
         val displayName = queryDisplayName(context, uri)
             ?.takeIf { it.isNotBlank() }
@@ -42,6 +55,59 @@ object SoundFontRepository {
             displayName = destination.name,
             localPath = destination.absolutePath,
         )
+    }
+
+    fun saveActiveSelection(
+        context: Context,
+        soundFont: ImportedSoundFont,
+        preset: SoundFontPreset?,
+    ) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putString(KEY_PATH, soundFont.localPath)
+            .putString(KEY_NAME, soundFont.displayName)
+            .putInt(KEY_BANK, preset?.bank ?: NO_PRESET)
+            .putInt(KEY_PROGRAM, preset?.program ?: NO_PRESET)
+            .apply()
+    }
+
+    fun loadActiveSelection(context: Context): SavedSoundFontSelection? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val path = prefs.getString(KEY_PATH, null)?.takeIf { it.isNotBlank() } ?: return null
+        val file = File(path)
+
+        if (!file.isFile) {
+            clearActiveSelection(context)
+            return null
+        }
+
+        if (!file.name.endsWith(".sf2", ignoreCase = true) &&
+            !file.name.endsWith(".sf3", ignoreCase = true)
+        ) {
+            clearActiveSelection(context)
+            return null
+        }
+
+        val bank = prefs.getInt(KEY_BANK, NO_PRESET).takeIf { it >= 0 }
+        val program = prefs.getInt(KEY_PROGRAM, NO_PRESET).takeIf { it >= 0 }
+
+        return SavedSoundFontSelection(
+            soundFont = ImportedSoundFont(
+                displayName = prefs.getString(KEY_NAME, file.name)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: file.name,
+                localPath = file.absolutePath,
+            ),
+            bank = bank,
+            program = program,
+        )
+    }
+
+    fun clearActiveSelection(context: Context) {
+        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .clear()
+            .apply()
     }
 
     private fun queryDisplayName(context: Context, uri: Uri): String? {
