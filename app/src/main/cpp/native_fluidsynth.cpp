@@ -1,6 +1,7 @@
 #include <jni.h>
 #include <fluidsynth.h>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace {
@@ -78,6 +79,71 @@ Java_com_scoreforge_app_audio_NativeFluidSynth_loadSoundFont(
     return result;
 }
 
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_com_scoreforge_app_audio_NativeFluidSynth_listPresets(
+    JNIEnv* env,
+    jobject,
+    jlong handle,
+    jint soundFontId
+) {
+    auto* engine = fromHandle(handle);
+    jclass stringClass = env->FindClass("java/lang/String");
+    if (engine == nullptr || engine->synth == nullptr || stringClass == nullptr) {
+        return env->NewObjectArray(0, stringClass, nullptr);
+    }
+
+    fluid_sfont_t* sfont = fluid_synth_get_sfont_by_id(engine->synth, soundFontId);
+    if (sfont == nullptr) return env->NewObjectArray(0, stringClass, nullptr);
+
+    std::vector<std::string> rows;
+    fluid_sfont_iteration_start(sfont);
+    while (fluid_preset_t* preset = fluid_sfont_iteration_next(sfont)) {
+        const int bank = fluid_preset_get_banknum(preset);
+        const int program = fluid_preset_get_num(preset);
+        const char* name = fluid_preset_get_name(preset);
+        rows.emplace_back(
+            std::to_string(bank) + "\t" +
+            std::to_string(program) + "\t" +
+            (name != nullptr ? name : "Unnamed preset")
+        );
+    }
+
+    jobjectArray output = env->NewObjectArray(
+        static_cast<jsize>(rows.size()),
+        stringClass,
+        nullptr
+    );
+    if (output == nullptr) return nullptr;
+
+    for (jsize i = 0; i < static_cast<jsize>(rows.size()); ++i) {
+        jstring value = env->NewStringUTF(rows[static_cast<size_t>(i)].c_str());
+        env->SetObjectArrayElement(output, i, value);
+        env->DeleteLocalRef(value);
+    }
+    return output;
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_scoreforge_app_audio_NativeFluidSynth_selectPreset(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint soundFontId,
+    jint channel,
+    jint bank,
+    jint program
+) {
+    auto* engine = fromHandle(handle);
+    if (engine == nullptr || engine->synth == nullptr) return FLUID_FAILED;
+    return fluid_synth_program_select(
+        engine->synth,
+        channel,
+        soundFontId,
+        bank,
+        program
+    );
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_scoreforge_app_audio_NativeFluidSynth_programChange(
     JNIEnv*,
@@ -127,7 +193,7 @@ Java_com_scoreforge_app_audio_NativeFluidSynth_allNotesOff(
 ) {
     auto* engine = fromHandle(handle);
     if (engine == nullptr || engine->synth == nullptr) return;
-    fluid_synth_cc(engine->synth, channel, 123, 0);
+    fluid_synth_all_notes_off(engine->synth, channel);
 }
 
 extern "C" JNIEXPORT jshortArray JNICALL
