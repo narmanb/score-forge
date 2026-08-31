@@ -274,7 +274,7 @@ class SoundFontEngine private constructor(
                 channelTrack.notes.forEach { note ->
                     val onFrame = (note.startBeat * secondsPerBeat * sampleRate).toInt().coerceAtLeast(0)
                     val offFrame = (
-                        (note.startBeat + note.duration.beats) * secondsPerBeat * sampleRate
+                        (note.startBeat + note.effectiveBeats) * secondsPerBeat * sampleRate
                         ).toInt().coerceAtLeast(onFrame + 1)
                     add(MidiEvent(onFrame, true, note.midiPitch, note.velocity, channel))
                     add(MidiEvent(offFrame, false, note.midiPitch, 0, channel))
