@@ -14,6 +14,7 @@ data class ScoreProjectSnapshot(
     val bpm: Int = 120,
     val cursorBeat: Float = ScoreTimeline.endBeat(events),
     val selectedDuration: NoteDuration = NoteDuration.QUARTER,
+    val pianoOctaveShift: Int = 0,
 )
 
 object ScoreProjectCodec {
@@ -25,6 +26,7 @@ object ScoreProjectCodec {
         append("BPM\t").append(snapshot.bpm.coerceIn(30, 300)).append('\n')
         append("CURSOR\t").append(snapshot.cursorBeat.coerceAtLeast(0f)).append('\n')
         append("DURATION\t").append(snapshot.selectedDuration.name).append('\n')
+        append("PIANO_OCTAVE\t").append(snapshot.pianoOctaveShift.coerceIn(-4, 3)).append('\n')
 
         snapshot.events.forEach { event ->
             when (event) {
@@ -49,6 +51,7 @@ object ScoreProjectCodec {
         var bpm = 120
         var cursorBeat = 0f
         var selectedDuration = NoteDuration.QUARTER
+        var pianoOctaveShift = 0
         val events = mutableListOf<ScoreEvent>()
 
         lines.drop(1).forEach { line ->
@@ -59,6 +62,9 @@ object ScoreProjectCodec {
                     cursorBeat = it.coerceAtLeast(0f)
                 }
                 "DURATION" -> parseDuration(parts.getOrNull(1))?.let { selectedDuration = it }
+                "PIANO_OCTAVE" -> parts.getOrNull(1)?.toIntOrNull()?.let {
+                    pianoOctaveShift = it.coerceIn(-4, 3)
+                }
                 "N" -> decodeNote(parts)?.let(events::add)
                 "R" -> decodeRest(parts)?.let(events::add)
             }
@@ -69,6 +75,7 @@ object ScoreProjectCodec {
             bpm = bpm,
             cursorBeat = maxOf(cursorBeat, ScoreTimeline.endBeat(events)),
             selectedDuration = selectedDuration,
+            pianoOctaveShift = pianoOctaveShift,
         )
     }
 
