@@ -16,6 +16,28 @@ class ScoreTimelineTest {
     }
 
     @Test
+    fun restsAreFirstClassTimelineEvents() {
+        val events: List<ScoreEvent> = listOf(
+            ScoreNote(60, NoteDuration.QUARTER, startBeat = 0f),
+            ScoreRest(NoteDuration.HALF, startBeat = 1f),
+            ScoreNote(67, NoteDuration.EIGHTH, startBeat = 3f),
+        )
+
+        assertEquals(3.5f, ScoreTimeline.endBeat(events), 0.0001f)
+    }
+
+    @Test
+    fun trailingRestExtendsScoreAndMeasureCount() {
+        val events: List<ScoreEvent> = listOf(
+            ScoreNote(60, NoteDuration.QUARTER, startBeat = 0f),
+            ScoreRest(NoteDuration.WHOLE, startBeat = 4f),
+        )
+
+        assertEquals(8f, ScoreTimeline.endBeat(events), 0.0001f)
+        assertEquals(2, ScoreTimeline.measureCount(events))
+    }
+
+    @Test
     fun measureCountRoundsUpToWholeMeasures() {
         val notes = listOf(
             ScoreNote(60, NoteDuration.QUARTER, startBeat = 4f),
