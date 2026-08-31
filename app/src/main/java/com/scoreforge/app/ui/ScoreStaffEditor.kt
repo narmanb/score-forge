@@ -40,6 +40,7 @@ fun ScoreStaffEditor(
     selectedDuration: NoteDuration,
     cursorBeat: Float,
     onAddPitch: (Int) -> Unit,
+    onBeginMove: (eventIndex: Int) -> Unit,
     onMoveNote: (eventIndex: Int, pitch: Int, startBeat: Float) -> Unit,
     onMoveRest: (eventIndex: Int, startBeat: Float) -> Unit,
     onDeleteEvent: (eventIndex: Int) -> Unit,
@@ -85,6 +86,7 @@ fun ScoreStaffEditor(
                                 height = size.height.toFloat(),
                                 visibleBeats = visibleBeats,
                             )
+                            if (draggingEventIndex >= 0) onBeginMove(draggingEventIndex)
                         },
                         onDragEnd = { draggingEventIndex = -1 },
                         onDragCancel = { draggingEventIndex = -1 },
