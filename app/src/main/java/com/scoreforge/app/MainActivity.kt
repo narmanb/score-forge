@@ -47,10 +47,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.scoreforge.app.audio.ScorePlaybackEngine
+import com.scoreforge.app.audio.SoundFontEngine
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreTimeline
+import com.scoreforge.app.ui.SoundFontControls
 import kotlin.math.abs
 
 class MainActivity : ComponentActivity() {
@@ -64,14 +66,20 @@ class MainActivity : ComponentActivity() {
 private fun ScoreForgeApp() {
     val notes = remember { mutableStateListOf<ScoreNote>() }
     val playback = remember { ScorePlaybackEngine() }
+    val soundFontEngine = remember { SoundFontEngine.createOrNull() }
     var selectedDuration by remember { mutableStateOf(NoteDuration.QUARTER) }
     var bpm by remember { mutableIntStateOf(120) }
     var isPlaying by remember { mutableStateOf(false) }
     var cursorBeat by remember { mutableStateOf(0f) }
     var chordMode by remember { mutableStateOf(false) }
 
-    DisposableEffect(Unit) {
-        onDispose { playback.release() }
+    DisposableEffect(playback, soundFontEngine) {
+        playback.setSoundFontEngine(soundFontEngine)
+        onDispose {
+            playback.setSoundFontEngine(null)
+            playback.release()
+            soundFontEngine?.close()
+        }
     }
 
     fun addNote(pitch: Int) {
@@ -122,6 +130,8 @@ private fun ScoreForgeApp() {
                         cursorBeat = 0f
                     },
                 )
+
+                SoundFontControls(engine = soundFontEngine)
 
                 DurationSelector(
                     selected = selectedDuration,
