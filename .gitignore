@@ -12,6 +12,9 @@ local.properties
 *.apk
 *.aab
 
+# Development signing output
+ci/*.keystore
+
 # Native build outputs
 .externalNativeBuild/
 .cxx/
