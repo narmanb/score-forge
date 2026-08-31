@@ -33,6 +33,8 @@ import com.scoreforge.app.audio.ScorePlaybackEngine
 import com.scoreforge.app.audio.SoundFontEngine
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
+import com.scoreforge.app.music.ScoreEditHistory
+import com.scoreforge.app.music.ScoreEditState
 import com.scoreforge.app.music.ScoreEvent
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreProjectRepository
@@ -49,6 +51,7 @@ fun ScoreForgeComposerScreen() {
     val events = remember { mutableStateListOf<ScoreEvent>() }
     val playback = remember { ScorePlaybackEngine() }
     val soundFontEngine = remember { SoundFontEngine.createOrNull() }
+    val editHistory = remember { ScoreEditHistory() }
     var selectedDuration by remember { mutableStateOf(NoteDuration.QUARTER) }
     var bpm by remember { mutableIntStateOf(120) }
     var isPlaying by remember { mutableStateOf(false) }
@@ -57,10 +60,33 @@ fun ScoreForgeComposerScreen() {
     var pianoOctaveShift by remember { mutableIntStateOf(0) }
     var staffSharpInput by remember { mutableStateOf(false) }
     var draftLoaded by remember { mutableStateOf(false) }
+    var canUndo by remember { mutableStateOf(false) }
+    var canRedo by remember { mutableStateOf(false) }
 
     val noteCount = events.count { it is ScoreNote }
     val restCount = events.count { it is ScoreRest }
     val draftEvents = events.toList()
+
+    fun syncHistoryButtons() {
+        canUndo = editHistory.canUndo
+        canRedo = editHistory.canRedo
+    }
+
+    fun currentEditState(): ScoreEditState = ScoreEditState(
+        events = events.toList(),
+        cursorBeat = cursorBeat,
+    )
+
+    fun recordBeforeScoreEdit() {
+        editHistory.recordBeforeChange(currentEditState())
+        syncHistoryButtons()
+    }
+
+    fun restoreEditState(state: ScoreEditState) {
+        events.clear()
+        events.addAll(state.events)
+        cursorBeat = state.cursorBeat
+    }
 
     LaunchedEffect(Unit) {
         val restored = withContext(Dispatchers.IO) {
@@ -75,6 +101,8 @@ fun ScoreForgeComposerScreen() {
             pianoOctaveShift = restored.pianoOctaveShift
             staffSharpInput = restored.staffSharpInput
         }
+        editHistory.clear()
+        syncHistoryButtons()
         draftLoaded = true
     }
 
@@ -112,7 +140,29 @@ fun ScoreForgeComposerScreen() {
         }
     }
 
+    fun stopPlayback() {
+        playback.stop()
+        isPlaying = false
+    }
+
+    fun undoScore() {
+        stopPlayback()
+        LiveInstrumentBus.allNotesOff()
+        val restored = editHistory.undo(currentEditState()) ?: return
+        restoreEditState(restored)
+        syncHistoryButtons()
+    }
+
+    fun redoScore() {
+        stopPlayback()
+        LiveInstrumentBus.allNotesOff()
+        val restored = editHistory.redo(currentEditState()) ?: return
+        restoreEditState(restored)
+        syncHistoryButtons()
+    }
+
     fun insertNote(pitch: Int, preview: Boolean) {
+        recordBeforeScoreEdit()
         events.add(
             ScoreNote(
                 midiPitch = pitch,
@@ -125,6 +175,7 @@ fun ScoreForgeComposerScreen() {
     }
 
     fun insertRest() {
+        recordBeforeScoreEdit()
         LiveInstrumentBus.allNotesOff()
         events.add(
             ScoreRest(
@@ -133,11 +184,6 @@ fun ScoreForgeComposerScreen() {
             )
         )
         cursorBeat += selectedDuration.beats
-    }
-
-    fun stopPlayback() {
-        playback.stop()
-        isPlaying = false
     }
 
     fun changePianoOctave(delta: Int) {
@@ -149,6 +195,7 @@ fun ScoreForgeComposerScreen() {
         stopPlayback()
         LiveInstrumentBus.allNotesOff()
         if (eventIndex in events.indices) {
+            recordBeforeScoreEdit()
             events.removeAt(eventIndex)
             if (!chordMode) cursorBeat = ScoreTimeline.endBeat(events)
         }
@@ -164,6 +211,8 @@ fun ScoreForgeComposerScreen() {
                     bpm = bpm,
                     cursorBeat = cursorBeat,
                     isPlaying = isPlaying,
+                    canUndo = canUndo,
+                    canRedo = canRedo,
                     onTempoDown = { bpm = (bpm - 5).coerceAtLeast(30) },
                     onTempoUp = { bpm = (bpm + 5).coerceAtMost(300) },
                     onPlay = {
@@ -178,19 +227,16 @@ fun ScoreForgeComposerScreen() {
                         }
                     },
                     onStop = ::stopPlayback,
-                    onUndo = {
-                        stopPlayback()
-                        LiveInstrumentBus.allNotesOff()
-                        if (events.isNotEmpty()) {
-                            events.removeAt(events.lastIndex)
-                            if (!chordMode) cursorBeat = ScoreTimeline.endBeat(events)
-                        }
-                    },
+                    onUndo = ::undoScore,
+                    onRedo = ::redoScore,
                     onClear = {
-                        stopPlayback()
-                        LiveInstrumentBus.allNotesOff()
-                        events.clear()
-                        cursorBeat = 0f
+                        if (events.isNotEmpty()) {
+                            stopPlayback()
+                            LiveInstrumentBus.allNotesOff()
+                            recordBeforeScoreEdit()
+                            events.clear()
+                            cursorBeat = 0f
+                        }
                     },
                 )
 
@@ -216,6 +262,7 @@ fun ScoreForgeComposerScreen() {
                         }
                         insertNote(pitch, preview = true)
                     },
+                    onBeginMove = { recordBeforeScoreEdit() },
                     onMoveNote = { eventIndex, pitch, startBeat ->
                         val note = events.getOrNull(eventIndex) as? ScoreNote
                         if (note != null) {
@@ -285,11 +332,14 @@ private fun HeaderBar(
     bpm: Int,
     cursorBeat: Float,
     isPlaying: Boolean,
+    canUndo: Boolean,
+    canRedo: Boolean,
     onTempoDown: () -> Unit,
     onTempoUp: () -> Unit,
     onPlay: () -> Unit,
     onStop: () -> Unit,
     onUndo: () -> Unit,
+    onRedo: () -> Unit,
     onClear: () -> Unit,
 ) {
     val eventCount = noteCount + restCount
@@ -321,7 +371,8 @@ private fun HeaderBar(
             Button(onClick = onPlay, enabled = noteCount > 0) { Text("Play") }
         }
 
-        OutlinedButton(onClick = onUndo, enabled = eventCount > 0) { Text("Undo") }
+        OutlinedButton(onClick = onUndo, enabled = canUndo) { Text("Undo") }
+        OutlinedButton(onClick = onRedo, enabled = canRedo) { Text("Redo") }
         OutlinedButton(onClick = onClear, enabled = eventCount > 0) { Text("Clear") }
     }
 }
