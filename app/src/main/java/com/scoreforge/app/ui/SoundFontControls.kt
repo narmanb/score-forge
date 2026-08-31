@@ -5,11 +5,14 @@ import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -43,6 +46,7 @@ fun SoundFontControls(
     var currentSoundFont by remember { mutableStateOf<ImportedSoundFont?>(null) }
     var presets by remember { mutableStateOf<List<SoundFontPreset>>(emptyList()) }
     var presetIndex by remember { mutableIntStateOf(-1) }
+    var presetMenuExpanded by remember { mutableStateOf(false) }
     var status by remember {
         mutableStateOf(
             if (engine == null) "Native SoundFont engine unavailable" else "Built-in preview synth"
@@ -60,6 +64,7 @@ fun SoundFontControls(
         currentSoundFont = soundFont
         presets = discoveredPresets
         presetIndex = discoveredIndex
+        presetMenuExpanded = false
         status = when {
             restored && discoveredPresets.isNotEmpty() ->
                 "Restored • ${discoveredPresets.size} presets • live piano ready"
@@ -116,6 +121,7 @@ fun SoundFontControls(
         if (uri == null || engine == null) return@rememberLauncherForActivityResult
 
         isImporting = true
+        presetMenuExpanded = false
         status = "Importing SoundFont…"
 
         thread(name = "ScoreForgeSoundFontImport", isDaemon = true) {
@@ -182,10 +188,34 @@ fun SoundFontControls(
                 Text("◀")
             }
 
-            Text(
-                text = presets.getOrNull(presetIndex)?.displayName ?: "Preset",
-                style = MaterialTheme.typography.labelLarge,
-            )
+            Box {
+                OutlinedButton(onClick = { presetMenuExpanded = true }) {
+                    val selectedName = presets.getOrNull(presetIndex)?.displayName ?: "Choose preset"
+                    val position = if (presetIndex in presets.indices) {
+                        "${presetIndex + 1}/${presets.size}"
+                    } else {
+                        presets.size.toString()
+                    }
+                    Text("$selectedName • $position")
+                }
+
+                DropdownMenu(
+                    expanded = presetMenuExpanded,
+                    onDismissRequest = { presetMenuExpanded = false },
+                ) {
+                    presets.forEachIndexed { index, preset ->
+                        DropdownMenuItem(
+                            text = {
+                                Text("${index + 1}. ${preset.displayName}")
+                            },
+                            onClick = {
+                                selectPreset(index)
+                                presetMenuExpanded = false
+                            },
+                        )
+                    }
+                }
+            }
 
             OutlinedButton(
                 onClick = { selectPreset((presetIndex + 1).coerceAtMost(presets.lastIndex)) },
