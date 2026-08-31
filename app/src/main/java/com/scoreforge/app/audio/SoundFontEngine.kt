@@ -59,8 +59,6 @@ class SoundFontEngine private constructor(
                 return@synchronized false
             }
         } else {
-            // Some minimal SoundFonts do not expose iterable preset metadata. Keep bank/program 0
-            // as a compatibility fallback rather than rejecting a file FluidSynth loaded correctly.
             NativeFluidSynth.programChange(handle, 0, 0)
             activePreset = SoundFontPreset(0, 0, "Program 1")
         }
@@ -131,13 +129,14 @@ class SoundFontEngine private constructor(
     }
 
     /**
-     * Offline-renders the current SoundFont/preset for a score. Long-term playback can become
-     * streamed; this deterministic renderer is sufficient for the first real-instrument layer.
+     * Offline-renders the current SoundFont/preset for a score. [throughBeat] can extend the
+     * rendered transport beyond the final sounding note, which preserves explicit trailing rests.
      */
     fun renderScore(
         notes: List<ScoreNote>,
         bpm: Int,
         tailSeconds: Float = 0.45f,
+        throughBeat: Float = ScoreTimeline.endBeat(notes),
     ): ShortArray = synchronized(lock) {
         if (handle == 0L || soundFontId < 0 || notes.isEmpty()) return@synchronized ShortArray(0)
 
@@ -150,8 +149,9 @@ class SoundFontEngine private constructor(
 
         val safeBpm = bpm.coerceIn(30, 300)
         val secondsPerBeat = 60f / safeBpm
+        val scoreEndBeat = maxOf(ScoreTimeline.endBeat(notes), throughBeat.coerceAtLeast(0f))
         val totalFrames = (
-            (ScoreTimeline.endBeat(notes) * secondsPerBeat + tailSeconds.coerceAtLeast(0f)) * sampleRate
+            (scoreEndBeat * secondsPerBeat + tailSeconds.coerceAtLeast(0f)) * sampleRate
             ).toInt().coerceAtLeast(1)
 
         val events = buildList {
