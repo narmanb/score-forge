@@ -4,12 +4,20 @@ import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreTimeline
 import java.io.Closeable
 
+data class SoundFontPreset(
+    val bank: Int,
+    val program: Int,
+    val name: String,
+) {
+    val displayName: String
+        get() = if (bank == 0) name else "$name (bank $bank)"
+}
+
 /**
  * Thin managed wrapper around the native FluidSynth instance.
  *
- * This class deliberately does not own Android UI or file-picker behavior. A caller provides
- * a local filesystem path to an .sf2/.sf3 file, then uses MIDI-style note/program operations
- * and pulls stereo PCM frames for playback through Android AudioTrack.
+ * A caller provides a local filesystem path to an .sf2/.sf3 file. Score Forge then enumerates
+ * the presets actually present in that file rather than assuming a General MIDI-only layout.
  */
 class SoundFontEngine private constructor(
     val sampleRate: Int,
@@ -17,28 +25,73 @@ class SoundFontEngine private constructor(
 ) : Closeable {
     private val lock = Any()
     private var soundFontId: Int = -1
+    private var loadedPresets: List<SoundFontPreset> = emptyList()
+    private var activePreset: SoundFontPreset? = null
 
     val hasSoundFont: Boolean
         get() = synchronized(lock) { soundFontId >= 0 }
 
+    val presets: List<SoundFontPreset>
+        get() = synchronized(lock) { loadedPresets.toList() }
+
+    val selectedPreset: SoundFontPreset?
+        get() = synchronized(lock) { activePreset }
+
     fun loadSoundFont(path: String): Boolean = synchronized(lock) {
         if (handle == 0L) return@synchronized false
+
         soundFontId = NativeFluidSynth.loadSoundFont(handle, path)
-        if (soundFontId >= 0) {
-            NativeFluidSynth.programChange(handle, 0, 0)
-            true
-        } else {
-            false
+        if (soundFontId < 0) {
+            loadedPresets = emptyList()
+            activePreset = null
+            return@synchronized false
         }
+
+        loadedPresets = NativeFluidSynth.listPresets(handle, soundFontId)
+            .mapNotNull(::parsePresetRow)
+            .sortedWith(compareBy<SoundFontPreset> { it.bank }.thenBy { it.program }.thenBy { it.name })
+
+        val first = loadedPresets.firstOrNull()
+        if (first != null) {
+            val selected = selectPresetLocked(first, channel = 0)
+            if (!selected) {
+                activePreset = null
+                return@synchronized false
+            }
+        } else {
+            // Some minimal SoundFonts do not expose iterable preset metadata. Keep bank/program 0
+            // as a compatibility fallback rather than rejecting a file FluidSynth loaded correctly.
+            NativeFluidSynth.programChange(handle, 0, 0)
+            activePreset = SoundFontPreset(0, 0, "Program 1")
+        }
+        true
     }
 
-    fun selectProgram(program: Int, channel: Int = 0): Boolean = synchronized(lock) {
-        if (handle == 0L || soundFontId < 0) return@synchronized false
-        NativeFluidSynth.programChange(
-            handle,
-            channel.coerceIn(0, 15),
-            program.coerceIn(0, 127),
-        ) == 0
+    fun selectPreset(preset: SoundFontPreset, channel: Int = 0): Boolean = synchronized(lock) {
+        selectPresetLocked(preset, channel)
+    }
+
+    fun selectPresetAt(index: Int, channel: Int = 0): Boolean = synchronized(lock) {
+        val preset = loadedPresets.getOrNull(index) ?: return@synchronized false
+        selectPresetLocked(preset, channel)
+    }
+
+    fun selectedPresetIndex(): Int = synchronized(lock) {
+        val selected = activePreset ?: return@synchronized -1
+        loadedPresets.indexOf(selected)
+    }
+
+    private fun selectPresetLocked(preset: SoundFontPreset, channel: Int): Boolean {
+        if (handle == 0L || soundFontId < 0) return false
+        val result = NativeFluidSynth.selectPreset(
+            handle = handle,
+            soundFontId = soundFontId,
+            channel = channel.coerceIn(0, 15),
+            bank = preset.bank.coerceAtLeast(0),
+            program = preset.program.coerceIn(0, 127),
+        )
+        if (result == 0) activePreset = preset
+        return result == 0
     }
 
     fun noteOn(
@@ -78,10 +131,8 @@ class SoundFontEngine private constructor(
     }
 
     /**
-     * Offline-renders the current SoundFont/program for a score. Keeping the entire scheduling
-     * pass under one lock prevents program changes or preview notes from corrupting the render.
-     * Long-term playback can become streamed; this is intentionally simple and deterministic
-     * for the first SoundFont milestone.
+     * Offline-renders the current SoundFont/preset for a score. Long-term playback can become
+     * streamed; this deterministic renderer is sufficient for the first real-instrument layer.
      */
     fun renderScore(
         notes: List<ScoreNote>,
@@ -119,6 +170,8 @@ class SoundFontEngine private constructor(
         )
 
         NativeFluidSynth.allNotesOff(handle, 0)
+        activePreset?.let { selectPresetLocked(it, channel = 0) }
+
         val output = ShortArray(totalFrames * 2)
         var frameCursor = 0
         var eventIndex = 0
@@ -163,7 +216,21 @@ class SoundFontEngine private constructor(
             NativeFluidSynth.destroy(handle)
             handle = 0L
             soundFontId = -1
+            loadedPresets = emptyList()
+            activePreset = null
         }
+    }
+
+    private fun parsePresetRow(row: String): SoundFontPreset? {
+        val parts = row.split('\t', limit = 3)
+        if (parts.size != 3) return null
+        val bank = parts[0].toIntOrNull() ?: return null
+        val program = parts[1].toIntOrNull() ?: return null
+        return SoundFontPreset(
+            bank = bank,
+            program = program,
+            name = parts[2].ifBlank { "Bank $bank Program ${program + 1}" },
+        )
     }
 
     companion object {
