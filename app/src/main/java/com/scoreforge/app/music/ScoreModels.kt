@@ -100,6 +100,23 @@ object ScoreTies {
         }
     }
 
+    fun isContinuation(events: List<ScoreEvent>, noteIndex: Int): Boolean =
+        incomingTieSourceIndex(events, noteIndex) != null
+
+    fun chainEndBeat(events: List<ScoreEvent>, rootIndex: Int): Float {
+        val root = events.getOrNull(rootIndex) as? ScoreNote ?: return 0f
+        var currentIndex = rootIndex
+        var endBeat = root.startBeat + root.effectiveBeats
+        val visited = mutableSetOf<Int>()
+        while (visited.add(currentIndex) && hasValidTie(events, currentIndex)) {
+            val nextIndex = targetIndex(events, currentIndex) ?: break
+            val next = events.getOrNull(nextIndex) as? ScoreNote ?: break
+            endBeat = maxOf(endBeat, next.startBeat + next.effectiveBeats)
+            currentIndex = nextIndex
+        }
+        return endBeat
+    }
+
     fun canToggle(events: List<ScoreEvent>, sourceIndex: Int): Boolean =
         events.getOrNull(sourceIndex) is ScoreNote &&
             ((events[sourceIndex] as ScoreNote).tieToNext || targetIndex(events, sourceIndex) != null)
