@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -39,7 +40,7 @@ fun SoundFontControls(
 ) {
     val context = LocalContext.current
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
-    var soundFontName by remember { mutableStateOf<String?>(null) }
+    var currentSoundFont by remember { mutableStateOf<ImportedSoundFont?>(null) }
     var presets by remember { mutableStateOf<List<SoundFontPreset>>(emptyList()) }
     var presetIndex by remember { mutableIntStateOf(-1) }
     var status by remember {
@@ -48,6 +49,66 @@ fun SoundFontControls(
         )
     }
     var isImporting by remember { mutableStateOf(false) }
+
+    fun publishLoadedSoundFont(
+        soundFont: ImportedSoundFont,
+        discoveredPresets: List<SoundFontPreset>,
+        discoveredIndex: Int,
+        selectedPreset: SoundFontPreset?,
+        restored: Boolean,
+    ) {
+        currentSoundFont = soundFont
+        presets = discoveredPresets
+        presetIndex = discoveredIndex
+        status = when {
+            restored && discoveredPresets.isNotEmpty() ->
+                "Restored • ${discoveredPresets.size} presets • live piano ready"
+            restored -> "Restored • default program"
+            discoveredPresets.isNotEmpty() -> "${discoveredPresets.size} presets • live piano ready"
+            else -> "Loaded • default program"
+        }
+
+        SoundFontRepository.saveActiveSelection(context, soundFont, selectedPreset)
+        LiveInstrumentBus.loadSoundFont(soundFont, selectedPreset)
+        onSoundFontLoaded(soundFont, selectedPreset)
+    }
+
+    LaunchedEffect(engine) {
+        if (engine == null) return@LaunchedEffect
+        val saved = SoundFontRepository.loadActiveSelection(context) ?: return@LaunchedEffect
+
+        isImporting = true
+        status = "Restoring ${saved.soundFont.displayName}…"
+
+        thread(name = "ScoreForgeSoundFontRestore", isDaemon = true) {
+            val loaded = engine.loadSoundFont(saved.soundFont.localPath)
+            if (loaded && saved.bank != null && saved.program != null) {
+                engine.presets
+                    .firstOrNull { it.bank == saved.bank && it.program == saved.program }
+                    ?.let(engine::selectPreset)
+            }
+
+            val discoveredPresets = if (loaded) engine.presets else emptyList()
+            val discoveredIndex = if (loaded) engine.selectedPresetIndex() else -1
+            val selectedPreset = if (loaded) engine.selectedPreset else null
+
+            mainHandler.post {
+                isImporting = false
+                if (loaded) {
+                    publishLoadedSoundFont(
+                        soundFont = saved.soundFont,
+                        discoveredPresets = discoveredPresets,
+                        discoveredIndex = discoveredIndex,
+                        selectedPreset = selectedPreset,
+                        restored = true,
+                    )
+                } else {
+                    SoundFontRepository.clearActiveSelection(context)
+                    status = "Saved SoundFont could not be restored"
+                }
+            }
+        }
+    }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument(),
@@ -69,16 +130,13 @@ fun SoundFontControls(
             mainHandler.post {
                 isImporting = false
                 if (loaded) {
-                    val loadedFile = checkNotNull(importedFile)
-                    soundFontName = loadedFile.displayName
-                    presets = discoveredPresets
-                    presetIndex = discoveredIndex
-                    status = when {
-                        discoveredPresets.isNotEmpty() -> "${discoveredPresets.size} presets • live piano ready"
-                        else -> "Loaded • default program"
-                    }
-                    LiveInstrumentBus.loadSoundFont(loadedFile, selectedPreset)
-                    onSoundFontLoaded(loadedFile, selectedPreset)
+                    publishLoadedSoundFont(
+                        soundFont = checkNotNull(importedFile),
+                        discoveredPresets = discoveredPresets,
+                        discoveredIndex = discoveredIndex,
+                        selectedPreset = selectedPreset,
+                        restored = false,
+                    )
                 } else {
                     status = error ?: "FluidSynth could not load that SoundFont"
                 }
@@ -90,9 +148,13 @@ fun SoundFontControls(
         if (engine == null || index !in presets.indices) return
         if (engine.selectPresetAt(index)) {
             presetIndex = index
+            val selected = presets[index]
             status = "${presets.size} presets"
-            LiveInstrumentBus.selectPreset(presets[index])
-            onPresetSelected(presets[index])
+            currentSoundFont?.let {
+                SoundFontRepository.saveActiveSelection(context, it, selected)
+            }
+            LiveInstrumentBus.selectPreset(selected)
+            onPresetSelected(selected)
         }
     }
 
@@ -109,7 +171,7 @@ fun SoundFontControls(
             onClick = { launcher.launch(arrayOf("audio/*", "application/octet-stream", "*/*")) },
             enabled = engine != null && !isImporting,
         ) {
-            Text(if (soundFontName == null) "Import SoundFont" else "Change SoundFont")
+            Text(if (currentSoundFont == null) "Import SoundFont" else "Change SoundFont")
         }
 
         if (presets.isNotEmpty()) {
@@ -131,14 +193,14 @@ fun SoundFontControls(
             ) {
                 Text("▶")
             }
-        } else if (soundFontName != null) {
+        } else if (currentSoundFont != null) {
             Text("Default program", style = MaterialTheme.typography.labelLarge)
         }
 
         Spacer(modifier = Modifier.weight(1f))
         Text(
             text = buildString {
-                if (soundFontName != null) append(soundFontName).append(" • ")
+                currentSoundFont?.let { append(it.displayName).append(" • ") }
                 append(status)
             },
             style = MaterialTheme.typography.bodySmall,
