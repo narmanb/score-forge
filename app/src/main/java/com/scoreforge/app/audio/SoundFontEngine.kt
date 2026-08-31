@@ -64,6 +64,7 @@ class SoundFontEngine private constructor(
             NativeFluidSynth.programChange(handle, 0, 0)
             activePreset = SoundFontPreset(0, 0, "Program 1")
         }
+        setChannelMixerLocked(channel = 0, volume = ScoreTrack.DEFAULT_VOLUME, pan = ScoreTrack.CENTER_PAN)
         true
     }
 
@@ -97,6 +98,32 @@ class SoundFontEngine private constructor(
             bank = preset.bank.coerceAtLeast(0),
             program = preset.program.coerceIn(0, 127),
         ) == 0
+    }
+
+    fun setChannelMixer(
+        volume: Int,
+        pan: Int,
+        channel: Int = 0,
+    ): Boolean = synchronized(lock) {
+        setChannelMixerLocked(channel, volume, pan)
+    }
+
+    private fun setChannelMixerLocked(channel: Int, volume: Int, pan: Int): Boolean {
+        if (handle == 0L || soundFontId < 0) return false
+        val safeChannel = channel.coerceIn(0, 15)
+        val volumeResult = NativeFluidSynth.controlChange(
+            handle,
+            safeChannel,
+            MIDI_CC_VOLUME,
+            volume.coerceIn(ScoreTrack.MIN_VOLUME, ScoreTrack.MAX_VOLUME),
+        )
+        val panResult = NativeFluidSynth.controlChange(
+            handle,
+            safeChannel,
+            MIDI_CC_PAN,
+            (pan.coerceIn(ScoreTrack.MIN_PAN, ScoreTrack.MAX_PAN) + 64).coerceIn(0, 127),
+        )
+        return volumeResult == 0 && panResult == 0
     }
 
     fun noteOn(
@@ -147,7 +174,15 @@ class SoundFontEngine private constructor(
     ): ShortArray = synchronized(lock) {
         if (handle == 0L || soundFontId < 0 || notes.isEmpty()) return@synchronized ShortArray(0)
         renderMidiEventsLocked(
-            channelNotes = listOf(ChannelNotes(channel = 0, notes = notes, preset = activePreset)),
+            channelNotes = listOf(
+                ChannelNotes(
+                    channel = 0,
+                    notes = notes,
+                    preset = activePreset,
+                    volume = ScoreTrack.DEFAULT_VOLUME,
+                    pan = ScoreTrack.CENTER_PAN,
+                )
+            ),
             bpm = bpm,
             tailSeconds = tailSeconds,
             throughBeat = throughBeat,
@@ -155,9 +190,8 @@ class SoundFontEngine private constructor(
     }
 
     /**
-     * Renders up to 16 unmuted tracks at once, one MIDI channel per track. Each track may request
-     * its own bank/program from the loaded SoundFont. Missing/invalid requests fall back to the
-     * currently selected preset so old projects remain audible.
+     * Renders up to 16 audible tracks at once, one MIDI channel per track. Each track may request
+     * its own bank/program and carries independent volume/pan mixer controls.
      */
     fun renderTracks(
         tracks: List<ScoreTrack>,
@@ -168,8 +202,7 @@ class SoundFontEngine private constructor(
         if (handle == 0L || soundFontId < 0) return@synchronized ShortArray(0)
 
         val originalPreset = activePreset
-        val channelNotes = tracks
-            .filterNot { it.muted }
+        val channelNotes = ScoreTracks.audibleTracks(tracks)
             .take(ScoreTracks.MAX_TRACKS)
             .mapIndexedNotNull { channel, track ->
                 if (track.notes.isEmpty()) return@mapIndexedNotNull null
@@ -184,6 +217,8 @@ class SoundFontEngine private constructor(
                     channel = channel,
                     notes = track.notes,
                     preset = requestedPreset ?: originalPreset ?: loadedPresets.firstOrNull(),
+                    volume = track.volume,
+                    pan = track.pan,
                 )
             }
 
@@ -199,6 +234,7 @@ class SoundFontEngine private constructor(
             selectPresetOnChannelLocked(it, channel = 0)
             activePreset = it
         }
+        setChannelMixerLocked(channel = 0, volume = ScoreTrack.DEFAULT_VOLUME, pan = ScoreTrack.CENTER_PAN)
         pcm
     }
 
@@ -206,6 +242,8 @@ class SoundFontEngine private constructor(
         val channel: Int,
         val notes: List<ScoreNote>,
         val preset: SoundFontPreset?,
+        val volume: Int,
+        val pan: Int,
     )
 
     private data class MidiEvent(
@@ -252,6 +290,7 @@ class SoundFontEngine private constructor(
         repeat(16) { NativeFluidSynth.allNotesOff(handle, it) }
         channelNotes.forEach { track ->
             track.preset?.let { selectPresetOnChannelLocked(it, track.channel) }
+            setChannelMixerLocked(track.channel, track.volume, track.pan)
         }
 
         val output = ShortArray(totalFrames * 2)
@@ -320,6 +359,9 @@ class SoundFontEngine private constructor(
     }
 
     companion object {
+        private const val MIDI_CC_VOLUME = 7
+        private const val MIDI_CC_PAN = 10
+
         fun createOrNull(sampleRate: Int = 44_100): SoundFontEngine? = try {
             val handle = NativeFluidSynth.create(sampleRate)
             if (handle == 0L) null else SoundFontEngine(sampleRate, handle)
