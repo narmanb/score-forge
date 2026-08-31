@@ -41,6 +41,7 @@ fun ScoreStaffEditor(
     cursorBeat: Float,
     onAddPitch: (Int) -> Unit,
     onMoveNote: (eventIndex: Int, pitch: Int, startBeat: Float) -> Unit,
+    onMoveRest: (eventIndex: Int, startBeat: Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var draggingEventIndex by remember { mutableIntStateOf(-1) }
@@ -64,7 +65,7 @@ fun ScoreStaffEditor(
                 .pointerInput(events.size, visibleBeats) {
                     detectDragGestures(
                         onDragStart = { position ->
-                            draggingEventIndex = nearestNoteEventIndex(
+                            draggingEventIndex = nearestEditableEventIndex(
                                 events = events,
                                 point = position,
                                 width = size.width.toFloat(),
@@ -75,22 +76,24 @@ fun ScoreStaffEditor(
                         onDragEnd = { draggingEventIndex = -1 },
                         onDragCancel = { draggingEventIndex = -1 },
                     ) { change, _ ->
-                        val note = events.getOrNull(draggingEventIndex) as? ScoreNote
-                        if (note != null) {
-                            val latestStart = (visibleBeats - note.duration.beats).coerceAtLeast(0f)
-                            val movedBeat = ScoreTimeline.quantizeBeat(
-                                beatFromX(
-                                    x = change.position.x,
-                                    visibleBeats = visibleBeats,
-                                    width = size.width.toFloat(),
-                                )
-                            ).coerceIn(0f, latestStart)
+                        val event = events.getOrNull(draggingEventIndex) ?: return@detectDragGestures
+                        val latestStart = (visibleBeats - event.duration.beats).coerceAtLeast(0f)
+                        val movedBeat = ScoreTimeline.quantizeBeat(
+                            beatFromX(
+                                x = change.position.x,
+                                visibleBeats = visibleBeats,
+                                width = size.width.toFloat(),
+                            )
+                        ).coerceIn(0f, latestStart)
 
-                            onMoveNote(
+                        when (event) {
+                            is ScoreNote -> onMoveNote(
                                 draggingEventIndex,
                                 pitchFromY(change.position.y, size.height.toFloat()),
                                 movedBeat,
                             )
+
+                            is ScoreRest -> onMoveRest(draggingEventIndex, movedBeat)
                         }
                     }
                 },
@@ -220,7 +223,6 @@ private fun DrawScope.drawScoreRest(
 
     when (rest.duration) {
         NoteDuration.WHOLE -> {
-            // Whole rest hangs below the fourth staff line.
             val lineY = staffTop + lineSpacing
             drawRect(
                 color = ink,
@@ -230,7 +232,6 @@ private fun DrawScope.drawScoreRest(
         }
 
         NoteDuration.HALF -> {
-            // Half rest sits on top of the middle staff line.
             drawRect(
                 color = ink,
                 topLeft = Offset(x - 9f, middleY - 6f),
@@ -317,7 +318,7 @@ private fun pitchFromY(y: Float, height: Float): Int {
     return bestPitch
 }
 
-private fun nearestNoteEventIndex(
+private fun nearestEditableEventIndex(
     events: List<ScoreEvent>,
     point: Offset,
     width: Float,
@@ -327,13 +328,18 @@ private fun nearestNoteEventIndex(
     val staffTop = height * 0.24f
     val lineSpacing = height * 0.11f
     val staffBottom = staffTop + lineSpacing * 4f
+    val restY = staffTop + lineSpacing * 2f
 
     var nearest = -1
     var bestDistanceSquared = Float.MAX_VALUE
     events.forEachIndexed { index, event ->
-        val note = event as? ScoreNote ?: return@forEachIndexed
-        val dx = point.x - beatX(note.startBeat + 0.10f, visibleBeats, width)
-        val dy = point.y - noteY(note.midiPitch, staffBottom, lineSpacing)
+        val x = beatX(event.startBeat + 0.10f, visibleBeats, width)
+        val y = when (event) {
+            is ScoreNote -> noteY(event.midiPitch, staffBottom, lineSpacing)
+            is ScoreRest -> restY
+        }
+        val dx = point.x - x
+        val dy = point.y - y
         val distanceSquared = dx * dx + dy * dy
         if (distanceSquared < bestDistanceSquared) {
             bestDistanceSquared = distanceSquared
