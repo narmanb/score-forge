@@ -116,7 +116,7 @@ fun PianoRollEditor(
                             highPitch = highPitch,
                             height = size.height.toFloat(),
                         )
-                        val latestStart = (visibleBeats - note.duration.beats).coerceAtLeast(0f)
+                        val latestStart = (visibleBeats - note.effectiveBeats).coerceAtLeast(0f)
                         val startBeat = ScoreTimeline.quantizeBeat(
                             PianoRollMapping.beatAtX(
                                 x = change.position.x,
@@ -269,7 +269,7 @@ private fun noteRect(
     val rowHeight = PianoRollMapping.rowHeight(height, lowPitch, highPitch)
     val centerY = PianoRollMapping.yCenterForPitch(note.midiPitch, lowPitch, highPitch, height)
     val x0 = PianoRollMapping.xAtBeat(note.startBeat, visibleBeats, width)
-    val x1 = PianoRollMapping.xAtBeat(note.startBeat + note.duration.beats, visibleBeats, width)
+    val x1 = PianoRollMapping.xAtBeat(note.startBeat + note.effectiveBeats, visibleBeats, width)
     return Rect(
         left = x0 + 1f,
         top = centerY - rowHeight * 0.40f,
