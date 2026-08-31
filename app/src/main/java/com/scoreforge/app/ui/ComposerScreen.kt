@@ -40,6 +40,7 @@ import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreProjectRepository
 import com.scoreforge.app.music.ScoreProjectSnapshot
 import com.scoreforge.app.music.ScoreRest
+import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
 import com.scoreforge.app.music.ScoreTrack
 import com.scoreforge.app.music.ScoreTracks
@@ -55,6 +56,7 @@ fun ScoreForgeComposerScreen() {
     val soundFontEngine = remember { SoundFontEngine.createOrNull() }
     val editHistory = remember { ScoreEditHistory() }
     var activeTrackIndex by remember { mutableIntStateOf(0) }
+    var selectedEventIndex by remember { mutableIntStateOf(-1) }
     var projectName by remember { mutableStateOf("Untitled") }
     var selectedDuration by remember { mutableStateOf(NoteDuration.QUARTER) }
     var selectedDotted by remember { mutableStateOf(false) }
@@ -79,9 +81,12 @@ fun ScoreForgeComposerScreen() {
     val draftTracks = tracks.map { it.copy(events = it.events.toList()) }
     val arrangementEndBeat = tracks.maxOfOrNull { ScoreTimeline.endBeat(it.events) } ?: 0f
     val audibleTracks = ScoreTracks.audibleTracks(tracks)
-    val playableNoteCount = audibleTracks.sumOf { track ->
-        track.events.count { it is ScoreNote }
-    }
+    val playableNoteCount = audibleTracks.sumOf { track -> track.events.count { it is ScoreNote } }
+    val selectedEvent = activeEvents.getOrNull(selectedEventIndex)
+    val selectedTieActive =
+        (selectedEvent as? ScoreNote)?.tieToNext == true &&
+            ScoreTies.hasValidTie(activeEvents, selectedEventIndex)
+    val canTieSelected = ScoreTies.canToggle(activeEvents, selectedEventIndex)
 
     fun syncHistoryButtons() {
         canUndo = editHistory.canUndo
@@ -89,9 +94,7 @@ fun ScoreForgeComposerScreen() {
     }
 
     fun activeIndex(): Int = activeTrackIndex.coerceIn(0, tracks.lastIndex)
-
     fun currentTrack(): ScoreTrack = tracks[activeIndex()]
-
     fun selectedInputBeats(): Float = selectedDuration.effectiveBeats(selectedDotted)
 
     fun replaceTrack(index: Int, updated: ScoreTrack) {
@@ -144,6 +147,7 @@ fun ScoreForgeComposerScreen() {
         tracks.clear()
         tracks.addAll(restoredTracks)
         activeTrackIndex = state.activeTrackIndex.coerceIn(0, tracks.lastIndex)
+        selectedEventIndex = -1
         mixerGestureHistoryRecorded = false
     }
 
@@ -152,6 +156,7 @@ fun ScoreForgeComposerScreen() {
         tracks.clear()
         tracks.addAll(restoredTracks)
         activeTrackIndex = snapshot.effectiveActiveTrackIndex()
+        selectedEventIndex = -1
         projectName = snapshot.safeProjectName()
         bpm = snapshot.bpm.coerceIn(30, 300)
         selectedDuration = snapshot.selectedDuration
@@ -165,9 +170,7 @@ fun ScoreForgeComposerScreen() {
     }
 
     LaunchedEffect(Unit) {
-        val restored = withContext(Dispatchers.IO) {
-            ScoreProjectRepository.loadDraft(context)
-        }
+        val restored = withContext(Dispatchers.IO) { ScoreProjectRepository.loadDraft(context) }
         if (restored != null) {
             applyProjectSnapshot(restored, clearHistory = true)
         } else {
@@ -191,9 +194,7 @@ fun ScoreForgeComposerScreen() {
         if (!draftLoaded || draftTracks.isEmpty()) return@LaunchedEffect
         delay(250L)
         val snapshot = currentProjectSnapshot()
-        withContext(Dispatchers.IO) {
-            ScoreProjectRepository.saveDraft(context, snapshot)
-        }
+        withContext(Dispatchers.IO) { ScoreProjectRepository.saveDraft(context, snapshot) }
     }
 
     LaunchedEffect(activeTrack.id, activeTrack.volume, activeTrack.pan) {
@@ -266,9 +267,24 @@ fun ScoreForgeComposerScreen() {
         syncHistoryButtons()
     }
 
+    fun selectEvent(eventIndex: Int) {
+        selectedEventIndex = if (eventIndex in currentTrack().events.indices) eventIndex else -1
+    }
+
+    fun toggleSelectedTie() {
+        val index = selectedEventIndex
+        val updatedEvents = ScoreTies.toggle(currentTrack().events, index) ?: return
+        stopPlayback()
+        LiveInstrumentBus.allNotesOff()
+        recordBeforeScoreEdit()
+        replaceActiveTrack { it.copy(events = updatedEvents) }
+        selectedEventIndex = index.coerceAtMost(currentTrack().events.lastIndex)
+    }
+
     fun insertNoteAt(pitch: Int, startBeat: Float, preview: Boolean, advanceCursor: Boolean) {
         recordBeforeScoreEdit()
         val track = currentTrack()
+        val newEventIndex = track.events.size
         val quantizedStart = ScoreTimeline.quantizeBeat(startBeat)
         val inputBeats = selectedInputBeats()
         val note = ScoreNote(
@@ -282,29 +298,21 @@ fun ScoreForgeComposerScreen() {
             advanceCursor -> quantizedStart + inputBeats
             else -> maxOf(track.cursorBeat, quantizedStart + inputBeats)
         }
-        replaceActiveTrack {
-            it.copy(
-                events = it.events + note,
-                cursorBeat = nextCursor,
-            )
-        }
+        replaceActiveTrack { it.copy(events = it.events + note, cursorBeat = nextCursor) }
+        selectedEventIndex = newEventIndex
         if (preview) playback.previewPitch(pitch)
     }
 
     fun insertStepNote(pitch: Int, preview: Boolean) {
         val track = currentTrack()
-        insertNoteAt(
-            pitch = pitch,
-            startBeat = track.cursorBeat,
-            preview = preview,
-            advanceCursor = true,
-        )
+        insertNoteAt(pitch, track.cursorBeat, preview, advanceCursor = true)
     }
 
     fun insertRest() {
         recordBeforeScoreEdit()
         LiveInstrumentBus.allNotesOff()
         val track = currentTrack()
+        val newEventIndex = track.events.size
         val inputBeats = selectedInputBeats()
         val rest = ScoreRest(
             duration = selectedDuration,
@@ -312,11 +320,9 @@ fun ScoreForgeComposerScreen() {
             dotted = selectedDotted,
         )
         replaceActiveTrack {
-            it.copy(
-                events = it.events + rest,
-                cursorBeat = track.cursorBeat + inputBeats,
-            )
+            it.copy(events = it.events + rest, cursorBeat = track.cursorBeat + inputBeats)
         }
+        selectedEventIndex = newEventIndex
     }
 
     fun changePianoOctave(delta: Int) {
@@ -334,13 +340,10 @@ fun ScoreForgeComposerScreen() {
             replaceActiveTrack {
                 it.copy(
                     events = updatedEvents,
-                    cursorBeat = if (chordMode) {
-                        it.cursorBeat
-                    } else {
-                        ScoreTimeline.endBeat(updatedEvents)
-                    },
+                    cursorBeat = if (chordMode) it.cursorBeat else ScoreTimeline.endBeat(updatedEvents),
                 )
             }
+            selectedEventIndex = -1
         }
     }
 
@@ -348,21 +351,15 @@ fun ScoreForgeComposerScreen() {
         val track = currentTrack()
         val note = track.events.getOrNull(eventIndex) as? ScoreNote ?: return
         val updatedEvents = track.events.toMutableList().apply {
-            this[eventIndex] = note.copy(
-                midiPitch = pitch,
-                startBeat = startBeat,
-            )
+            this[eventIndex] = note.copy(midiPitch = pitch, startBeat = startBeat)
         }
         replaceActiveTrack {
             it.copy(
                 events = updatedEvents,
-                cursorBeat = if (chordMode) {
-                    it.cursorBeat
-                } else {
-                    ScoreTimeline.endBeat(updatedEvents)
-                },
+                cursorBeat = if (chordMode) it.cursorBeat else ScoreTimeline.endBeat(updatedEvents),
             )
         }
+        selectedEventIndex = eventIndex.coerceAtMost(currentTrack().events.lastIndex)
     }
 
     fun moveActiveRest(eventIndex: Int, startBeat: Float) {
@@ -374,13 +371,10 @@ fun ScoreForgeComposerScreen() {
         replaceActiveTrack {
             it.copy(
                 events = updatedEvents,
-                cursorBeat = if (chordMode) {
-                    it.cursorBeat
-                } else {
-                    ScoreTimeline.endBeat(updatedEvents)
-                },
+                cursorBeat = if (chordMode) it.cursorBeat else ScoreTimeline.endBeat(updatedEvents),
             )
         }
+        selectedEventIndex = eventIndex.coerceAtMost(currentTrack().events.lastIndex)
     }
 
     fun selectTrack(index: Int) {
@@ -388,6 +382,7 @@ fun ScoreForgeComposerScreen() {
         stopPlayback()
         LiveInstrumentBus.allNotesOff()
         mixerGestureHistoryRecorded = false
+        selectedEventIndex = -1
         activeTrackIndex = index
     }
 
@@ -403,6 +398,7 @@ fun ScoreForgeComposerScreen() {
         )
         tracks.add(newTrack)
         activeTrackIndex = tracks.lastIndex
+        selectedEventIndex = -1
         mixerGestureHistoryRecorded = false
         syncHistoryButtons()
     }
@@ -462,6 +458,7 @@ fun ScoreForgeComposerScreen() {
         val index = activeIndex()
         tracks.removeAt(index)
         activeTrackIndex = index.coerceAtMost(tracks.lastIndex)
+        selectedEventIndex = -1
         mixerGestureHistoryRecorded = false
         syncHistoryButtons()
     }
@@ -470,12 +467,7 @@ fun ScoreForgeComposerScreen() {
         val track = currentTrack()
         if (track.presetBank == bank && track.presetProgram == program) return
         if (recordHistory) recordBeforeScoreEdit()
-        replaceActiveTrack {
-            it.copy(
-                presetBank = bank,
-                presetProgram = program,
-            )
-        }
+        replaceActiveTrack { it.copy(presetBank = bank, presetProgram = program) }
     }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
@@ -515,9 +507,8 @@ fun ScoreForgeComposerScreen() {
                             stopPlayback()
                             LiveInstrumentBus.allNotesOff()
                             recordBeforeScoreEdit()
-                            replaceActiveTrack {
-                                it.copy(events = emptyList(), cursorBeat = 0f)
-                            }
+                            replaceActiveTrack { it.copy(events = emptyList(), cursorBeat = 0f) }
+                            selectedEventIndex = -1
                         }
                     },
                 )
@@ -551,19 +542,11 @@ fun ScoreForgeComposerScreen() {
                     requestedPresetProgram = activeTrack.presetProgram,
                     onSoundFontLoaded = { _, preset ->
                         if (preset != null) {
-                            setActiveTrackPreset(
-                                bank = preset.bank,
-                                program = preset.program,
-                                recordHistory = false,
-                            )
+                            setActiveTrackPreset(preset.bank, preset.program, recordHistory = false)
                         }
                     },
                     onPresetSelected = { preset ->
-                        setActiveTrackPreset(
-                            bank = preset.bank,
-                            program = preset.program,
-                            recordHistory = true,
-                        )
+                        setActiveTrackPreset(preset.bank, preset.program, recordHistory = true)
                     },
                 )
 
@@ -571,10 +554,13 @@ fun ScoreForgeComposerScreen() {
                     selected = selectedDuration,
                     dotted = selectedDotted,
                     sharpInput = staffSharpInput,
+                    tieEnabled = canTieSelected,
+                    tieActive = selectedTieActive,
                     onSelected = { selectedDuration = it },
                     onToggleDotted = { selectedDotted = !selectedDotted },
                     onInsertRest = ::insertRest,
                     onToggleSharpInput = { staffSharpInput = !staffSharpInput },
+                    onToggleTie = ::toggleSelectedTie,
                 )
 
                 EditorModeControls(
@@ -592,26 +578,21 @@ fun ScoreForgeComposerScreen() {
                         events = activeEvents,
                         selectedDuration = selectedDuration,
                         cursorBeat = activeCursorBeat,
+                        selectedEventIndex = selectedEventIndex,
                         onAddPitch = { naturalPitch, tappedBeat ->
                             val pitch = if (staffSharpInput) {
                                 PitchNames.sharpenIfAvailable(naturalPitch)
                             } else {
                                 naturalPitch
                             }
-                            insertNoteAt(
-                                pitch = pitch,
-                                startBeat = tappedBeat,
-                                preview = true,
-                                advanceCursor = false,
-                            )
+                            insertNoteAt(pitch, tappedBeat, preview = true, advanceCursor = false)
                         },
+                        onSelectEvent = ::selectEvent,
                         onBeginMove = { recordBeforeScoreEdit() },
                         onMoveNote = ::moveActiveNote,
                         onMoveRest = ::moveActiveRest,
                         onDeleteEvent = ::deleteEvent,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
+                        modifier = Modifier.fillMaxWidth().weight(1f),
                     )
 
                     ScoreEditorMode.PIANO_ROLL -> PianoRollEditor(
@@ -619,20 +600,15 @@ fun ScoreForgeComposerScreen() {
                         selectedDuration = selectedDuration,
                         cursorBeat = activeCursorBeat,
                         octaveShift = pianoOctaveShift,
+                        selectedEventIndex = selectedEventIndex,
                         onAddPitch = { pitch, tappedBeat ->
-                            insertNoteAt(
-                                pitch = pitch,
-                                startBeat = tappedBeat,
-                                preview = true,
-                                advanceCursor = false,
-                            )
+                            insertNoteAt(pitch, tappedBeat, preview = true, advanceCursor = false)
                         },
+                        onSelectEvent = ::selectEvent,
                         onBeginMove = { recordBeforeScoreEdit() },
                         onMoveNote = ::moveActiveNote,
                         onDeleteEvent = ::deleteEvent,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
+                        modifier = Modifier.fillMaxWidth().weight(1f),
                     )
                 }
 
@@ -650,9 +626,7 @@ fun ScoreForgeComposerScreen() {
                                 }
                             } else {
                                 chordMode = true
-                                replaceActiveTrack {
-                                    it.copy(cursorBeat = ScoreTimeline.endBeat(track.events))
-                                }
+                                replaceActiveTrack { it.copy(cursorBeat = ScoreTimeline.endBeat(track.events)) }
                             }
                         },
                         onAdvanceChord = {
@@ -670,14 +644,10 @@ fun ScoreForgeComposerScreen() {
                         onOctaveUp = { changePianoOctave(1) },
                         onPitchDown = { pitch ->
                             insertStepNote(pitch, preview = false)
-                            if (!LiveInstrumentBus.noteOn(pitch, velocity = 96)) {
-                                playback.previewPitch(pitch)
-                            }
+                            if (!LiveInstrumentBus.noteOn(pitch, velocity = 96)) playback.previewPitch(pitch)
                         },
                         onPitchUp = { pitch -> LiveInstrumentBus.noteOff(pitch) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(120.dp),
+                        modifier = Modifier.fillMaxWidth().height(120.dp),
                     )
                 }
             }
@@ -730,11 +700,8 @@ private fun HeaderBar(
         Text("$bpm", style = MaterialTheme.typography.labelLarge)
         OutlinedButton(onClick = onTempoUp) { Text("+5") }
 
-        if (isPlaying) {
-            Button(onClick = onStop) { Text("Stop") }
-        } else {
-            Button(onClick = onPlay, enabled = canPlay) { Text("Play") }
-        }
+        if (isPlaying) Button(onClick = onStop) { Text("Stop") }
+        else Button(onClick = onPlay, enabled = canPlay) { Text("Play") }
 
         OutlinedButton(onClick = onUndo, enabled = canUndo) { Text("Undo") }
         OutlinedButton(onClick = onRedo, enabled = canRedo) { Text("Redo") }
@@ -750,46 +717,43 @@ private fun DurationSelector(
     selected: NoteDuration,
     dotted: Boolean,
     sharpInput: Boolean,
+    tieEnabled: Boolean,
+    tieActive: Boolean,
     onSelected: (NoteDuration) -> Unit,
     onToggleDotted: () -> Unit,
     onInsertRest: () -> Unit,
     onToggleSharpInput: () -> Unit,
+    onToggleTie: () -> Unit,
 ) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("Duration:", style = MaterialTheme.typography.labelLarge)
         NoteDuration.entries.forEach { duration ->
-            if (duration == selected) {
-                Button(onClick = { onSelected(duration) }) { Text(duration.displayName) }
-            } else {
-                OutlinedButton(onClick = { onSelected(duration) }) { Text(duration.displayName) }
-            }
+            if (duration == selected) Button(onClick = { onSelected(duration) }) { Text(duration.displayName) }
+            else OutlinedButton(onClick = { onSelected(duration) }) { Text(duration.displayName) }
         }
 
-        if (dotted) {
-            Button(onClick = onToggleDotted) { Text("Dot •") }
-        } else {
-            OutlinedButton(onClick = onToggleDotted) { Text("Dot") }
-        }
+        if (dotted) Button(onClick = onToggleDotted) { Text("Dot •") }
+        else OutlinedButton(onClick = onToggleDotted) { Text("Dot") }
 
         Button(onClick = onInsertRest) { Text(if (dotted) "Dotted Rest" else "Rest") }
 
-        if (sharpInput) {
-            Button(onClick = onToggleSharpInput) { Text("Staff ♯") }
-        } else {
-            OutlinedButton(onClick = onToggleSharpInput) { Text("Staff ♯") }
-        }
+        if (tieActive) Button(onClick = onToggleTie, enabled = tieEnabled) { Text("Tie →") }
+        else OutlinedButton(onClick = onToggleTie, enabled = tieEnabled) { Text("Tie →") }
+
+        if (sharpInput) Button(onClick = onToggleSharpInput) { Text("Staff ♯") }
+        else OutlinedButton(onClick = onToggleSharpInput) { Text("Staff ♯") }
 
         Spacer(modifier = Modifier.weight(1f))
         Text(
             buildString {
                 append(if (sharpInput) "Staff tap enters sharps" else "Staff tap enters naturals")
                 if (dotted) append(" • dotted input on")
+                append(" • tap note to select")
+                if (tieEnabled) append(" • Tie → available")
                 append(" • drag to move • long-press delete")
             },
             style = MaterialTheme.typography.bodySmall,
