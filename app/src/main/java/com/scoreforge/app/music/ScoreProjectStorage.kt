@@ -4,11 +4,12 @@ import android.content.Context
 import java.io.File
 
 /**
- * Small versioned snapshot used for the current automatic draft.
+ * Small versioned snapshot used for the current automatic draft and user-saved .sfp files.
  *
  * [events] and [cursorBeat] remain as compatibility fields for older editor code and tests. New
- * code should use [tracks] and [activeTrackIndex]. The encoder always writes the multi-track v2
- * format, while the decoder still migrates v1 drafts into Track 1.
+ * code should use [tracks] and [activeTrackIndex]. The encoder writes the multi-track v2 format,
+ * while the decoder still migrates v1 drafts into Track 1. New optional v2 fields are deliberately
+ * backward-compatible so existing v2 files continue to open.
  */
 data class ScoreProjectSnapshot(
     val events: List<ScoreEvent>,
@@ -26,6 +27,7 @@ data class ScoreProjectSnapshot(
         )
     ),
     val activeTrackIndex: Int = 0,
+    val projectName: String = "Untitled",
 ) {
     fun effectiveTracks(): List<ScoreTrack> =
         tracks.takeIf { it.isNotEmpty() }
@@ -42,7 +44,21 @@ data class ScoreProjectSnapshot(
 
     fun effectiveActiveTrackIndex(): Int =
         activeTrackIndex.coerceIn(0, effectiveTracks().lastIndex)
+
+    fun safeProjectName(): String = sanitizeProjectName(projectName)
+
+    companion object {
+        fun sanitizeProjectName(name: String): String = sanitizeProjectName(name)
+    }
 }
+
+private fun sanitizeProjectName(name: String): String =
+    name.replace('\t', ' ')
+        .replace('\n', ' ')
+        .replace('\r', ' ')
+        .trim()
+        .ifBlank { "Untitled" }
+        .take(120)
 
 object ScoreProjectCodec {
     private const val MAGIC = "SCOREFORGE"
@@ -55,6 +71,7 @@ object ScoreProjectCodec {
         val activeTrackIndex = snapshot.activeTrackIndex.coerceIn(0, tracks.lastIndex)
 
         append(MAGIC).append('\t').append(VERSION).append('\n')
+        append("PROJECT_NAME\t").append(snapshot.safeProjectName()).append('\n')
         append("BPM\t").append(snapshot.bpm.coerceIn(30, 300)).append('\n')
         append("DURATION\t").append(snapshot.selectedDuration.name).append('\n')
         append("PIANO_OCTAVE\t").append(snapshot.pianoOctaveShift.coerceIn(-4, 3)).append('\n')
@@ -104,6 +121,7 @@ object ScoreProjectCodec {
     }
 
     private fun decodeV2(lines: List<String>): ScoreProjectSnapshot {
+        var projectName = "Untitled"
         var bpm = 120
         var selectedDuration = NoteDuration.QUARTER
         var pianoOctaveShift = 0
@@ -121,6 +139,7 @@ object ScoreProjectCodec {
         lines.forEach { line ->
             val parts = line.split('\t')
             when (parts.firstOrNull()) {
+                "PROJECT_NAME" -> projectName = sanitizeProjectName(parts.getOrNull(1).orEmpty())
                 "BPM" -> parts.getOrNull(1)?.toIntOrNull()?.let { bpm = it.coerceIn(30, 300) }
                 "DURATION" -> parseDuration(parts.getOrNull(1))?.let { selectedDuration = it }
                 "PIANO_OCTAVE" -> parts.getOrNull(1)?.toIntOrNull()?.let {
@@ -154,6 +173,7 @@ object ScoreProjectCodec {
             staffSharpInput = staffSharpInput,
             tracks = safeTracks,
             activeTrackIndex = safeActiveIndex,
+            projectName = projectName,
         )
     }
 
@@ -200,6 +220,7 @@ object ScoreProjectCodec {
             staffSharpInput = staffSharpInput,
             tracks = listOf(track),
             activeTrackIndex = 0,
+            projectName = "Untitled",
         )
     }
 
