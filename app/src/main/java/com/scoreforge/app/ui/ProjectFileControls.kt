@@ -34,6 +34,7 @@ import kotlinx.coroutines.withContext
 fun ProjectFileControls(
     projectName: String,
     snapshotProvider: () -> ScoreProjectSnapshot,
+    onNewProject: () -> Unit,
     onRenameProject: (String) -> Unit,
     onOpenProject: (ScoreProjectSnapshot) -> Unit,
     modifier: Modifier = Modifier,
@@ -41,6 +42,7 @@ fun ProjectFileControls(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var renameDialogOpen by remember { mutableStateOf(false) }
+    var newProjectDialogOpen by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("Autosave on") }
 
@@ -119,6 +121,10 @@ fun ProjectFileControls(
         Text("Project:", style = MaterialTheme.typography.labelLarge)
         Text(projectName, style = MaterialTheme.typography.labelLarge)
 
+        OutlinedButton(onClick = { newProjectDialogOpen = true }) {
+            Text("New")
+        }
+
         OutlinedButton(
             onClick = {
                 renameText = projectName
@@ -150,6 +156,32 @@ fun ProjectFileControls(
             status,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    if (newProjectDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { newProjectDialogOpen = false },
+            title = { Text("Start a new project?") },
+            text = {
+                Text("The current composition will be replaced by a blank project. Use Save As first if you want a separate .sfp copy.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onNewProject()
+                        status = "New project"
+                        newProjectDialogOpen = false
+                    },
+                ) {
+                    Text("New Project")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { newProjectDialogOpen = false }) {
+                    Text("Cancel")
+                }
+            },
         )
     }
 
