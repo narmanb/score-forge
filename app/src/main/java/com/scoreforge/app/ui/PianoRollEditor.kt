@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
@@ -29,6 +30,7 @@ import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
 import com.scoreforge.app.music.ScoreEvent
 import com.scoreforge.app.music.ScoreNote
+import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
 
 @Composable
@@ -37,7 +39,9 @@ fun PianoRollEditor(
     selectedDuration: NoteDuration,
     cursorBeat: Float,
     octaveShift: Int,
+    selectedEventIndex: Int,
     onAddPitch: (pitch: Int, startBeat: Float) -> Unit,
+    onSelectEvent: (eventIndex: Int) -> Unit,
     onBeginMove: (eventIndex: Int) -> Unit,
     onMoveNote: (eventIndex: Int, pitch: Int, startBeat: Float) -> Unit,
     onDeleteEvent: (eventIndex: Int) -> Unit,
@@ -62,29 +66,27 @@ fun PianoRollEditor(
                     detectTapGestures(
                         onLongPress = { position ->
                             val noteIndex = noteIndexAtPoint(
-                                events = events,
-                                point = position,
-                                width = size.width.toFloat(),
-                                height = size.height.toFloat(),
-                                visibleBeats = visibleBeats,
-                                lowPitch = lowPitch,
-                                highPitch = highPitch,
+                                events, position, size.width.toFloat(), size.height.toFloat(),
+                                visibleBeats, lowPitch, highPitch,
                             )
                             if (noteIndex >= 0) onDeleteEvent(noteIndex)
                         },
                         onTap = { position ->
                             if (position.x < PianoRollMapping.LEFT_GUTTER_PX) return@detectTapGestures
+                            val noteIndex = noteIndexAtPoint(
+                                events, position, size.width.toFloat(), size.height.toFloat(),
+                                visibleBeats, lowPitch, highPitch,
+                            )
+                            if (noteIndex >= 0) {
+                                onSelectEvent(noteIndex)
+                                return@detectTapGestures
+                            }
                             val pitch = PianoRollMapping.pitchAtY(
-                                y = position.y,
-                                lowPitch = lowPitch,
-                                highPitch = highPitch,
-                                height = size.height.toFloat(),
+                                position.y, lowPitch, highPitch, size.height.toFloat(),
                             )
                             val startBeat = ScoreTimeline.quantizeBeat(
                                 PianoRollMapping.beatAtX(
-                                    x = position.x,
-                                    visibleBeats = visibleBeats,
-                                    width = size.width.toFloat(),
+                                    position.x, visibleBeats, size.width.toFloat(),
                                 )
                             )
                             onAddPitch(pitch, startBeat)
@@ -95,15 +97,13 @@ fun PianoRollEditor(
                     detectDragGestures(
                         onDragStart = { position ->
                             draggingEventIndex = noteIndexAtPoint(
-                                events = events,
-                                point = position,
-                                width = size.width.toFloat(),
-                                height = size.height.toFloat(),
-                                visibleBeats = visibleBeats,
-                                lowPitch = lowPitch,
-                                highPitch = highPitch,
+                                events, position, size.width.toFloat(), size.height.toFloat(),
+                                visibleBeats, lowPitch, highPitch,
                             )
-                            if (draggingEventIndex >= 0) onBeginMove(draggingEventIndex)
+                            if (draggingEventIndex >= 0) {
+                                onSelectEvent(draggingEventIndex)
+                                onBeginMove(draggingEventIndex)
+                            }
                         },
                         onDragEnd = { draggingEventIndex = -1 },
                         onDragCancel = { draggingEventIndex = -1 },
@@ -111,17 +111,12 @@ fun PianoRollEditor(
                         val note = events.getOrNull(draggingEventIndex) as? ScoreNote
                             ?: return@detectDragGestures
                         val pitch = PianoRollMapping.pitchAtY(
-                            y = change.position.y,
-                            lowPitch = lowPitch,
-                            highPitch = highPitch,
-                            height = size.height.toFloat(),
+                            change.position.y, lowPitch, highPitch, size.height.toFloat(),
                         )
                         val latestStart = (visibleBeats - note.effectiveBeats).coerceAtLeast(0f)
                         val startBeat = ScoreTimeline.quantizeBeat(
                             PianoRollMapping.beatAtX(
-                                x = change.position.x,
-                                visibleBeats = visibleBeats,
-                                width = size.width.toFloat(),
+                                change.position.x, visibleBeats, size.width.toFloat(),
                             )
                         ).coerceIn(0f, latestStart)
                         onMoveNote(draggingEventIndex, pitch, startBeat)
@@ -142,49 +137,30 @@ fun PianoRollEditor(
                     color = if (isSharp) Color(0xFFE1E4E8) else Color(0xFFF7F7F7),
                     topLeft = Offset(PianoRollMapping.LEFT_GUTTER_PX, top),
                     size = androidx.compose.ui.geometry.Size(
-                        width = (size.width - PianoRollMapping.LEFT_GUTTER_PX).coerceAtLeast(0f),
-                        height = rowHeight,
+                        (size.width - PianoRollMapping.LEFT_GUTTER_PX).coerceAtLeast(0f), rowHeight,
                     ),
                 )
                 drawLine(
-                    color = Color(0xFFC8CCD1),
-                    start = Offset(PianoRollMapping.LEFT_GUTTER_PX, top),
-                    end = Offset(size.width, top),
-                    strokeWidth = 1f,
+                    Color(0xFFC8CCD1), Offset(PianoRollMapping.LEFT_GUTTER_PX, top),
+                    Offset(size.width, top), 1f,
                 )
-
-                if (pitch % 12 == 0) {
-                    val centerY = top + rowHeight * 0.70f
-                    drawContext.canvas.nativeCanvas.drawText(
-                        PitchNames.name(pitch),
-                        5f,
-                        centerY,
-                        labelPaint,
-                    )
-                }
             }
 
             drawRect(
-                color = Color(0xFFECEFF1),
-                topLeft = Offset.Zero,
-                size = androidx.compose.ui.geometry.Size(PianoRollMapping.LEFT_GUTTER_PX, size.height),
+                Color(0xFFECEFF1), Offset.Zero,
+                androidx.compose.ui.geometry.Size(PianoRollMapping.LEFT_GUTTER_PX, size.height),
             )
             for (pitch in lowPitch..highPitch) {
                 if (pitch % 12 == 0) {
                     val y = PianoRollMapping.yCenterForPitch(pitch, lowPitch, highPitch, size.height)
                     drawContext.canvas.nativeCanvas.drawText(
-                        PitchNames.name(pitch),
-                        5f,
-                        y + labelPaint.textSize * 0.32f,
-                        labelPaint,
+                        PitchNames.name(pitch), 5f, y + labelPaint.textSize * 0.32f, labelPaint,
                     )
                 }
             }
             drawLine(
-                color = Color(0xFF9EA4AA),
-                start = Offset(PianoRollMapping.LEFT_GUTTER_PX, 0f),
-                end = Offset(PianoRollMapping.LEFT_GUTTER_PX, size.height),
-                strokeWidth = 1.5f,
+                Color(0xFF9EA4AA), Offset(PianoRollMapping.LEFT_GUTTER_PX, 0f),
+                Offset(PianoRollMapping.LEFT_GUTTER_PX, size.height), 1.5f,
             )
 
             var gridBeat = 0f
@@ -209,39 +185,51 @@ fun PianoRollEditor(
                 gridBeat += ScoreTimeline.EDIT_GRID_BEATS
             }
 
-            visibleNotes.forEach { note ->
-                if (note.midiPitch !in lowPitch..highPitch) return@forEach
-                val rect = noteRect(
-                    note = note,
-                    width = size.width,
-                    height = size.height,
-                    visibleBeats = visibleBeats,
-                    lowPitch = lowPitch,
-                    highPitch = highPitch,
-                )
+            events.forEachIndexed { index, event ->
+                val note = event as? ScoreNote ?: return@forEachIndexed
+                if (note.midiPitch !in lowPitch..highPitch) return@forEachIndexed
+                val rect = noteRect(note, size.width, size.height, visibleBeats, lowPitch, highPitch)
                 drawRoundRect(
+                    Color(0xFF355C8A), rect.topLeft, rect.size,
+                    androidx.compose.ui.geometry.CornerRadius(3f, 3f),
+                )
+                if (index == selectedEventIndex) {
+                    drawRoundRect(
+                        color = Color(0xFFB43B3B),
+                        topLeft = rect.topLeft,
+                        size = rect.size,
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(3f, 3f),
+                        style = Stroke(width = 2.5f),
+                    )
+                }
+            }
+
+            events.forEachIndexed { sourceIndex, event ->
+                val source = event as? ScoreNote ?: return@forEachIndexed
+                if (!ScoreTies.hasValidTie(events, sourceIndex)) return@forEachIndexed
+                val targetIndex = ScoreTies.targetIndex(events, sourceIndex) ?: return@forEachIndexed
+                val target = events.getOrNull(targetIndex) as? ScoreNote ?: return@forEachIndexed
+                if (source.midiPitch !in lowPitch..highPitch || target.midiPitch !in lowPitch..highPitch) {
+                    return@forEachIndexed
+                }
+                val sourceRect = noteRect(source, size.width, size.height, visibleBeats, lowPitch, highPitch)
+                val targetRect = noteRect(target, size.width, size.height, visibleBeats, lowPitch, highPitch)
+                drawLine(
                     color = Color(0xFF355C8A),
-                    topLeft = rect.topLeft,
-                    size = rect.size,
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(3f, 3f),
+                    start = Offset(sourceRect.right, sourceRect.center.y),
+                    end = Offset(targetRect.left, targetRect.center.y),
+                    strokeWidth = 3f,
                 )
             }
 
             val cursorX = PianoRollMapping.xAtBeat(cursorBeat, visibleBeats, size.width)
-            drawLine(
-                color = Color(0xFFB43B3B),
-                start = Offset(cursorX, 0f),
-                end = Offset(cursorX, size.height),
-                strokeWidth = 2f,
-            )
+            drawLine(Color(0xFFB43B3B), Offset(cursorX, 0f), Offset(cursorX, size.height), 2f)
         }
 
         if (visibleNotes.isEmpty()) {
             Text(
-                "Tap the grid to place ${selectedDuration.displayName.lowercase()} notes. Drag notes to move pitch/time; long-press to delete.",
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(10.dp),
+                "Tap the grid to place ${selectedDuration.displayName.lowercase()} notes. Tap an existing note to select it; drag to move; long-press to delete.",
+                modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp),
                 color = Color(0xFF555555),
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -249,9 +237,7 @@ fun PianoRollEditor(
 
         Text(
             "${PitchNames.name(lowPitch)}–${PitchNames.name(highPitch)}",
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(8.dp),
+            modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
             color = Color(0xFF555555),
             style = MaterialTheme.typography.labelSmall,
         )
