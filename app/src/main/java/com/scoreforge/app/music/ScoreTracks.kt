@@ -27,16 +27,19 @@ data class ScoreTrack(
     val endBeat: Float
         get() = maxOf(cursorBeat, ScoreTimeline.endBeat(events))
 
-    fun normalized(): ScoreTrack = copy(
-        id = id.coerceAtLeast(1),
-        name = name.replace('\t', ' ').replace('\n', ' ').trim().ifBlank { "Track $id" }.take(80),
-        events = events.toList(),
-        cursorBeat = maxOf(cursorBeat.coerceAtLeast(0f), ScoreTimeline.endBeat(events)),
-        presetBank = presetBank?.coerceAtLeast(0),
-        presetProgram = presetProgram?.coerceIn(0, 127),
-        volume = volume.coerceIn(MIN_VOLUME, MAX_VOLUME),
-        pan = pan.coerceIn(MIN_PAN, MAX_PAN),
-    )
+    fun normalized(): ScoreTrack {
+        val safeEvents = sanitizeScoreTies(events.toList())
+        return copy(
+            id = id.coerceAtLeast(1),
+            name = name.replace('\t', ' ').replace('\n', ' ').trim().ifBlank { "Track $id" }.take(80),
+            events = safeEvents,
+            cursorBeat = maxOf(cursorBeat.coerceAtLeast(0f), ScoreTimeline.endBeat(safeEvents)),
+            presetBank = presetBank?.coerceAtLeast(0),
+            presetProgram = presetProgram?.coerceIn(0, 127),
+            volume = volume.coerceIn(MIN_VOLUME, MAX_VOLUME),
+            pan = pan.coerceIn(MIN_PAN, MAX_PAN),
+        )
+    }
 
     companion object {
         const val MIN_VOLUME = 0
@@ -61,10 +64,6 @@ object ScoreTracks {
         return ScoreTrack(id = id, name = "Track $id")
     }
 
-    /**
-     * Mixer routing semantics: mute always wins. When at least one non-muted track is soloed,
-     * only non-muted solo tracks are audible. Otherwise every non-muted track is audible.
-     */
     fun audibleTracks(tracks: List<ScoreTrack>): List<ScoreTrack> {
         val unmuted = tracks.filterNot { it.muted }.take(MAX_TRACKS)
         return if (unmuted.any { it.solo }) unmuted.filter { it.solo } else unmuted
