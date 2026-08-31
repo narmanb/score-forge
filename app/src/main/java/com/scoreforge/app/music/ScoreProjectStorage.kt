@@ -16,6 +16,7 @@ data class ScoreProjectSnapshot(
     val bpm: Int = 120,
     val cursorBeat: Float = ScoreTimeline.endBeat(events),
     val selectedDuration: NoteDuration = NoteDuration.QUARTER,
+    val selectedDotted: Boolean = false,
     val pianoOctaveShift: Int = 0,
     val staffSharpInput: Boolean = false,
     val tracks: List<ScoreTrack> = listOf(
@@ -74,6 +75,7 @@ object ScoreProjectCodec {
         append("PROJECT_NAME\t").append(snapshot.safeProjectName()).append('\n')
         append("BPM\t").append(snapshot.bpm.coerceIn(30, 300)).append('\n')
         append("DURATION\t").append(snapshot.selectedDuration.name).append('\n')
+        append("DOTTED_INPUT\t").append(if (snapshot.selectedDotted) 1 else 0).append('\n')
         append("PIANO_OCTAVE\t").append(snapshot.pianoOctaveShift.coerceIn(-4, 3)).append('\n')
         append("STAFF_SHARP\t").append(if (snapshot.staffSharpInput) 1 else 0).append('\n')
         append("ACTIVE_TRACK\t").append(activeTrackIndex).append('\n')
@@ -103,11 +105,13 @@ object ScoreProjectCodec {
                     .append(event.midiPitch.coerceIn(0, 127)).append('\t')
                     .append(event.duration.name).append('\t')
                     .append(event.startBeat.coerceAtLeast(0f)).append('\t')
-                    .append(event.velocity.coerceIn(1, 127)).append('\n')
+                    .append(event.velocity.coerceIn(1, 127)).append('\t')
+                    .append(if (event.dotted) 1 else 0).append('\n')
 
                 is ScoreRest -> append("R\t")
                     .append(event.duration.name).append('\t')
-                    .append(event.startBeat.coerceAtLeast(0f)).append('\n')
+                    .append(event.startBeat.coerceAtLeast(0f)).append('\t')
+                    .append(if (event.dotted) 1 else 0).append('\n')
             }
         }
     }
@@ -128,6 +132,7 @@ object ScoreProjectCodec {
         var projectName = "Untitled"
         var bpm = 120
         var selectedDuration = NoteDuration.QUARTER
+        var selectedDotted = false
         var pianoOctaveShift = 0
         var staffSharpInput = false
         var activeTrackIndex = 0
@@ -146,6 +151,7 @@ object ScoreProjectCodec {
                 "PROJECT_NAME" -> projectName = cleanProjectName(parts.getOrNull(1).orEmpty())
                 "BPM" -> parts.getOrNull(1)?.toIntOrNull()?.let { bpm = it.coerceIn(30, 300) }
                 "DURATION" -> parseDuration(parts.getOrNull(1))?.let { selectedDuration = it }
+                "DOTTED_INPUT" -> selectedDotted = parts.getOrNull(1) == "1"
                 "PIANO_OCTAVE" -> parts.getOrNull(1)?.toIntOrNull()?.let {
                     pianoOctaveShift = it.coerceIn(-4, 3)
                 }
@@ -173,6 +179,7 @@ object ScoreProjectCodec {
             bpm = bpm,
             cursorBeat = active.cursorBeat,
             selectedDuration = selectedDuration,
+            selectedDotted = selectedDotted,
             pianoOctaveShift = pianoOctaveShift,
             staffSharpInput = staffSharpInput,
             tracks = safeTracks,
@@ -220,6 +227,7 @@ object ScoreProjectCodec {
             bpm = bpm,
             cursorBeat = cursorBeat,
             selectedDuration = selectedDuration,
+            selectedDotted = false,
             pianoOctaveShift = pianoOctaveShift,
             staffSharpInput = staffSharpInput,
             tracks = listOf(track),
@@ -248,14 +256,16 @@ object ScoreProjectCodec {
         val duration = parseDuration(parts[2]) ?: return null
         val startBeat = parts[3].toFloatOrNull()?.takeIf { it >= 0f } ?: return null
         val velocity = parts[4].toIntOrNull()?.takeIf { it in 1..127 } ?: return null
-        return ScoreNote(pitch, duration, startBeat, velocity)
+        val dotted = parts.getOrNull(5) == "1"
+        return ScoreNote(pitch, duration, startBeat, velocity, dotted)
     }
 
     private fun decodeRest(parts: List<String>): ScoreRest? {
         if (parts.size < 3) return null
         val duration = parseDuration(parts[1]) ?: return null
         val startBeat = parts[2].toFloatOrNull()?.takeIf { it >= 0f } ?: return null
-        return ScoreRest(duration, startBeat)
+        val dotted = parts.getOrNull(3) == "1"
+        return ScoreRest(duration, startBeat, dotted)
     }
 
     private fun parseDuration(value: String?): NoteDuration? =
