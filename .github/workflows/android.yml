@@ -30,6 +30,12 @@ jobs:
       - name: Install Android toolchain
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
 
+      - name: Install stable development signing key
+        run: |
+          mkdir -p "$HOME/.android"
+          base64 --decode ci/score-forge-dev.keystore.b64 > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+
       - name: Set up Gradle 9.5
         uses: gradle/actions/setup-gradle@v4
         with:
