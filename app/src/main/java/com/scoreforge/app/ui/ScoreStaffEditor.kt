@@ -42,6 +42,7 @@ fun ScoreStaffEditor(
     onAddPitch: (Int) -> Unit,
     onMoveNote: (eventIndex: Int, pitch: Int, startBeat: Float) -> Unit,
     onMoveRest: (eventIndex: Int, startBeat: Float) -> Unit,
+    onDeleteEvent: (eventIndex: Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var draggingEventIndex by remember { mutableIntStateOf(-1) }
@@ -57,10 +58,22 @@ fun ScoreStaffEditor(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 8.dp)
-                .pointerInput(events.size, selectedDuration, cursorBeat) {
-                    detectTapGestures { position ->
-                        onAddPitch(pitchFromY(position.y, size.height.toFloat()))
-                    }
+                .pointerInput(events.size, selectedDuration, cursorBeat, visibleBeats) {
+                    detectTapGestures(
+                        onLongPress = { position ->
+                            val eventIndex = nearestEditableEventIndex(
+                                events = events,
+                                point = position,
+                                width = size.width.toFloat(),
+                                height = size.height.toFloat(),
+                                visibleBeats = visibleBeats,
+                            )
+                            if (eventIndex >= 0) onDeleteEvent(eventIndex)
+                        },
+                        onTap = { position ->
+                            onAddPitch(pitchFromY(position.y, size.height.toFloat()))
+                        },
+                    )
                 }
                 .pointerInput(events.size, visibleBeats) {
                     detectDragGestures(
