@@ -67,6 +67,8 @@ private fun ScoreForgeApp() {
     var selectedDuration by remember { mutableStateOf(NoteDuration.QUARTER) }
     var bpm by remember { mutableIntStateOf(120) }
     var isPlaying by remember { mutableStateOf(false) }
+    var cursorBeat by remember { mutableStateOf(0f) }
+    var chordMode by remember { mutableStateOf(false) }
 
     DisposableEffect(Unit) {
         onDispose { playback.release() }
@@ -77,10 +79,11 @@ private fun ScoreForgeApp() {
             ScoreNote(
                 midiPitch = pitch,
                 duration = selectedDuration,
-                startBeat = ScoreTimeline.nextBeat(notes),
+                startBeat = cursorBeat,
             )
         )
         playback.previewPitch(pitch)
+        if (!chordMode) cursorBeat += selectedDuration.beats
     }
 
     fun stopPlayback() {
@@ -93,8 +96,9 @@ private fun ScoreForgeApp() {
             Column(modifier = Modifier.fillMaxSize()) {
                 HeaderBar(
                     noteCount = notes.size,
-                    measureCount = ScoreTimeline.measureCount(notes),
+                    measureCount = ScoreTimeline.measureCount(notes, cursorBeat),
                     bpm = bpm,
+                    cursorBeat = cursorBeat,
                     isPlaying = isPlaying,
                     onTempoDown = { bpm = (bpm - 5).coerceAtLeast(30) },
                     onTempoUp = { bpm = (bpm + 5).coerceAtMost(300) },
@@ -107,11 +111,15 @@ private fun ScoreForgeApp() {
                     onStop = ::stopPlayback,
                     onUndo = {
                         stopPlayback()
-                        if (notes.isNotEmpty()) notes.removeAt(notes.lastIndex)
+                        if (notes.isNotEmpty()) {
+                            notes.removeAt(notes.lastIndex)
+                            if (!chordMode) cursorBeat = ScoreTimeline.endBeat(notes)
+                        }
                     },
                     onClear = {
                         stopPlayback()
                         notes.clear()
+                        cursorBeat = 0f
                     },
                 )
 
@@ -123,11 +131,15 @@ private fun ScoreForgeApp() {
                 StaffEditor(
                     notes = notes,
                     selectedDuration = selectedDuration,
+                    cursorBeat = cursorBeat,
                     onAddPitch = ::addNote,
-                    onMoveNote = { index, pitch ->
+                    onMoveNote = { index, pitch, startBeat ->
                         if (index in notes.indices) {
-                            notes[index] = notes[index].copy(midiPitch = pitch)
-                            playback.previewPitch(pitch)
+                            notes[index] = notes[index].copy(
+                                midiPitch = pitch,
+                                startBeat = startBeat,
+                            )
+                            if (!chordMode) cursorBeat = ScoreTimeline.endBeat(notes)
                         }
                     },
                     modifier = Modifier
@@ -136,10 +148,26 @@ private fun ScoreForgeApp() {
                 )
 
                 PianoKeyboard(
+                    chordMode = chordMode,
+                    onToggleChordMode = {
+                        if (chordMode) {
+                            chordMode = false
+                            cursorBeat = maxOf(cursorBeat, ScoreTimeline.endBeat(notes))
+                        } else {
+                            chordMode = true
+                            cursorBeat = ScoreTimeline.endBeat(notes)
+                        }
+                    },
+                    onAdvanceChord = {
+                        cursorBeat = maxOf(
+                            cursorBeat + selectedDuration.beats,
+                            ScoreTimeline.endBeat(notes),
+                        )
+                    },
                     onPitchPressed = ::addNote,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(138.dp),
+                        .height(144.dp),
                 )
             }
         }
@@ -151,6 +179,7 @@ private fun HeaderBar(
     noteCount: Int,
     measureCount: Int,
     bpm: Int,
+    cursorBeat: Float,
     isPlaying: Boolean,
     onTempoDown: () -> Unit,
     onTempoUp: () -> Unit,
@@ -170,7 +199,7 @@ private fun HeaderBar(
         Column(modifier = Modifier.weight(1f)) {
             Text("Score Forge", style = MaterialTheme.typography.titleLarge)
             Text(
-                "Untitled • Piano • 4/4 • $bpm BPM • $measureCount measures • $noteCount notes",
+                "Untitled • Piano • 4/4 • $bpm BPM • $measureCount measures • beat ${formatBeat(cursorBeat)} • $noteCount notes",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -190,6 +219,9 @@ private fun HeaderBar(
         OutlinedButton(onClick = onClear, enabled = noteCount > 0) { Text("Clear") }
     }
 }
+
+private fun formatBeat(beat: Float): String =
+    if (beat % 1f == 0f) beat.toInt().toString() else "%.2f".format(beat)
 
 @Composable
 private fun DurationSelector(
@@ -213,7 +245,7 @@ private fun DurationSelector(
         }
         Spacer(modifier = Modifier.weight(1f))
         Text(
-            "Step entry • Tap staff/piano • Drag pitch • Play score",
+            "Drag notes in pitch + time • 1/16 beat grid",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -224,13 +256,13 @@ private fun DurationSelector(
 private fun StaffEditor(
     notes: List<ScoreNote>,
     selectedDuration: NoteDuration,
+    cursorBeat: Float,
     onAddPitch: (Int) -> Unit,
-    onMoveNote: (Int, Int) -> Unit,
+    onMoveNote: (Int, Int, Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var draggingIndex by remember { mutableIntStateOf(-1) }
-    val visibleBeats = ScoreTimeline.visibleBeats(notes)
-    val endBeat = ScoreTimeline.endBeat(notes)
+    val visibleBeats = ScoreTimeline.visibleBeats(notes, throughBeat = cursorBeat)
 
     Box(
         modifier = modifier
@@ -242,7 +274,7 @@ private fun StaffEditor(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 8.dp)
-                .pointerInput(notes.size, selectedDuration) {
+                .pointerInput(notes.size, selectedDuration, cursorBeat) {
                     detectTapGestures { position ->
                         onAddPitch(pitchFromY(position.y, size.height.toFloat()))
                     }
@@ -262,9 +294,20 @@ private fun StaffEditor(
                         onDragCancel = { draggingIndex = -1 },
                     ) { change, _ ->
                         if (draggingIndex in notes.indices) {
+                            val note = notes[draggingIndex]
+                            val latestStart = (visibleBeats - note.duration.beats).coerceAtLeast(0f)
+                            val movedBeat = ScoreTimeline.quantizeBeat(
+                                beatFromX(
+                                    x = change.position.x,
+                                    visibleBeats = visibleBeats,
+                                    width = size.width.toFloat(),
+                                )
+                            ).coerceIn(0f, latestStart)
+
                             onMoveNote(
                                 draggingIndex,
                                 pitchFromY(change.position.y, size.height.toFloat()),
+                                movedBeat,
                             )
                         }
                     }
@@ -294,7 +337,7 @@ private fun StaffEditor(
             }
 
             notes.forEach { note ->
-                val x = beatX(note.startBeat + 0.12f, visibleBeats, size.width)
+                val x = beatX(note.startBeat + 0.10f, visibleBeats, size.width)
                 val y = noteY(note.midiPitch, staffBottom, lineSpacing)
                 drawLedgerLines(x, y, staffTop, staffBottom, lineSpacing)
 
@@ -336,15 +379,13 @@ private fun StaffEditor(
                 }
             }
 
-            if (endBeat > 0f) {
-                val cursorX = beatX(endBeat, visibleBeats, size.width)
-                drawLine(
-                    color = Color(0xFF777777),
-                    start = Offset(cursorX, staffTop - lineSpacing * 0.65f),
-                    end = Offset(cursorX, staffBottom + lineSpacing * 0.65f),
-                    strokeWidth = 1.5f,
-                )
-            }
+            val cursorX = beatX(cursorBeat, visibleBeats, size.width)
+            drawLine(
+                color = Color(0xFF5E6A73),
+                start = Offset(cursorX, staffTop - lineSpacing * 0.70f),
+                end = Offset(cursorX, staffBottom + lineSpacing * 0.70f),
+                strokeWidth = 2f,
+            )
         }
 
         if (notes.isEmpty()) {
@@ -365,6 +406,14 @@ private fun beatX(beat: Float, visibleBeats: Float, width: Float): Float {
     val right = 20f
     val usable = (width - left - right).coerceAtLeast(1f)
     return left + usable * (beat.coerceIn(0f, visibleBeats) / visibleBeats.coerceAtLeast(1f))
+}
+
+private fun beatFromX(x: Float, visibleBeats: Float, width: Float): Float {
+    val left = 30f
+    val right = 20f
+    val usable = (width - left - right).coerceAtLeast(1f)
+    val fraction = ((x - left) / usable).coerceIn(0f, 1f)
+    return fraction * visibleBeats
 }
 
 private fun noteY(midiPitch: Int, staffBottom: Float, lineSpacing: Float): Float {
@@ -407,7 +456,7 @@ private fun nearestNoteIndex(
     var nearest = -1
     var bestDistanceSquared = Float.MAX_VALUE
     notes.forEachIndexed { index, note ->
-        val dx = point.x - beatX(note.startBeat + 0.12f, visibleBeats, width)
+        val dx = point.x - beatX(note.startBeat + 0.10f, visibleBeats, width)
         val dy = point.y - noteY(note.midiPitch, staffBottom, lineSpacing)
         val distanceSquared = dx * dx + dy * dy
         if (distanceSquared < bestDistanceSquared) {
@@ -440,6 +489,9 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawLedgerLines(
 
 @Composable
 private fun PianoKeyboard(
+    chordMode: Boolean,
+    onToggleChordMode: () -> Unit,
+    onAdvanceChord: () -> Unit,
     onPitchPressed: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -461,11 +513,21 @@ private fun PianoKeyboard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 4.dp),
+                .padding(horizontal = 12.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
         ) {
-            Text("Piano step entry + preview", style = MaterialTheme.typography.labelLarge)
+            Text(
+                if (chordMode) "Piano chord step entry" else "Piano step entry + preview",
+                style = MaterialTheme.typography.labelLarge,
+            )
             Spacer(modifier = Modifier.weight(1f))
+            OutlinedButton(onClick = onToggleChordMode) {
+                Text(if (chordMode) "Chord: On" else "Chord: Off")
+            }
+            OutlinedButton(onClick = onAdvanceChord, enabled = chordMode) {
+                Text("Next")
+            }
             Text(
                 "C4–B5",
                 style = MaterialTheme.typography.bodySmall,
