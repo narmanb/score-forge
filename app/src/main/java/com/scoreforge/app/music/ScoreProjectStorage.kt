@@ -15,6 +15,7 @@ data class ScoreProjectSnapshot(
     val cursorBeat: Float = ScoreTimeline.endBeat(events),
     val selectedDuration: NoteDuration = NoteDuration.QUARTER,
     val pianoOctaveShift: Int = 0,
+    val staffSharpInput: Boolean = false,
 )
 
 object ScoreProjectCodec {
@@ -27,6 +28,7 @@ object ScoreProjectCodec {
         append("CURSOR\t").append(snapshot.cursorBeat.coerceAtLeast(0f)).append('\n')
         append("DURATION\t").append(snapshot.selectedDuration.name).append('\n')
         append("PIANO_OCTAVE\t").append(snapshot.pianoOctaveShift.coerceIn(-4, 3)).append('\n')
+        append("STAFF_SHARP\t").append(if (snapshot.staffSharpInput) 1 else 0).append('\n')
 
         snapshot.events.forEach { event ->
             when (event) {
@@ -52,6 +54,7 @@ object ScoreProjectCodec {
         var cursorBeat = 0f
         var selectedDuration = NoteDuration.QUARTER
         var pianoOctaveShift = 0
+        var staffSharpInput = false
         val events = mutableListOf<ScoreEvent>()
 
         lines.drop(1).forEach { line ->
@@ -65,6 +68,7 @@ object ScoreProjectCodec {
                 "PIANO_OCTAVE" -> parts.getOrNull(1)?.toIntOrNull()?.let {
                     pianoOctaveShift = it.coerceIn(-4, 3)
                 }
+                "STAFF_SHARP" -> staffSharpInput = parts.getOrNull(1) == "1"
                 "N" -> decodeNote(parts)?.let(events::add)
                 "R" -> decodeRest(parts)?.let(events::add)
             }
@@ -76,6 +80,7 @@ object ScoreProjectCodec {
             cursorBeat = maxOf(cursorBeat, ScoreTimeline.endBeat(events)),
             selectedDuration = selectedDuration,
             pianoOctaveShift = pianoOctaveShift,
+            staffSharpInput = staffSharpInput,
         )
     }
 
