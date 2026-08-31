@@ -41,6 +41,9 @@ jobs:
         with:
           gradle-version: '9.5.0'
 
+      - name: Report debug signing source
+        run: gradle :app:signingReport --stacktrace
+
       - name: Run unit tests
         run: gradle :app:testDebugUnitTest --stacktrace
 
