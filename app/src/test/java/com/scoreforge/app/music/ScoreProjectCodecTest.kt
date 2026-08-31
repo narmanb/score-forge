@@ -20,13 +20,14 @@ class ScoreProjectCodecTest {
             selectedDuration = NoteDuration.SIXTEENTH,
             pianoOctaveShift = -2,
             staffSharpInput = true,
+            projectName = "Night Drive",
         )
 
         assertEquals(original, ScoreProjectCodec.decode(ScoreProjectCodec.encode(original)))
     }
 
     @Test
-    fun versionTwoRoundTripPreservesMultipleTracksAndPresets() {
+    fun versionTwoRoundTripPreservesMultipleTracksPresetsAndProjectName() {
         val tracks = listOf(
             ScoreTrack(
                 id = 1,
@@ -55,6 +56,7 @@ class ScoreProjectCodecTest {
             tracks = tracks,
             activeTrackIndex = 1,
             bpm = 132,
+            projectName = "Boss Theme",
         )
 
         val decoded = requireNotNull(ScoreProjectCodec.decode(ScoreProjectCodec.encode(original)))
@@ -64,7 +66,30 @@ class ScoreProjectCodecTest {
         assertEquals(2, decoded.tracks[1].presetBank)
         assertEquals(41, decoded.tracks[1].presetProgram)
         assertTrue(decoded.tracks[1].muted)
+        assertEquals("Boss Theme", decoded.projectName)
         assertEquals(original, decoded)
+    }
+
+    @Test
+    fun projectNameIsSanitizedAndOldV2WithoutNameDefaultsToUntitled() {
+        val dirty = ScoreProjectSnapshot(
+            events = emptyList(),
+            projectName = "  My\tSong\nName  ",
+        )
+        val decodedDirty = requireNotNull(ScoreProjectCodec.decode(ScoreProjectCodec.encode(dirty)))
+        assertEquals("My Song Name", decodedDirty.projectName)
+
+        val oldV2 = ScoreProjectCodec.decode(
+            """
+            SCOREFORGE\t2
+            BPM\t120
+            ACTIVE_TRACK\t0
+            TRACK\t1\tTrack 1\t0.0\t0\t-1\t-1
+            END_TRACK
+            """.trimIndent().replace("\\t", "\t")
+        )
+        requireNotNull(oldV2)
+        assertEquals("Untitled", oldV2.projectName)
     }
 
     @Test
@@ -85,6 +110,7 @@ class ScoreProjectCodecTest {
         assertEquals(decoded.events, decoded.tracks.single().events)
         assertEquals(3f, decoded.tracks.single().cursorBeat, 0.0001f)
         assertEquals(118, decoded.bpm)
+        assertEquals("Untitled", decoded.projectName)
     }
 
     @Test
@@ -127,6 +153,7 @@ class ScoreProjectCodecTest {
         assertEquals(0, decoded.pianoOctaveShift)
         assertFalse(decoded.staffSharpInput)
         assertEquals(1, decoded.tracks.size)
+        assertEquals("Untitled", decoded.projectName)
     }
 
     @Test
