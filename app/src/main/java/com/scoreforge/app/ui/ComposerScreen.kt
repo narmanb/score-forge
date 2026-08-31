@@ -17,6 +17,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -25,6 +26,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.scoreforge.app.audio.LiveInstrumentBus
 import com.scoreforge.app.audio.ScorePlaybackEngine
@@ -32,11 +34,17 @@ import com.scoreforge.app.audio.SoundFontEngine
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.ScoreEvent
 import com.scoreforge.app.music.ScoreNote
+import com.scoreforge.app.music.ScoreProjectRepository
+import com.scoreforge.app.music.ScoreProjectSnapshot
 import com.scoreforge.app.music.ScoreRest
 import com.scoreforge.app.music.ScoreTimeline
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 @Composable
 fun ScoreForgeComposerScreen() {
+    val context = LocalContext.current
     val events = remember { mutableStateListOf<ScoreEvent>() }
     val playback = remember { ScorePlaybackEngine() }
     val soundFontEngine = remember { SoundFontEngine.createOrNull() }
@@ -45,9 +53,39 @@ fun ScoreForgeComposerScreen() {
     var isPlaying by remember { mutableStateOf(false) }
     var cursorBeat by remember { mutableStateOf(0f) }
     var chordMode by remember { mutableStateOf(false) }
+    var draftLoaded by remember { mutableStateOf(false) }
 
     val noteCount = events.count { it is ScoreNote }
     val restCount = events.count { it is ScoreRest }
+    val draftEvents = events.toList()
+
+    LaunchedEffect(Unit) {
+        val restored = withContext(Dispatchers.IO) {
+            ScoreProjectRepository.loadDraft(context)
+        }
+        if (restored != null) {
+            events.clear()
+            events.addAll(restored.events)
+            bpm = restored.bpm
+            cursorBeat = restored.cursorBeat
+            selectedDuration = restored.selectedDuration
+        }
+        draftLoaded = true
+    }
+
+    LaunchedEffect(draftLoaded, draftEvents, bpm, cursorBeat, selectedDuration) {
+        if (!draftLoaded) return@LaunchedEffect
+        delay(250L)
+        val snapshot = ScoreProjectSnapshot(
+            events = draftEvents,
+            bpm = bpm,
+            cursorBeat = cursorBeat,
+            selectedDuration = selectedDuration,
+        )
+        withContext(Dispatchers.IO) {
+            ScoreProjectRepository.saveDraft(context, snapshot)
+        }
+    }
 
     DisposableEffect(playback, soundFontEngine) {
         playback.setSoundFontEngine(soundFontEngine)
@@ -275,7 +313,7 @@ private fun DurationSelector(
 
         Spacer(modifier = Modifier.weight(1f))
         Text(
-            "Drag notes in pitch + time • drag rests in time • 1/16 beat grid",
+            "Drag notes in pitch + time • drag rests in time • autosaved draft",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
