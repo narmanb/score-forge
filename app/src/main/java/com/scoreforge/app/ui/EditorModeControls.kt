@@ -2,6 +2,7 @@ package com.scoreforge.app.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
@@ -20,7 +21,9 @@ enum class ScoreEditorMode {
 @Composable
 fun EditorModeControls(
     mode: ScoreEditorMode,
+    showPianoKeyboard: Boolean,
     onModeChanged: (ScoreEditorMode) -> Unit,
+    onTogglePianoKeyboard: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Row(
@@ -41,6 +44,11 @@ fun EditorModeControls(
             Button(onClick = { onModeChanged(ScoreEditorMode.PIANO_ROLL) }) { Text("Piano Roll") }
         } else {
             OutlinedButton(onClick = { onModeChanged(ScoreEditorMode.PIANO_ROLL) }) { Text("Piano Roll") }
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+        OutlinedButton(onClick = onTogglePianoKeyboard) {
+            Text(if (showPianoKeyboard) "Hide Piano" else "Show Piano")
         }
     }
 }
