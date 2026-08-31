@@ -145,6 +145,15 @@ fun ScoreForgeComposerScreen() {
         pianoOctaveShift = (pianoOctaveShift + delta).coerceIn(-4, 3)
     }
 
+    fun deleteEvent(eventIndex: Int) {
+        stopPlayback()
+        LiveInstrumentBus.allNotesOff()
+        if (eventIndex in events.indices) {
+            events.removeAt(eventIndex)
+            if (!chordMode) cursorBeat = ScoreTimeline.endBeat(events)
+        }
+    }
+
     MaterialTheme(colorScheme = darkColorScheme()) {
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
@@ -224,6 +233,7 @@ fun ScoreForgeComposerScreen() {
                             if (!chordMode) cursorBeat = ScoreTimeline.endBeat(events)
                         }
                     },
+                    onDeleteEvent = ::deleteEvent,
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
@@ -354,9 +364,9 @@ private fun DurationSelector(
         Spacer(modifier = Modifier.weight(1f))
         Text(
             if (sharpInput) {
-                "Staff tap enters sharps • drag notes/rests • autosaved draft"
+                "Staff tap enters sharps • drag to move • long-press delete"
             } else {
-                "Staff tap enters naturals • drag notes/rests • autosaved draft"
+                "Staff tap enters naturals • drag to move • long-press delete"
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
