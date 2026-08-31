@@ -4,12 +4,13 @@ import android.os.Handler
 import android.os.Looper
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -198,6 +199,7 @@ fun SoundFontControls(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
             .padding(horizontal = 12.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
@@ -236,9 +238,7 @@ fun SoundFontControls(
                 ) {
                     presets.forEachIndexed { index, preset ->
                         DropdownMenuItem(
-                            text = {
-                                Text("${index + 1}. ${preset.displayName}")
-                            },
+                            text = { Text("${index + 1}. ${preset.displayName}") },
                             onClick = {
                                 selectPreset(index)
                                 presetMenuExpanded = false
@@ -258,7 +258,6 @@ fun SoundFontControls(
             Text("Default program", style = MaterialTheme.typography.labelLarge)
         }
 
-        Spacer(modifier = Modifier.weight(1f))
         Text(
             text = buildString {
                 currentSoundFont?.let { append(it.displayName).append(" • ") }
