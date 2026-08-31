@@ -16,6 +16,25 @@ class ScoreTimelineTest {
     }
 
     @Test
+    fun dottedNotesAndRestsExtendByHalfTheirBaseDuration() {
+        val dottedQuarter = ScoreNote(
+            midiPitch = 60,
+            duration = NoteDuration.QUARTER,
+            startBeat = 0f,
+            dotted = true,
+        )
+        val dottedHalfRest = ScoreRest(
+            duration = NoteDuration.HALF,
+            startBeat = 1.5f,
+            dotted = true,
+        )
+
+        assertEquals(1.5f, dottedQuarter.effectiveBeats, 0.0001f)
+        assertEquals(3f, dottedHalfRest.effectiveBeats, 0.0001f)
+        assertEquals(4.5f, ScoreTimeline.endBeat(listOf(dottedQuarter, dottedHalfRest)), 0.0001f)
+    }
+
+    @Test
     fun restsAreFirstClassTimelineEvents() {
         val events: List<ScoreEvent> = listOf(
             ScoreNote(60, NoteDuration.QUARTER, startBeat = 0f),
