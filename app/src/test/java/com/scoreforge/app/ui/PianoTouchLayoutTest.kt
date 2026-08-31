@@ -27,13 +27,12 @@ class PianoTouchLayoutTest {
     }
 
     @Test
-    fun sameHorizontalPositionFallsBackToWhiteBelowBlackKey() {
-        val cSharpCenter = whiteWidth * (
-            PianoTouchLayout.BLACK_KEY_X_OFFSET_FRACTION +
-                PianoTouchLayout.BLACK_KEY_WIDTH_FRACTION / 2f
-            )
+    fun lowerAreaUsesUnderlyingWhiteKeysAcrossBlackKeyOverlap() {
+        val leftSideOfCSharp = whiteWidth * 0.85f
+        val rightSideOfCSharp = whiteWidth * 1.15f
 
-        assertEquals(60, PianoTouchLayout.pitchAt(cSharpCenter, 190f, width, height))
+        assertEquals(60, PianoTouchLayout.pitchAt(leftSideOfCSharp, 190f, width, height))
+        assertEquals(62, PianoTouchLayout.pitchAt(rightSideOfCSharp, 190f, width, height))
     }
 
     @Test
