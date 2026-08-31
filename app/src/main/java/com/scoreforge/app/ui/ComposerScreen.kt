@@ -205,6 +205,30 @@ fun ScoreForgeComposerScreen() {
         applyProjectSnapshot(snapshot, clearHistory = true)
     }
 
+    fun newProject() {
+        stopPlayback()
+        LiveInstrumentBus.allNotesOff()
+        val preset = soundFontEngine?.selectedPreset
+        val blankTrack = ScoreTracks.defaultTrack().copy(
+            presetBank = preset?.bank,
+            presetProgram = preset?.program,
+        )
+        applyProjectSnapshot(
+            ScoreProjectSnapshot(
+                events = emptyList(),
+                bpm = 120,
+                cursorBeat = 0f,
+                selectedDuration = NoteDuration.QUARTER,
+                pianoOctaveShift = 0,
+                staffSharpInput = false,
+                tracks = listOf(blankTrack),
+                activeTrackIndex = 0,
+                projectName = "Untitled",
+            ),
+            clearHistory = true,
+        )
+    }
+
     fun renameProject(name: String) {
         projectName = ScoreProjectSnapshot.sanitizeProjectName(name)
     }
@@ -405,6 +429,7 @@ fun ScoreForgeComposerScreen() {
                 ProjectFileControls(
                     projectName = projectName,
                     snapshotProvider = ::currentProjectSnapshot,
+                    onNewProject = ::newProject,
                     onRenameProject = ::renameProject,
                     onOpenProject = ::openProject,
                 )
