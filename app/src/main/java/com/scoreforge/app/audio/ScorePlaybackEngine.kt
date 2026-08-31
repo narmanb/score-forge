@@ -38,6 +38,7 @@ class ScorePlaybackEngine {
     fun playScore(
         notes: List<ScoreNote>,
         bpm: Int,
+        throughBeat: Float = ScoreTimeline.endBeat(notes),
         onFinished: () -> Unit = {},
     ) {
         if (notes.isEmpty()) {
@@ -49,9 +50,10 @@ class ScorePlaybackEngine {
         val myGeneration = ++generation
         val snapshot = notes.toList()
         val safeBpm = bpm.coerceIn(30, 300)
+        val safeThroughBeat = maxOf(ScoreTimeline.endBeat(snapshot), throughBeat.coerceAtLeast(0f))
 
         thread(name = "ScoreForgePlayback", isDaemon = true) {
-            val rendered = renderBestAvailable(snapshot, safeBpm)
+            val rendered = renderBestAvailable(snapshot, safeBpm, safeThroughBeat)
             if (myGeneration != generation || rendered.pcm.isEmpty()) return@thread
 
             val track = createStaticTrack(rendered.pcm, rendered.channels)
@@ -83,8 +85,6 @@ class ScorePlaybackEngine {
     }
 
     fun previewPitch(midiPitch: Int) {
-        // Imported SoundFonts use a dedicated continuously-rendering FluidSynth instance so the
-        // touchscreen/staff preview is immediate and independent from full-score rendering.
         if (LiveInstrumentBus.previewPitch(midiPitch, velocity = 82)) return
 
         val preview = listOf(
@@ -96,8 +96,6 @@ class ScorePlaybackEngine {
             )
         )
 
-        // No SoundFont loaded yet: retain the tiny built-in voice so Score Forge is still audible
-        // immediately after installation.
         thread(name = "ScoreForgePreview", isDaemon = true) {
             val pcm = renderFallbackScore(preview, bpm = 240, tailSeconds = 0.08f)
             if (pcm.isEmpty()) return@thread
@@ -121,13 +119,20 @@ class ScorePlaybackEngine {
 
     fun release() = stop()
 
-    private fun renderBestAvailable(notes: List<ScoreNote>, bpm: Int): RenderedAudio {
+    private fun renderBestAvailable(
+        notes: List<ScoreNote>,
+        bpm: Int,
+        throughBeat: Float,
+    ): RenderedAudio {
         val soundFont = soundFontEngine
         if (soundFont != null && soundFont.hasSoundFont) {
-            val pcm = soundFont.renderScore(notes, bpm)
+            val pcm = soundFont.renderScore(notes, bpm, throughBeat = throughBeat)
             if (pcm.isNotEmpty()) return RenderedAudio(pcm, channels = 2)
         }
-        return RenderedAudio(renderFallbackScore(notes, bpm), channels = 1)
+        return RenderedAudio(
+            renderFallbackScore(notes, bpm, throughBeat = throughBeat),
+            channels = 1,
+        )
     }
 
     private fun createStaticTrack(pcm: ShortArray, channels: Int): AudioTrack =
@@ -172,11 +177,12 @@ class ScorePlaybackEngine {
         notes: List<ScoreNote>,
         bpm: Int,
         tailSeconds: Float = 0.35f,
+        throughBeat: Float = ScoreTimeline.endBeat(notes),
     ): ShortArray {
         if (notes.isEmpty()) return ShortArray(0)
 
         val secondsPerBeat = 60f / bpm.coerceIn(30, 300)
-        val endBeat = ScoreTimeline.endBeat(notes)
+        val endBeat = maxOf(ScoreTimeline.endBeat(notes), throughBeat.coerceAtLeast(0f))
         val totalSeconds = endBeat * secondsPerBeat + tailSeconds
         val totalSamples = (totalSeconds * sampleRate).toInt().coerceAtLeast(1)
         val mix = FloatArray(totalSamples)
