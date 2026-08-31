@@ -103,7 +103,11 @@ fun ScoreForgeComposerScreen() {
                         val notes = events.filterIsInstance<ScoreNote>()
                         if (notes.isNotEmpty()) {
                             isPlaying = true
-                            playback.playScore(notes, bpm) { isPlaying = false }
+                            playback.playScore(
+                                notes = notes,
+                                bpm = bpm,
+                                throughBeat = ScoreTimeline.endBeat(events),
+                            ) { isPlaying = false }
                         }
                     },
                     onStop = ::stopPlayback,
