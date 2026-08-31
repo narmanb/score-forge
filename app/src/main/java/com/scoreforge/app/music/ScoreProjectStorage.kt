@@ -79,15 +79,19 @@ object ScoreProjectCodec {
         append("ACTIVE_TRACK\t").append(activeTrackIndex).append('\n')
 
         tracks.forEach { track ->
+            val safeTrack = track.normalized()
             append("TRACK\t")
-                .append(track.id.coerceAtLeast(1)).append('\t')
-                .append(sanitizeTrackName(track.name)).append('\t')
-                .append(track.cursorBeat.coerceAtLeast(0f)).append('\t')
-                .append(if (track.muted) 1 else 0).append('\t')
-                .append(track.presetBank ?: NO_PRESET).append('\t')
-                .append(track.presetProgram ?: NO_PRESET).append('\n')
+                .append(safeTrack.id).append('\t')
+                .append(sanitizeTrackName(safeTrack.name)).append('\t')
+                .append(safeTrack.cursorBeat).append('\t')
+                .append(if (safeTrack.muted) 1 else 0).append('\t')
+                .append(safeTrack.presetBank ?: NO_PRESET).append('\t')
+                .append(safeTrack.presetProgram ?: NO_PRESET).append('\t')
+                .append(if (safeTrack.solo) 1 else 0).append('\t')
+                .append(safeTrack.volume).append('\t')
+                .append(safeTrack.pan).append('\n')
 
-            appendEvents(track.events)
+            appendEvents(safeTrack.events)
             append("END_TRACK\n")
         }
     }
@@ -232,7 +236,10 @@ object ScoreProjectCodec {
         val muted = parts[4] == "1"
         val bank = parts[5].toIntOrNull()?.takeIf { it >= 0 }
         val program = parts[6].toIntOrNull()?.takeIf { it in 0..127 }
-        return TrackBuilder(id, name, cursorBeat, bank, program, muted)
+        val solo = parts.getOrNull(7) == "1"
+        val volume = parts.getOrNull(8)?.toIntOrNull() ?: ScoreTrack.DEFAULT_VOLUME
+        val pan = parts.getOrNull(9)?.toIntOrNull() ?: ScoreTrack.CENTER_PAN
+        return TrackBuilder(id, name, cursorBeat, bank, program, muted, solo, volume, pan)
     }
 
     private fun decodeNote(parts: List<String>): ScoreNote? {
@@ -264,6 +271,9 @@ object ScoreProjectCodec {
         val presetBank: Int?,
         val presetProgram: Int?,
         val muted: Boolean,
+        val solo: Boolean,
+        val volume: Int,
+        val pan: Int,
         val events: MutableList<ScoreEvent> = mutableListOf(),
     ) {
         fun build(): ScoreTrack = ScoreTrack(
@@ -274,6 +284,9 @@ object ScoreProjectCodec {
             presetBank = presetBank,
             presetProgram = presetProgram,
             muted = muted,
+            solo = solo,
+            volume = volume,
+            pan = pan,
         )
     }
 }
