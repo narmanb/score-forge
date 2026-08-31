@@ -158,6 +158,20 @@ Java_com_scoreforge_app_audio_NativeFluidSynth_programChange(
 }
 
 extern "C" JNIEXPORT jint JNICALL
+Java_com_scoreforge_app_audio_NativeFluidSynth_controlChange(
+    JNIEnv*,
+    jobject,
+    jlong handle,
+    jint channel,
+    jint controller,
+    jint value
+) {
+    auto* engine = fromHandle(handle);
+    if (engine == nullptr || engine->synth == nullptr) return FLUID_FAILED;
+    return fluid_synth_cc(engine->synth, channel, controller, value);
+}
+
+extern "C" JNIEXPORT jint JNICALL
 Java_com_scoreforge_app_audio_NativeFluidSynth_noteOn(
     JNIEnv*,
     jobject,
