@@ -100,7 +100,7 @@ fun ScoreStaffEditor(
                         onDragCancel = { draggingEventIndex = -1 },
                     ) { change, _ ->
                         val event = events.getOrNull(draggingEventIndex) ?: return@detectDragGestures
-                        val latestStart = (visibleBeats - event.duration.beats).coerceAtLeast(0f)
+                        val latestStart = (visibleBeats - event.effectiveBeats).coerceAtLeast(0f)
                         val movedBeat = ScoreTimeline.quantizeBeat(
                             StaffTimeMapping.beatAtX(
                                 x = change.position.x,
@@ -240,6 +240,14 @@ private fun DrawScope.drawScoreNote(
             }
         }
     }
+
+    if (note.dotted) {
+        drawCircle(
+            color = Color(0xFF111111),
+            radius = 3.2f,
+            center = Offset(x + 16f, y),
+        )
+    }
 }
 
 private fun DrawScope.drawSharpAccidental(x: Float, y: Float) {
@@ -314,6 +322,14 @@ private fun DrawScope.drawScoreRest(
                 )
             }
         }
+    }
+
+    if (rest.dotted) {
+        drawCircle(
+            color = ink,
+            radius = 3.2f,
+            center = Offset(x + 16f, middleY),
+        )
     }
 }
 
