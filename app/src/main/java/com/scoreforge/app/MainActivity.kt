@@ -21,12 +21,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -45,7 +42,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -57,9 +53,7 @@ import kotlin.math.abs
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            ScoreForgeApp()
-        }
+        setContent { ScoreForgeApp() }
     }
 }
 
@@ -74,7 +68,7 @@ private fun ScoreForgeApp() {
                 HeaderBar(
                     noteCount = notes.size,
                     onUndo = { if (notes.isNotEmpty()) notes.removeAt(notes.lastIndex) },
-                    onClear = { notes.clear() },
+                    onClear = notes::clear,
                 )
 
                 DurationSelector(
@@ -91,12 +85,12 @@ private fun ScoreForgeApp() {
                 )
 
                 PianoKeyboard(
-                    onPitchPressed = { midiPitch ->
-                        notes.add(ScoreNote(midiPitch = midiPitch, duration = selectedDuration))
+                    onPitchPressed = { pitch ->
+                        notes.add(ScoreNote(pitch, selectedDuration))
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(136.dp),
+                        .height(138.dp),
                 )
             }
         }
@@ -115,7 +109,7 @@ private fun HeaderBar(
             .background(MaterialTheme.colorScheme.surfaceVariant)
             .padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text("Score Forge", style = MaterialTheme.typography.titleLarge)
@@ -125,13 +119,8 @@ private fun HeaderBar(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-
-        OutlinedButton(onClick = onUndo, enabled = noteCount > 0) {
-            Text("Undo")
-        }
-        OutlinedButton(onClick = onClear, enabled = noteCount > 0) {
-            Text("Clear")
-        }
+        OutlinedButton(onClick = onUndo, enabled = noteCount > 0) { Text("Undo") }
+        OutlinedButton(onClick = onClear, enabled = noteCount > 0) { Text("Clear") }
     }
 }
 
@@ -144,27 +133,24 @@ private fun DurationSelector(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("Note:", style = MaterialTheme.typography.labelLarge)
         NoteDuration.entries.forEach { duration ->
-            val active = duration == selected
-            Button(
-                onClick = { onSelected(duration) },
-                modifier = Modifier.widthIn(min = 70.dp),
-                colors = if (active) {
-                    ButtonDefaults.buttonColors()
-                } else {
-                    ButtonDefaults.outlinedButtonColors()
-                },
-            ) {
-                Text(duration.displayName)
+            if (duration == selected) {
+                Button(onClick = { onSelected(duration) }) {
+                    Text(duration.displayName)
+                }
+            } else {
+                OutlinedButton(onClick = { onSelected(duration) }) {
+                    Text(duration.displayName)
+                }
             }
         }
         Spacer(modifier = Modifier.weight(1f))
         Text(
-            "Tap staff or piano • Drag staff notes vertically",
+            "Tap staff or piano • Drag notes vertically",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -191,16 +177,20 @@ private fun StaffEditor(
                 .padding(horizontal = 8.dp)
                 .pointerInput(notes.size, selectedDuration) {
                     detectTapGestures { position ->
-                        val pitch = pitchFromY(position.y, size.height.toFloat())
-                        notes.add(ScoreNote(pitch, selectedDuration))
+                        notes.add(
+                            ScoreNote(
+                                midiPitch = pitchFromY(position.y, size.height.toFloat()),
+                                duration = selectedDuration,
+                            )
+                        )
                     }
                 }
                 .pointerInput(notes.size) {
                     detectDragGestures(
-                        onDragStart = { start ->
+                        onDragStart = { position ->
                             draggingIndex = nearestNoteIndex(
                                 notes = notes,
-                                point = start,
+                                point = position,
                                 width = size.width.toFloat(),
                                 height = size.height.toFloat(),
                             )
@@ -208,11 +198,10 @@ private fun StaffEditor(
                         onDragEnd = { draggingIndex = -1 },
                         onDragCancel = { draggingIndex = -1 },
                     ) { change, _ ->
-                        change.consume()
                         if (draggingIndex in notes.indices) {
                             val old = notes[draggingIndex]
                             notes[draggingIndex] = old.copy(
-                                midiPitch = pitchFromY(change.position.y, size.height.toFloat()),
+                                midiPitch = pitchFromY(change.position.y, size.height.toFloat())
                             )
                         }
                     }
@@ -226,55 +215,43 @@ private fun StaffEditor(
 
             repeat(5) { line ->
                 val y = staffTop + lineSpacing * line
-                drawLine(
-                    color = Color(0xFF202020),
-                    start = Offset(left, y),
-                    end = Offset(right, y),
-                    strokeWidth = 2f,
-                )
+                drawLine(Color(0xFF202020), Offset(left, y), Offset(right, y), 2f)
             }
-
             drawLine(Color(0xFF202020), Offset(left, staffTop), Offset(left, staffBottom), 2f)
             drawLine(Color(0xFF202020), Offset(right, staffTop), Offset(right, staffBottom), 2f)
 
             notes.forEachIndexed { index, note ->
                 val x = noteX(index, notes.size, size.width)
                 val y = noteY(note.midiPitch, staffBottom, lineSpacing)
-
-                drawLedgerLinesIfNeeded(x, y, staffTop, staffBottom, lineSpacing)
+                drawLedgerLines(x, y, staffTop, staffBottom, lineSpacing)
 
                 val filled = note.duration != NoteDuration.WHOLE && note.duration != NoteDuration.HALF
                 if (filled) {
                     drawOval(
-                        color = Color(0xFF111111),
+                        Color(0xFF111111),
                         topLeft = Offset(x - 8f, y - 5.5f),
                         size = Size(16f, 11f),
                     )
                 } else {
                     drawOval(
-                        color = Color(0xFF111111),
+                        Color(0xFF111111),
                         topLeft = Offset(x - 8f, y - 5.5f),
                         size = Size(16f, 11f),
-                        style = Stroke(width = 2.5f),
+                        style = Stroke(2.5f),
                     )
                 }
 
                 if (note.duration != NoteDuration.WHOLE) {
-                    drawLine(
-                        color = Color(0xFF111111),
-                        start = Offset(x + 7f, y),
-                        end = Offset(x + 7f, y - lineSpacing * 2.8f),
-                        strokeWidth = 2.5f,
-                    )
-                }
-
-                if (note.duration == NoteDuration.EIGHTH || note.duration == NoteDuration.SIXTEENTH) {
-                    drawLine(
-                        color = Color(0xFF111111),
-                        start = Offset(x + 7f, y - lineSpacing * 2.8f),
-                        end = Offset(x + 17f, y - lineSpacing * 2.2f),
-                        strokeWidth = 2.5f,
-                    )
+                    val stemTop = y - lineSpacing * 2.8f
+                    drawLine(Color(0xFF111111), Offset(x + 7f, y), Offset(x + 7f, stemTop), 2.5f)
+                    if (note.duration == NoteDuration.EIGHTH || note.duration == NoteDuration.SIXTEENTH) {
+                        drawLine(
+                            Color(0xFF111111),
+                            Offset(x + 7f, stemTop),
+                            Offset(x + 17f, stemTop + lineSpacing * 0.6f),
+                            2.5f,
+                        )
+                    }
                 }
             }
         }
@@ -293,17 +270,15 @@ private fun StaffEditor(
 }
 
 private fun noteX(index: Int, count: Int, width: Float): Float {
-    val left = 58f
-    val right = 34f
-    val usable = (width - left - right).coerceAtLeast(1f)
+    val usable = (width - 92f).coerceAtLeast(1f)
     val slots = (count + 1).coerceAtLeast(8)
-    return left + usable * (index + 1f) / slots
+    return 58f + usable * (index + 1f) / slots
 }
 
 private fun noteY(midiPitch: Int, staffBottom: Float, lineSpacing: Float): Float {
     val e4Diatonic = 4 * 7 + 2
-    val offsetSteps = PitchNames.diatonicPosition(midiPitch) - e4Diatonic
-    return staffBottom - offsetSteps * (lineSpacing / 2f)
+    val steps = PitchNames.diatonicPosition(midiPitch) - e4Diatonic
+    return staffBottom - steps * (lineSpacing / 2f)
 }
 
 private fun pitchFromY(y: Float, height: Float): Int {
@@ -311,13 +286,12 @@ private fun pitchFromY(y: Float, height: Float): Int {
     val lineSpacing = height * 0.11f
     val staffBottom = staffTop + lineSpacing * 4f
     val e4Diatonic = 4 * 7 + 2
-    val diatonicOffset = ((staffBottom - y) / (lineSpacing / 2f)).toInt()
-    val targetDiatonic = e4Diatonic + diatonicOffset
+    val target = e4Diatonic + ((staffBottom - y) / (lineSpacing / 2f)).toInt()
 
     var bestPitch = 60
     var bestDistance = Int.MAX_VALUE
     for (pitch in 36..96) {
-        val distance = abs(PitchNames.diatonicPosition(pitch) - targetDiatonic)
+        val distance = abs(PitchNames.diatonicPosition(pitch) - target)
         if (distance < bestDistance || (distance == bestDistance && !PitchNames.hasSharp(pitch))) {
             bestDistance = distance
             bestPitch = pitch
@@ -340,10 +314,8 @@ private fun nearestNoteIndex(
     var nearest = -1
     var bestDistanceSquared = Float.MAX_VALUE
     notes.forEachIndexed { index, note ->
-        val x = noteX(index, notes.size, width)
-        val y = noteY(note.midiPitch, staffBottom, lineSpacing)
-        val dx = point.x - x
-        val dy = point.y - y
+        val dx = point.x - noteX(index, notes.size, width)
+        val dy = point.y - noteY(note.midiPitch, staffBottom, lineSpacing)
         val distanceSquared = dx * dx + dy * dy
         if (distanceSquared < bestDistanceSquared) {
             bestDistanceSquared = distanceSquared
@@ -353,22 +325,21 @@ private fun nearestNoteIndex(
     return if (bestDistanceSquared <= 48f * 48f) nearest else -1
 }
 
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawLedgerLinesIfNeeded(
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawLedgerLines(
     x: Float,
     y: Float,
     staffTop: Float,
     staffBottom: Float,
     lineSpacing: Float,
 ) {
-    val halfStep = lineSpacing / 2f
     var ledgerY = staffBottom + lineSpacing
-    while (y >= ledgerY - halfStep / 2f) {
+    while (y >= ledgerY - lineSpacing / 4f) {
         drawLine(Color(0xFF202020), Offset(x - 13f, ledgerY), Offset(x + 13f, ledgerY), 2f)
         ledgerY += lineSpacing
     }
 
     ledgerY = staffTop - lineSpacing
-    while (y <= ledgerY + halfStep / 2f) {
+    while (y <= ledgerY + lineSpacing / 4f) {
         drawLine(Color(0xFF202020), Offset(x - 13f, ledgerY), Offset(x + 13f, ledgerY), 2f)
         ledgerY -= lineSpacing
     }
@@ -445,7 +416,10 @@ private fun PianoKeyboard(
                         .width(whiteKeyWidth * 0.64f)
                         .fillMaxHeight(0.62f)
                         .zIndex(2f)
-                        .background(Color(0xFF151515), RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp))
+                        .background(
+                            Color(0xFF151515),
+                            RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp),
+                        )
                         .clickable { onPitchPressed(pitch) },
                 )
             }
