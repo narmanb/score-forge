@@ -161,17 +161,31 @@ fun ScoreForgeComposerScreen() {
         syncHistoryButtons()
     }
 
-    fun insertNote(pitch: Int, preview: Boolean) {
+    fun insertNoteAt(pitch: Int, startBeat: Float, preview: Boolean, advanceCursor: Boolean) {
         recordBeforeScoreEdit()
+        val quantizedStart = ScoreTimeline.quantizeBeat(startBeat)
         events.add(
             ScoreNote(
                 midiPitch = pitch,
                 duration = selectedDuration,
-                startBeat = cursorBeat,
+                startBeat = quantizedStart,
             )
         )
         if (preview) playback.previewPitch(pitch)
-        if (!chordMode) cursorBeat += selectedDuration.beats
+        if (advanceCursor && !chordMode) {
+            cursorBeat = quantizedStart + selectedDuration.beats
+        } else {
+            cursorBeat = maxOf(cursorBeat, quantizedStart + selectedDuration.beats)
+        }
+    }
+
+    fun insertStepNote(pitch: Int, preview: Boolean) {
+        insertNoteAt(
+            pitch = pitch,
+            startBeat = cursorBeat,
+            preview = preview,
+            advanceCursor = true,
+        )
     }
 
     fun insertRest() {
@@ -254,13 +268,18 @@ fun ScoreForgeComposerScreen() {
                     events = events,
                     selectedDuration = selectedDuration,
                     cursorBeat = cursorBeat,
-                    onAddPitch = { naturalPitch ->
+                    onAddPitch = { naturalPitch, tappedBeat ->
                         val pitch = if (staffSharpInput) {
                             PitchNames.sharpenIfAvailable(naturalPitch)
                         } else {
                             naturalPitch
                         }
-                        insertNote(pitch, preview = true)
+                        insertNoteAt(
+                            pitch = pitch,
+                            startBeat = tappedBeat,
+                            preview = true,
+                            advanceCursor = false,
+                        )
                     },
                     onBeginMove = { recordBeforeScoreEdit() },
                     onMoveNote = { eventIndex, pitch, startBeat ->
@@ -309,7 +328,7 @@ fun ScoreForgeComposerScreen() {
                     onOctaveDown = { changePianoOctave(-1) },
                     onOctaveUp = { changePianoOctave(1) },
                     onPitchDown = { pitch ->
-                        insertNote(pitch, preview = false)
+                        insertStepNote(pitch, preview = false)
                         if (!LiveInstrumentBus.noteOn(pitch, velocity = 96)) {
                             playback.previewPitch(pitch)
                         }
@@ -415,9 +434,9 @@ private fun DurationSelector(
         Spacer(modifier = Modifier.weight(1f))
         Text(
             if (sharpInput) {
-                "Staff tap enters sharps • drag to move • long-press delete"
+                "Staff tap enters sharps at tapped beat • drag to move • long-press delete"
             } else {
-                "Staff tap enters naturals • drag to move • long-press delete"
+                "Staff tap enters naturals at tapped beat • drag to move • long-press delete"
             },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
