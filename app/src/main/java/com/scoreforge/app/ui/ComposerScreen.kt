@@ -150,6 +150,13 @@ fun ScoreForgeComposerScreen() {
                             if (!chordMode) cursorBeat = ScoreTimeline.endBeat(events)
                         }
                     },
+                    onMoveRest = { eventIndex, startBeat ->
+                        val rest = events.getOrNull(eventIndex) as? ScoreRest
+                        if (rest != null) {
+                            events[eventIndex] = rest.copy(startBeat = startBeat)
+                            if (!chordMode) cursorBeat = ScoreTimeline.endBeat(events)
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
@@ -268,7 +275,7 @@ private fun DurationSelector(
 
         Spacer(modifier = Modifier.weight(1f))
         Text(
-            "Drag notes in pitch + time • rests preserve silence • 1/16 beat grid",
+            "Drag notes in pitch + time • drag rests in time • 1/16 beat grid",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
