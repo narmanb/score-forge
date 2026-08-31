@@ -32,6 +32,7 @@ import com.scoreforge.app.audio.LiveInstrumentBus
 import com.scoreforge.app.audio.ScorePlaybackEngine
 import com.scoreforge.app.audio.SoundFontEngine
 import com.scoreforge.app.music.NoteDuration
+import com.scoreforge.app.music.PitchNames
 import com.scoreforge.app.music.ScoreEvent
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreProjectRepository
@@ -54,6 +55,7 @@ fun ScoreForgeComposerScreen() {
     var cursorBeat by remember { mutableStateOf(0f) }
     var chordMode by remember { mutableStateOf(false) }
     var pianoOctaveShift by remember { mutableIntStateOf(0) }
+    var staffSharpInput by remember { mutableStateOf(false) }
     var draftLoaded by remember { mutableStateOf(false) }
 
     val noteCount = events.count { it is ScoreNote }
@@ -71,6 +73,7 @@ fun ScoreForgeComposerScreen() {
             cursorBeat = restored.cursorBeat
             selectedDuration = restored.selectedDuration
             pianoOctaveShift = restored.pianoOctaveShift
+            staffSharpInput = restored.staffSharpInput
         }
         draftLoaded = true
     }
@@ -82,6 +85,7 @@ fun ScoreForgeComposerScreen() {
         cursorBeat,
         selectedDuration,
         pianoOctaveShift,
+        staffSharpInput,
     ) {
         if (!draftLoaded) return@LaunchedEffect
         delay(250L)
@@ -91,6 +95,7 @@ fun ScoreForgeComposerScreen() {
             cursorBeat = cursorBeat,
             selectedDuration = selectedDuration,
             pianoOctaveShift = pianoOctaveShift,
+            staffSharpInput = staffSharpInput,
         )
         withContext(Dispatchers.IO) {
             ScoreProjectRepository.saveDraft(context, snapshot)
@@ -184,15 +189,24 @@ fun ScoreForgeComposerScreen() {
 
                 DurationSelector(
                     selected = selectedDuration,
+                    sharpInput = staffSharpInput,
                     onSelected = { selectedDuration = it },
                     onInsertRest = ::insertRest,
+                    onToggleSharpInput = { staffSharpInput = !staffSharpInput },
                 )
 
                 ScoreStaffEditor(
                     events = events,
                     selectedDuration = selectedDuration,
                     cursorBeat = cursorBeat,
-                    onAddPitch = { insertNote(it, preview = true) },
+                    onAddPitch = { naturalPitch ->
+                        val pitch = if (staffSharpInput) {
+                            PitchNames.sharpenIfAvailable(naturalPitch)
+                        } else {
+                            naturalPitch
+                        }
+                        insertNote(pitch, preview = true)
+                    },
                     onMoveNote = { eventIndex, pitch, startBeat ->
                         val note = events.getOrNull(eventIndex) as? ScoreNote
                         if (note != null) {
@@ -308,8 +322,10 @@ private fun formatBeat(beat: Float): String =
 @Composable
 private fun DurationSelector(
     selected: NoteDuration,
+    sharpInput: Boolean,
     onSelected: (NoteDuration) -> Unit,
     onInsertRest: () -> Unit,
+    onToggleSharpInput: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -329,9 +345,19 @@ private fun DurationSelector(
 
         Button(onClick = onInsertRest) { Text("Rest") }
 
+        if (sharpInput) {
+            Button(onClick = onToggleSharpInput) { Text("Staff ♯") }
+        } else {
+            OutlinedButton(onClick = onToggleSharpInput) { Text("Staff ♯") }
+        }
+
         Spacer(modifier = Modifier.weight(1f))
         Text(
-            "Drag notes in pitch + time • drag rests in time • autosaved draft",
+            if (sharpInput) {
+                "Staff tap enters sharps • drag notes/rests • autosaved draft"
+            } else {
+                "Staff tap enters naturals • drag notes/rests • autosaved draft"
+            },
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
