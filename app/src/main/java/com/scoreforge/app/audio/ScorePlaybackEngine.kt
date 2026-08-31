@@ -8,6 +8,8 @@ import android.os.Looper
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreTimeline
+import com.scoreforge.app.music.ScoreTrack
+import com.scoreforge.app.music.ScoreTracks
 import kotlin.concurrent.thread
 import kotlin.math.PI
 import kotlin.math.exp
@@ -41,6 +43,31 @@ class ScorePlaybackEngine {
         throughBeat: Float = ScoreTimeline.endBeat(notes),
         onFinished: () -> Unit = {},
     ) {
+        val compatibilityTrack = ScoreTrack(
+            id = 1,
+            name = "Track 1",
+            events = notes,
+            cursorBeat = throughBeat,
+        )
+        playTracks(
+            tracks = listOf(compatibilityTrack),
+            bpm = bpm,
+            throughBeat = throughBeat,
+            onFinished = onFinished,
+        )
+    }
+
+    fun playTracks(
+        tracks: List<ScoreTrack>,
+        bpm: Int,
+        throughBeat: Float = ScoreTracks.endBeat(tracks),
+        onFinished: () -> Unit = {},
+    ) {
+        val playableTracks = tracks
+            .filterNot { it.muted }
+            .take(ScoreTracks.MAX_TRACKS)
+            .map { it.copy(events = it.events.toList()) }
+        val notes = ScoreTracks.allNotes(playableTracks)
         if (notes.isEmpty()) {
             onFinished()
             return
@@ -48,12 +75,11 @@ class ScorePlaybackEngine {
 
         stop()
         val myGeneration = ++generation
-        val snapshot = notes.toList()
         val safeBpm = bpm.coerceIn(30, 300)
-        val safeThroughBeat = maxOf(ScoreTimeline.endBeat(snapshot), throughBeat.coerceAtLeast(0f))
+        val safeThroughBeat = maxOf(ScoreTracks.endBeat(playableTracks), throughBeat.coerceAtLeast(0f))
 
         thread(name = "ScoreForgePlayback", isDaemon = true) {
-            val rendered = renderBestAvailable(snapshot, safeBpm, safeThroughBeat)
+            val rendered = renderBestAvailableTracks(playableTracks, safeBpm, safeThroughBeat)
             if (myGeneration != generation || rendered.pcm.isEmpty()) return@thread
 
             val track = createStaticTrack(rendered.pcm, rendered.channels)
@@ -119,18 +145,23 @@ class ScorePlaybackEngine {
 
     fun release() = stop()
 
-    private fun renderBestAvailable(
-        notes: List<ScoreNote>,
+    private fun renderBestAvailableTracks(
+        tracks: List<ScoreTrack>,
         bpm: Int,
         throughBeat: Float,
     ): RenderedAudio {
         val soundFont = soundFontEngine
         if (soundFont != null && soundFont.hasSoundFont) {
-            val pcm = soundFont.renderScore(notes, bpm, throughBeat = throughBeat)
+            val pcm = soundFont.renderTracks(tracks, bpm, throughBeat = throughBeat)
             if (pcm.isNotEmpty()) return RenderedAudio(pcm, channels = 2)
         }
+
         return RenderedAudio(
-            renderFallbackScore(notes, bpm, throughBeat = throughBeat),
+            pcm = renderFallbackScore(
+                notes = ScoreTracks.allNotes(tracks),
+                bpm = bpm,
+                throughBeat = throughBeat,
+            ),
             channels = 1,
         )
     }
