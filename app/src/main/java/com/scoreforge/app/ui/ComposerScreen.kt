@@ -65,6 +65,7 @@ fun ScoreForgeComposerScreen() {
     var draftLoaded by remember { mutableStateOf(false) }
     var canUndo by remember { mutableStateOf(false) }
     var canRedo by remember { mutableStateOf(false) }
+    var mixerGestureHistoryRecorded by remember { mutableStateOf(false) }
 
     val safeActiveTrackIndex = activeTrackIndex.coerceIn(0, tracks.lastIndex)
     val activeTrack = tracks[safeActiveTrackIndex]
@@ -74,7 +75,8 @@ fun ScoreForgeComposerScreen() {
     val activeRestCount = activeEvents.count { it is ScoreRest }
     val draftTracks = tracks.map { it.copy(events = it.events.toList()) }
     val arrangementEndBeat = tracks.maxOfOrNull { ScoreTimeline.endBeat(it.events) } ?: 0f
-    val playableNoteCount = tracks.filterNot { it.muted }.sumOf { track ->
+    val audibleTracks = ScoreTracks.audibleTracks(tracks)
+    val playableNoteCount = audibleTracks.sumOf { track ->
         track.events.count { it is ScoreNote }
     }
 
@@ -136,6 +138,7 @@ fun ScoreForgeComposerScreen() {
         tracks.clear()
         tracks.addAll(restoredTracks)
         activeTrackIndex = state.activeTrackIndex.coerceIn(0, tracks.lastIndex)
+        mixerGestureHistoryRecorded = false
     }
 
     fun applyProjectSnapshot(snapshot: ScoreProjectSnapshot, clearHistory: Boolean) {
@@ -149,6 +152,7 @@ fun ScoreForgeComposerScreen() {
         pianoOctaveShift = snapshot.pianoOctaveShift.coerceIn(-4, 3)
         staffSharpInput = snapshot.staffSharpInput
         chordMode = false
+        mixerGestureHistoryRecorded = false
         if (clearHistory) editHistory.clear()
         syncHistoryButtons()
     }
@@ -182,6 +186,10 @@ fun ScoreForgeComposerScreen() {
         withContext(Dispatchers.IO) {
             ScoreProjectRepository.saveDraft(context, snapshot)
         }
+    }
+
+    LaunchedEffect(activeTrack.id, activeTrack.volume, activeTrack.pan) {
+        LiveInstrumentBus.setMixer(activeTrack.volume, activeTrack.pan)
     }
 
     DisposableEffect(playback, soundFontEngine) {
@@ -327,6 +335,7 @@ fun ScoreForgeComposerScreen() {
         if (index !in tracks.indices || index == activeIndex()) return
         stopPlayback()
         LiveInstrumentBus.allNotesOff()
+        mixerGestureHistoryRecorded = false
         activeTrackIndex = index
     }
 
@@ -342,6 +351,7 @@ fun ScoreForgeComposerScreen() {
         )
         tracks.add(newTrack)
         activeTrackIndex = tracks.lastIndex
+        mixerGestureHistoryRecorded = false
         syncHistoryButtons()
     }
 
@@ -359,6 +369,39 @@ fun ScoreForgeComposerScreen() {
         replaceActiveTrack { it.copy(muted = !it.muted) }
     }
 
+    fun toggleActiveTrackSolo() {
+        stopPlayback()
+        LiveInstrumentBus.allNotesOff()
+        recordBeforeScoreEdit()
+        replaceActiveTrack { it.copy(solo = !it.solo) }
+    }
+
+    fun beginMixerGestureIfNeeded() {
+        if (!mixerGestureHistoryRecorded) {
+            recordBeforeScoreEdit()
+            mixerGestureHistoryRecorded = true
+        }
+    }
+
+    fun changeActiveTrackVolume(volume: Int) {
+        val safeVolume = volume.coerceIn(ScoreTrack.MIN_VOLUME, ScoreTrack.MAX_VOLUME)
+        if (safeVolume == currentTrack().volume) return
+        beginMixerGestureIfNeeded()
+        replaceActiveTrack { it.copy(volume = safeVolume) }
+    }
+
+    fun changeActiveTrackPan(pan: Int) {
+        val safePan = pan.coerceIn(ScoreTrack.MIN_PAN, ScoreTrack.MAX_PAN)
+        if (safePan == currentTrack().pan) return
+        beginMixerGestureIfNeeded()
+        replaceActiveTrack { it.copy(pan = safePan) }
+    }
+
+    fun finishMixerGesture() {
+        mixerGestureHistoryRecorded = false
+        syncHistoryButtons()
+    }
+
     fun deleteActiveTrack() {
         if (tracks.size <= 1) return
         stopPlayback()
@@ -367,6 +410,7 @@ fun ScoreForgeComposerScreen() {
         val index = activeIndex()
         tracks.removeAt(index)
         activeTrackIndex = index.coerceAtMost(tracks.lastIndex)
+        mixerGestureHistoryRecorded = false
         syncHistoryButtons()
     }
 
@@ -441,6 +485,11 @@ fun ScoreForgeComposerScreen() {
                     onAddTrack = ::addTrack,
                     onRenameTrack = ::renameActiveTrack,
                     onToggleMute = ::toggleActiveTrackMute,
+                    onToggleSolo = ::toggleActiveTrackSolo,
+                    onVolumeChange = ::changeActiveTrackVolume,
+                    onVolumeChangeFinished = ::finishMixerGesture,
+                    onPanChange = ::changeActiveTrackPan,
+                    onPanChangeFinished = ::finishMixerGesture,
                     onDeleteTrack = ::deleteActiveTrack,
                 )
 
