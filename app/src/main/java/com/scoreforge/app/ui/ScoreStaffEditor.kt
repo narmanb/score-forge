@@ -1,5 +1,7 @@
 package com.scoreforge.app.ui
 
+import android.graphics.Paint
+import android.graphics.Typeface
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -7,16 +9,15 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -24,6 +25,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import com.scoreforge.app.music.NoteDuration
@@ -34,6 +37,9 @@ import com.scoreforge.app.music.ScoreRest
 import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
 import kotlin.math.abs
+
+private const val STAFF_TOP_FRACTION = 0.20f
+private const val STAFF_LINE_SPACING_FRACTION = 0.12f
 
 @Composable
 fun ScoreStaffEditor(
@@ -53,10 +59,12 @@ fun ScoreStaffEditor(
     val visibleBeats = ScoreTimeline.visibleBeats(events, throughBeat = cursorBeat)
 
     Box(
-        modifier = modifier
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+        modifier = Modifier
+            .height(220.dp)
+            .then(modifier)
+            .padding(horizontal = 12.dp, vertical = 2.dp)
             .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
-            .background(Color(0xFFF7F4EA), RoundedCornerShape(8.dp)),
+            .background(Color(0xFFF9F7EF), RoundedCornerShape(8.dp)),
     ) {
         Canvas(
             modifier = Modifier
@@ -143,10 +151,10 @@ fun ScoreStaffEditor(
                     }
                 },
         ) {
-            val staffTop = size.height * 0.24f
-            val lineSpacing = size.height * 0.11f
+            val staffTop = size.height * STAFF_TOP_FRACTION
+            val lineSpacing = size.height * STAFF_LINE_SPACING_FRACTION
             val staffBottom = staffTop + lineSpacing * 4f
-            val left = 24f
+            val left = 20f
             val right = size.width - 14f
 
             repeat(5) { line ->
@@ -154,14 +162,22 @@ fun ScoreStaffEditor(
                 drawLine(Color(0xFF202020), Offset(left, y), Offset(right, y), 2f)
             }
 
-            var measureBeat = 0f
+            drawLine(
+                color = Color(0xFF202020),
+                start = Offset(left, staffTop),
+                end = Offset(left, staffBottom),
+                strokeWidth = 2.4f,
+            )
+            drawNotationHeader(staffTop, lineSpacing)
+
+            var measureBeat = ScoreTimeline.BEATS_PER_MEASURE
             while (measureBeat <= visibleBeats + 0.001f) {
                 val x = StaffTimeMapping.xAtBeat(measureBeat, visibleBeats, size.width)
                 drawLine(
-                    color = Color(0xFF383838),
+                    color = Color(0xFF303030),
                     start = Offset(x, staffTop),
                     end = Offset(x, staffBottom),
-                    strokeWidth = if (measureBeat == 0f || measureBeat >= visibleBeats) 2.4f else 1.4f,
+                    strokeWidth = if (measureBeat >= visibleBeats) 2.4f else 1.5f,
                 )
                 measureBeat += ScoreTimeline.BEATS_PER_MEASURE
             }
@@ -196,21 +212,39 @@ fun ScoreStaffEditor(
 
             val cursorX = StaffTimeMapping.xAtBeat(cursorBeat, visibleBeats, size.width)
             drawLine(
-                color = Color(0xFF5E6A73),
-                start = Offset(cursorX, staffTop - lineSpacing * 0.70f),
-                end = Offset(cursorX, staffBottom + lineSpacing * 0.70f),
+                color = Color(0xFF6A7280),
+                start = Offset(cursorX, staffTop - lineSpacing * 0.55f),
+                end = Offset(cursorX, staffBottom + lineSpacing * 0.55f),
                 strokeWidth = 2f,
             )
         }
+    }
+}
 
-        if (events.isEmpty()) {
-            Text(
-                "Tap a pitch + beat to place a ${selectedDuration.displayName.lowercase()} note, use Rest above, or play the piano below.",
-                modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp),
-                color = Color(0xFF555555),
-                style = MaterialTheme.typography.bodySmall,
-            )
+private fun DrawScope.drawNotationHeader(staffTop: Float, lineSpacing: Float) {
+    drawIntoCanvas { canvas ->
+        val ink = android.graphics.Color.rgb(20, 20, 20)
+        val clefPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ink
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+            textSize = lineSpacing * 4.7f
         }
+        canvas.nativeCanvas.drawText(
+            "𝄞",
+            52f,
+            staffTop + lineSpacing * 3.72f,
+            clefPaint,
+        )
+
+        val signaturePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = ink
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+            textSize = lineSpacing * 1.65f
+        }
+        canvas.nativeCanvas.drawText("4", 91f, staffTop + lineSpacing * 1.72f, signaturePaint)
+        canvas.nativeCanvas.drawText("4", 91f, staffTop + lineSpacing * 3.75f, signaturePaint)
     }
 }
 
@@ -370,8 +404,8 @@ private fun noteY(midiPitch: Int, staffBottom: Float, lineSpacing: Float): Float
 }
 
 private fun pitchFromY(y: Float, height: Float, preferSharp: Boolean = false): Int {
-    val staffTop = height * 0.24f
-    val lineSpacing = height * 0.11f
+    val staffTop = height * STAFF_TOP_FRACTION
+    val lineSpacing = height * STAFF_LINE_SPACING_FRACTION
     val staffBottom = staffTop + lineSpacing * 4f
     val e4Diatonic = 4 * 7 + 2
     val target = e4Diatonic + ((staffBottom - y) / (lineSpacing / 2f)).toInt()
@@ -399,8 +433,8 @@ private fun nearestEditableEventIndex(
     height: Float,
     visibleBeats: Float,
 ): Int {
-    val staffTop = height * 0.24f
-    val lineSpacing = height * 0.11f
+    val staffTop = height * STAFF_TOP_FRACTION
+    val lineSpacing = height * STAFF_LINE_SPACING_FRACTION
     val staffBottom = staffTop + lineSpacing * 4f
     val restY = staffTop + lineSpacing * 2f
 
