@@ -12,19 +12,30 @@ import com.scoreforge.app.ui.ScoreForgeComposerScreen
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        hideSystemBars()
         setContent { ScoreForgeComposerScreen() }
+        requestImmersiveMode()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        requestImmersiveMode()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideSystemBars()
+        if (hasFocus) requestImmersiveMode()
+    }
+
+    private fun requestImmersiveMode() {
+        window.decorView.post {
+            runCatching { hideSystemBars() }
+        }
     }
 
     private fun hideSystemBars() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             window.setDecorFitsSystemWindows(false)
-            window.insetsController?.apply {
+            window.decorView.windowInsetsController?.apply {
                 hide(WindowInsets.Type.systemBars())
                 systemBarsBehavior =
                     WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
