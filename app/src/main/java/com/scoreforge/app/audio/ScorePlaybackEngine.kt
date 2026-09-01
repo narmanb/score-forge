@@ -5,6 +5,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreTies
@@ -81,10 +82,15 @@ class ScorePlaybackEngine {
             playableTracks.maxOfOrNull { ScoreTimeline.endBeat(it.events) } ?: 0f,
             throughBeat.coerceAtLeast(0f),
         )
+        val startBeat = ScoreTransportBus.requestedStartBeat(safeThroughBeat)
+        ScoreTransportBus.begin(startBeat, safeThroughBeat)
 
         thread(name = "ScoreForgePlayback", isDaemon = true) {
             val rendered = renderBestAvailableTracks(playableTracks, safeBpm, safeThroughBeat)
-            if (myGeneration != generation || rendered.pcm.isEmpty()) return@thread
+            if (myGeneration != generation || rendered.pcm.isEmpty()) {
+                if (myGeneration == generation) ScoreTransportBus.stop()
+                return@thread
+            }
 
             val track = createStaticTrack(rendered.pcm, rendered.channels)
             if (myGeneration != generation) {
@@ -94,17 +100,39 @@ class ScorePlaybackEngine {
 
             activeTrack = track
             track.write(rendered.pcm, 0, rendered.pcm.size)
+
+            val totalFrames = rendered.pcm.size / rendered.channels.coerceAtLeast(1)
+            val secondsPerBeat = 60.0 / safeBpm
+            val requestedStartFrame = (startBeat * secondsPerBeat * sampleRate).toInt()
+            val startFrame = requestedStartFrame.coerceIn(0, (totalFrames - 1).coerceAtLeast(0))
+            if (startFrame > 0) {
+                try {
+                    track.setPlaybackHeadPosition(startFrame)
+                } catch (_: IllegalStateException) {
+                    // If a device rejects static seeking, playback still safely starts at zero.
+                }
+            }
+
             track.play()
 
-            val frames = rendered.pcm.size.toDouble() / rendered.channels.coerceAtLeast(1)
-            val durationMs = (frames / sampleRate * 1000.0).toLong() + 80L
+            val remainingFrames = (totalFrames - startFrame).coerceAtLeast(0)
+            val durationMs = (remainingFrames.toDouble() / sampleRate * 1000.0).toLong() + 80L
+            val startedAt = SystemClock.elapsedRealtime()
+
             try {
-                Thread.sleep(durationMs)
+                while (myGeneration == generation) {
+                    val elapsedMs = SystemClock.elapsedRealtime() - startedAt
+                    if (elapsedMs >= durationMs) break
+                    val beat = startBeat + (elapsedMs / 1000.0 / secondsPerBeat).toFloat()
+                    ScoreTransportBus.progress(beat.coerceAtMost(safeThroughBeat))
+                    Thread.sleep(16L)
+                }
             } catch (_: InterruptedException) {
                 // A stop/restart invalidates this generation below.
             }
 
             if (myGeneration == generation) {
+                ScoreTransportBus.finish(safeThroughBeat)
                 releaseTrack(track)
                 activeTrack = null
                 mainHandler.post(onFinished)
@@ -145,6 +173,7 @@ class ScorePlaybackEngine {
         generation++
         activeTrack?.let(::releaseTrack)
         activeTrack = null
+        ScoreTransportBus.stop()
     }
 
     fun release() = stop()
