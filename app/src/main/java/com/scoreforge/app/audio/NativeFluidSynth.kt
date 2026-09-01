@@ -1,8 +1,28 @@
 package com.scoreforge.app.audio
 
 internal object NativeFluidSynth {
+    private var nativeLoadFailure: Throwable? = null
+
+    val isAvailable: Boolean
+
+    val loadErrorMessage: String?
+        get() = nativeLoadFailure?.let { error ->
+            val detail = error.message?.takeIf { it.isNotBlank() } ?: error::class.java.simpleName
+            "${error::class.java.simpleName}: $detail"
+        }
+
     init {
-        System.loadLibrary("scoreforge_native")
+        isAvailable = try {
+            // Load the native dependency chain explicitly. Some Android linker/device combinations
+            // are less forgiving about resolving transitive JNI dependencies from an APK.
+            System.loadLibrary("c++_shared")
+            System.loadLibrary("fluidsynth")
+            System.loadLibrary("scoreforge_native")
+            true
+        } catch (error: Throwable) {
+            nativeLoadFailure = error
+            false
+        }
     }
 
     external fun create(sampleRate: Int): Long
