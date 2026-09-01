@@ -49,6 +49,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import com.scoreforge.app.audio.ScoreTransportBus
+import com.scoreforge.app.music.NoteArticulation
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
 import com.scoreforge.app.music.ScoreEvent
@@ -377,6 +378,24 @@ fun ScoreStaffEditor(
                         drawTieCurve(event, target, timelineLeftPx, beatWidthPx, geometry)
                     }
 
+                    events.forEachIndexed { sourceIndex, event ->
+                        val source = event as? ScoreNote ?: return@forEachIndexed
+                        if (
+                            source.articulation != NoteArticulation.LEGATO ||
+                            ScoreTies.hasValidTie(events, sourceIndex)
+                        ) return@forEachIndexed
+                        val target = events
+                            .filterIsInstance<ScoreNote>()
+                            .asSequence()
+                            .filter { it.startBeat > source.startBeat + 0.001f }
+                            .minByOrNull { it.startBeat }
+                            ?: return@forEachIndexed
+                        val writtenEnd = source.startBeat + source.effectiveBeats
+                        if (target.startBeat <= writtenEnd + 0.25f) {
+                            drawLegatoCurve(source, target, timelineLeftPx, beatWidthPx, geometry)
+                        }
+                    }
+
                     val playheadX = StaffTimelineLayout.xAtBeat(
                         transport.beat.coerceIn(0f, contentBeats),
                         timelineLeftPx,
@@ -617,6 +636,93 @@ private fun DrawScope.drawScoreNote(
             Offset(x + noteWidth * 0.95f, y),
         )
     }
+
+    drawArticulationMark(note, x, y, noteWidth, geometry)
+}
+
+private fun DrawScope.drawArticulationMark(
+    note: ScoreNote,
+    x: Float,
+    y: Float,
+    noteWidth: Float,
+    geometry: StaffGeometry,
+) {
+    if (note.articulation == NoteArticulation.NORMAL || note.articulation == NoteArticulation.LEGATO) {
+        return
+    }
+    val below = y >= geometry.middleLine
+    val direction = if (below) 1f else -1f
+    val markY = y + geometry.lineSpacing * 0.72f * direction
+    val ink = Color(0xFF111111)
+
+    when (note.articulation) {
+        NoteArticulation.STACCATO -> drawCircle(
+            ink,
+            maxOf(2.1f, geometry.lineSpacing * 0.065f),
+            Offset(x, markY),
+        )
+        NoteArticulation.TENUTO -> drawLine(
+            ink,
+            Offset(x - noteWidth * 0.45f, markY),
+            Offset(x + noteWidth * 0.45f, markY),
+            maxOf(1.5f, geometry.lineSpacing * 0.05f),
+        )
+        NoteArticulation.ACCENT -> {
+            val halfWidth = noteWidth * 0.58f
+            val halfHeight = geometry.lineSpacing * 0.14f
+            drawLine(
+                ink,
+                Offset(x - halfWidth, markY - halfHeight),
+                Offset(x + halfWidth, markY),
+                maxOf(1.5f, geometry.lineSpacing * 0.05f),
+            )
+            drawLine(
+                ink,
+                Offset(x - halfWidth, markY + halfHeight),
+                Offset(x + halfWidth, markY),
+                maxOf(1.5f, geometry.lineSpacing * 0.05f),
+            )
+        }
+        NoteArticulation.NORMAL,
+        NoteArticulation.LEGATO -> Unit
+    }
+}
+
+private fun DrawScope.drawLegatoCurve(
+    source: ScoreNote,
+    target: ScoreNote,
+    timelineLeftPx: Float,
+    pixelsPerBeat: Float,
+    geometry: StaffGeometry,
+) {
+    val sourceX = StaffTimelineLayout.xAtBeat(
+        source.startBeat + 0.16f,
+        timelineLeftPx,
+        pixelsPerBeat,
+    )
+    val targetX = StaffTimelineLayout.xAtBeat(
+        target.startBeat + 0.04f,
+        timelineLeftPx,
+        pixelsPerBeat,
+    )
+    val sourceY = noteY(source.midiPitch, geometry)
+    val targetY = noteY(target.midiPitch, geometry)
+    val below = (sourceY + targetY) / 2f >= geometry.middleLine
+    val baseline = if (below) {
+        maxOf(sourceY, targetY) + geometry.lineSpacing * 0.62f
+    } else {
+        minOf(sourceY, targetY) - geometry.lineSpacing * 0.62f
+    }
+    val controlY = baseline + geometry.lineSpacing * if (below) 0.68f else -0.68f
+    val path = Path().apply {
+        moveTo(sourceX, baseline)
+        quadraticBezierTo((sourceX + targetX) / 2f, controlY, targetX, baseline)
+    }
+    drawPath(
+        path,
+        Color(0xFF111111),
+        style = Stroke(width = maxOf(1.5f, geometry.lineSpacing * 0.05f)),
+    )
 }
 
 private fun DrawScope.drawTieCurve(
