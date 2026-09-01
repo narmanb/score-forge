@@ -23,6 +23,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
@@ -32,6 +33,7 @@ import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
 
 @Composable
@@ -40,10 +42,17 @@ fun MultitouchPianoKeyboard(
     octaveShift: Int,
     entryMode: PianoEntryMode,
     liveRecordingActive: Boolean,
+    selectedDuration: NoteDuration,
+    selectedDotted: Boolean,
+    tieEnabled: Boolean,
+    tieActive: Boolean,
     canUndo: Boolean,
     canRedo: Boolean,
     onUndo: () -> Unit,
     onRedo: () -> Unit,
+    onDurationSelected: (NoteDuration) -> Unit,
+    onToggleDotted: () -> Unit,
+    onToggleTie: () -> Unit,
     onEntryModeChanged: (PianoEntryMode) -> Unit,
     onStopLive: () -> Unit,
     onToggleChordMode: () -> Unit,
@@ -58,6 +67,7 @@ fun MultitouchPianoKeyboard(
     val activePitchCounts = remember { mutableStateMapOf<Int, Int>() }
     val safeOctaveShift = octaveShift.coerceIn(-4, 3)
     val currentOctaveShift by rememberUpdatedState(safeOctaveShift)
+    var durationPaletteOpen by remember { mutableStateOf(false) }
 
     fun visualPitch(layoutPitch: Int): Int =
         PianoTouchLayout.shiftedPitch(layoutPitch, safeOctaveShift)
@@ -217,110 +227,170 @@ fun MultitouchPianoKeyboard(
         ) {
             Text("Piano", style = MaterialTheme.typography.labelMedium, color = Color.White)
 
-            ChamferedControlButton(
-                label = "↶",
-                onClick = {
-                    releaseAllPitches()
-                    onUndo()
-                },
-                enabled = canUndo,
-            )
-            ChamferedControlButton(
-                label = "↷",
-                onClick = {
-                    releaseAllPitches()
-                    onRedo()
-                },
-                enabled = canRedo,
-            )
-
-            ChamferedControlButton(
-                label = "Oct −",
-                onClick = {
-                    releaseAllPitches()
-                    onOctaveDown()
-                },
-                enabled = safeOctaveShift > -4,
-            )
-            ChamferedControlButton(
-                label = "Oct +",
-                onClick = {
-                    releaseAllPitches()
-                    onOctaveUp()
-                },
-                enabled = safeOctaveShift < 3,
-            )
-
-            Text("Mode", style = MaterialTheme.typography.labelSmall, color = Color.White)
-            ChamferedControlButton(
-                label = "Step",
-                onClick = {
-                    if (entryMode != PianoEntryMode.STEP) {
-                        releaseAllPitches()
-                        onEntryModeChanged(PianoEntryMode.STEP)
-                    }
-                },
-                selected = entryMode == PianoEntryMode.STEP,
-            )
-            ChamferedControlButton(
-                label = "Natural",
-                onClick = {
-                    if (entryMode != PianoEntryMode.NATURAL) {
-                        releaseAllPitches()
-                        onEntryModeChanged(PianoEntryMode.NATURAL)
-                    }
-                },
-                selected = entryMode == PianoEntryMode.NATURAL,
-            )
-            ChamferedControlButton(
-                label = when {
-                    entryMode == PianoEntryMode.LIVE && liveRecordingActive -> "Stop Live"
-                    entryMode == PianoEntryMode.LIVE -> "Live Armed"
-                    else -> "Live"
-                },
-                onClick = {
-                    if (entryMode == PianoEntryMode.LIVE) {
-                        if (liveRecordingActive) onStopLive()
-                    } else {
-                        releaseAllPitches()
-                        onEntryModeChanged(PianoEntryMode.LIVE)
-                    }
-                },
-                selected = entryMode == PianoEntryMode.LIVE,
-            )
-
-            ChamferedControlButton(
-                label = "Rest",
-                onClick = {
-                    releaseAllPitches()
-                    onInsertRest()
-                },
-            )
-
-            if (entryMode == PianoEntryMode.STEP) {
+            if (durationPaletteOpen) {
                 ChamferedControlButton(
-                    label = if (chordMode) "Chord On" else "Chord Off",
+                    label = "← Back",
                     onClick = {
                         releaseAllPitches()
-                        onToggleChordMode()
+                        durationPaletteOpen = false
                     },
-                    selected = chordMode,
+                )
+
+                NoteDuration.entries.forEach { duration ->
+                    ChamferedControlButton(
+                        label = durationControlLabel(duration, dotted = false),
+                        onClick = {
+                            releaseAllPitches()
+                            onDurationSelected(duration)
+                        },
+                        selected = selectedDuration == duration,
+                    )
+                }
+
+                ChamferedControlButton(
+                    label = if (selectedDotted) "Dot On" else "Dot",
+                    onClick = {
+                        releaseAllPitches()
+                        onToggleDotted()
+                    },
+                    selected = selectedDotted,
                 )
                 ChamferedControlButton(
-                    label = "Next Chord",
+                    label = if (tieActive) "Tie On" else "Tie",
                     onClick = {
                         releaseAllPitches()
-                        onAdvanceChord()
+                        onToggleTie()
                     },
-                    enabled = chordMode,
+                    selected = tieActive,
+                    enabled = tieEnabled,
+                )
+            } else {
+                ChamferedControlButton(
+                    label = "↶",
+                    onClick = {
+                        releaseAllPitches()
+                        onUndo()
+                    },
+                    enabled = canUndo,
+                )
+                ChamferedControlButton(
+                    label = "↷",
+                    onClick = {
+                        releaseAllPitches()
+                        onRedo()
+                    },
+                    enabled = canRedo,
+                )
+
+                ChamferedControlButton(
+                    label = "Oct −",
+                    onClick = {
+                        releaseAllPitches()
+                        onOctaveDown()
+                    },
+                    enabled = safeOctaveShift > -4,
+                )
+                ChamferedControlButton(
+                    label = "Oct +",
+                    onClick = {
+                        releaseAllPitches()
+                        onOctaveUp()
+                    },
+                    enabled = safeOctaveShift < 3,
+                )
+
+                Text("Mode", style = MaterialTheme.typography.labelSmall, color = Color.White)
+                ChamferedControlButton(
+                    label = "Step",
+                    onClick = {
+                        if (entryMode != PianoEntryMode.STEP) {
+                            releaseAllPitches()
+                            onEntryModeChanged(PianoEntryMode.STEP)
+                        }
+                    },
+                    selected = entryMode == PianoEntryMode.STEP,
+                )
+                ChamferedControlButton(
+                    label = "Natural",
+                    onClick = {
+                        if (entryMode != PianoEntryMode.NATURAL) {
+                            releaseAllPitches()
+                            onEntryModeChanged(PianoEntryMode.NATURAL)
+                        }
+                    },
+                    selected = entryMode == PianoEntryMode.NATURAL,
+                )
+                ChamferedControlButton(
+                    label = when {
+                        entryMode == PianoEntryMode.LIVE && liveRecordingActive -> "Stop Live"
+                        entryMode == PianoEntryMode.LIVE -> "Live Armed"
+                        else -> "Live"
+                    },
+                    onClick = {
+                        if (entryMode == PianoEntryMode.LIVE) {
+                            if (liveRecordingActive) onStopLive()
+                        } else {
+                            releaseAllPitches()
+                            onEntryModeChanged(PianoEntryMode.LIVE)
+                        }
+                    },
+                    selected = entryMode == PianoEntryMode.LIVE,
+                )
+
+                ChamferedControlButton(
+                    label = durationControlLabel(selectedDuration, selectedDotted),
+                    onClick = {
+                        releaseAllPitches()
+                        durationPaletteOpen = true
+                    },
+                )
+
+                ChamferedControlButton(
+                    label = "Rest",
+                    onClick = {
+                        releaseAllPitches()
+                        onInsertRest()
+                    },
+                    enabled = entryMode != PianoEntryMode.LIVE,
+                )
+
+                if (entryMode == PianoEntryMode.STEP) {
+                    ChamferedControlButton(
+                        label = if (chordMode) "Chord On" else "Chord Off",
+                        onClick = {
+                            releaseAllPitches()
+                            onToggleChordMode()
+                        },
+                        selected = chordMode,
+                    )
+                    ChamferedControlButton(
+                        label = "Next Chord",
+                        onClick = {
+                            releaseAllPitches()
+                            onAdvanceChord()
+                        },
+                        enabled = chordMode,
+                    )
+                }
+
+                Text(
+                    "${PitchNames.name(visualPitch(60))}–${PitchNames.name(visualPitch(83))}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
                 )
             }
-
-            Text(
-                "${PitchNames.name(visualPitch(60))}–${PitchNames.name(visualPitch(83))}",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White,
-            )
         }
+
     }
+}
+
+private fun durationControlLabel(duration: NoteDuration, dotted: Boolean): String {
+    val glyph = when (duration) {
+        NoteDuration.WHOLE -> "𝅝"
+        NoteDuration.HALF -> "𝅗𝅥"
+        NoteDuration.QUARTER -> "♩"
+        NoteDuration.EIGHTH -> "♪"
+        NoteDuration.SIXTEENTH -> "𝅘𝅥𝅯"
+    }
+    return "$glyph ${duration.displayName}${if (dotted) " •" else ""}"
 }

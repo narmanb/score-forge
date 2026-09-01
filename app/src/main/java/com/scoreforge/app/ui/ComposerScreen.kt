@@ -873,10 +873,17 @@ fun ScoreForgeComposerScreen() {
                         octaveShift = pianoOctaveShift,
                         entryMode = pianoEntryMode,
                         liveRecordingActive = liveRecordingActive,
+                        selectedDuration = selectedDuration,
+                        selectedDotted = selectedDotted,
+                        tieEnabled = canTieSelected,
+                        tieActive = selectedTieActive,
                         canUndo = canUndo,
                         canRedo = canRedo,
                         onUndo = ::undoScore,
                         onRedo = ::redoScore,
+                        onDurationSelected = { selectedDuration = it },
+                        onToggleDotted = { selectedDotted = !selectedDotted },
+                        onToggleTie = ::toggleSelectedTie,
                         onEntryModeChanged = { mode ->
                             if (pianoEntryMode == PianoEntryMode.LIVE) stopLiveRecording()
                             cancelNaturalEntryGroup()
