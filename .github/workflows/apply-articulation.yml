@@ -1,0 +1,30 @@
+name: Apply articulation implementation
+
+on:
+  push:
+    branches: [feature/articulation-controls]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: feature/articulation-controls
+
+      - name: Apply articulation patch
+        run: python ci/apply_articulation_patch.py
+
+      - name: Commit source changes
+        run: |
+          rm ci/apply_articulation_patch.py
+          rm .github/workflows/apply-articulation.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Add articulation controls and playback"
+          git push origin HEAD:feature/articulation-controls
