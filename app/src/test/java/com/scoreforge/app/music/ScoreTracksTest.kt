@@ -85,7 +85,7 @@ class ScoreTracksTest {
         ).normalized()
 
         assertEquals("Lead Synth", track.name)
-        assertEquals(6f, track.cursorBeat, 0.0001f)
+        assertEquals(0f, track.cursorBeat, 0.0001f)
         assertEquals(0, track.presetBank)
         assertEquals(127, track.presetProgram)
         assertEquals(ScoreTrack.MAX_VOLUME, track.volume)
@@ -93,5 +93,23 @@ class ScoreTracksTest {
         assertFalse(track.muted)
         assertFalse(track.solo)
         assertTrue(track.events.isNotEmpty())
+    }
+
+    @Test
+    fun normalizationPreservesChordAnchorBeforeEventEnd() {
+        val anchor = 2f
+        val first = ScoreTrack(
+            id = 1,
+            name = "Chord",
+            cursorBeat = anchor,
+            events = listOf(ScoreNote(60, NoteDuration.QUARTER, startBeat = anchor)),
+        ).normalized()
+        val second = first.copy(
+            events = first.events + ScoreNote(64, NoteDuration.QUARTER, startBeat = first.cursorBeat),
+        ).normalized()
+
+        assertEquals(anchor, first.cursorBeat, 0.0001f)
+        assertEquals(anchor, second.cursorBeat, 0.0001f)
+        assertEquals(listOf(anchor, anchor), second.notes.map { it.startBeat })
     }
 }

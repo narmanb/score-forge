@@ -183,12 +183,15 @@ fun ScoreForgeComposerScreen() {
         val held = liveHeldInputs.remove(pitch) ?: return
         val track = currentTrack()
         val note = track.events.getOrNull(held.eventIndex) as? ScoreNote ?: return
-        val duration = NaturalEntryTiming.durationForHoldMs(
+        val written = LiveEntryTiming.quantizedDurationForHoldMs(
             holdMs = finishedAtMs - held.startedAtMs,
             bpm = held.bpmAtPress,
         )
         val updatedEvents = track.events.toMutableList().apply {
-            this[held.eventIndex] = note.copy(duration = duration, dotted = false)
+            this[held.eventIndex] = note.copy(
+                duration = written.duration,
+                dotted = written.dotted,
+            )
         }
         replaceActiveTrack {
             it.copy(
@@ -346,14 +349,14 @@ fun ScoreForgeComposerScreen() {
                 liveHeldInputs.values.forEach { held ->
                     val note = updatedEvents.getOrNull(held.eventIndex) as? ScoreNote
                         ?: return@forEach
-                    val duration = NaturalEntryTiming.durationForHoldMs(
+                    val written = LiveEntryTiming.quantizedDurationForHoldMs(
                         holdMs = now - held.startedAtMs,
                         bpm = held.bpmAtPress,
                     )
-                    if (note.duration != duration || note.dotted) {
+                    if (note.duration != written.duration || note.dotted != written.dotted) {
                         updatedEvents[held.eventIndex] = note.copy(
-                            duration = duration,
-                            dotted = false,
+                            duration = written.duration,
+                            dotted = written.dotted,
                         )
                         changed = true
                     }
@@ -425,6 +428,7 @@ fun ScoreForgeComposerScreen() {
             ),
             clearHistory = true,
         )
+        ScoreTransportBus.seek(0f)
     }
 
     fun renameProject(name: String) {
@@ -711,6 +715,19 @@ fun ScoreForgeComposerScreen() {
         replaceActiveTrack { it.copy(presetBank = bank, presetProgram = program) }
     }
 
+    fun clearActiveTrack() {
+        val track = currentTrack()
+        if (track.events.isEmpty()) return
+        stopPlayback()
+        stopLiveRecording()
+        cancelNaturalEntryGroup()
+        LiveInstrumentBus.allNotesOff()
+        recordBeforeScoreEdit()
+        replaceActiveTrack { it.copy(events = emptyList(), cursorBeat = 0f) }
+        selectedEventIndex = -1
+        syncHistoryButtons()
+    }
+
     MaterialTheme(colorScheme = darkColorScheme()) {
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(
@@ -729,8 +746,6 @@ fun ScoreForgeComposerScreen() {
                     bpm = bpm,
                     cursorBeat = activeCursorBeat,
                     isPlaying = isPlaying,
-                    canUndo = canUndo,
-                    canRedo = canRedo,
                     canPlay = playableNoteCount > 0 && !liveRecordingActive,
                     onTempoDown = { bpm = (bpm - 5).coerceAtLeast(30) },
                     onTempoUp = { bpm = (bpm + 5).coerceAtMost(300) },
@@ -745,26 +760,15 @@ fun ScoreForgeComposerScreen() {
                         }
                     },
                     onStop = ::stopPlayback,
-                    onUndo = ::undoScore,
-                    onRedo = ::redoScore,
-                    onClearTrack = {
-                        val track = currentTrack()
-                        if (track.events.isNotEmpty()) {
-                            stopPlayback()
-                            stopLiveRecording()
-                            cancelNaturalEntryGroup()
-                            LiveInstrumentBus.allNotesOff()
-                            recordBeforeScoreEdit()
-                            replaceActiveTrack { it.copy(events = emptyList(), cursorBeat = 0f) }
-                            selectedEventIndex = -1
-                        }
-                    },
                 )
 
                 ProjectFileControls(
                     projectName = projectName,
+                    activeTrackName = activeTrack.name,
+                    canClearTrack = activeEvents.isNotEmpty(),
                     snapshotProvider = ::currentProjectSnapshot,
                     onNewProject = ::newProject,
+                    onClearTrack = ::clearActiveTrack,
                     onRenameProject = ::renameProject,
                     onOpenProject = ::openProject,
                 )
@@ -842,6 +846,7 @@ fun ScoreForgeComposerScreen() {
                         onMoveNote = ::moveActiveNote,
                         onMoveRest = ::moveActiveRest,
                         onDeleteEvent = ::deleteEvent,
+                        onVerticalPan = { dragY -> pageScrollState.dispatchRawDelta(-dragY) },
                         modifier = Modifier.fillMaxWidth().height(300.dp),
                     )
 
@@ -868,6 +873,10 @@ fun ScoreForgeComposerScreen() {
                         octaveShift = pianoOctaveShift,
                         entryMode = pianoEntryMode,
                         liveRecordingActive = liveRecordingActive,
+                        canUndo = canUndo,
+                        canRedo = canRedo,
+                        onUndo = ::undoScore,
+                        onRedo = ::redoScore,
                         onEntryModeChanged = { mode ->
                             if (pianoEntryMode == PianoEntryMode.LIVE) stopLiveRecording()
                             cancelNaturalEntryGroup()
@@ -946,18 +955,12 @@ private fun HeaderBar(
     bpm: Int,
     cursorBeat: Float,
     isPlaying: Boolean,
-    canUndo: Boolean,
-    canRedo: Boolean,
     canPlay: Boolean,
     onTempoDown: () -> Unit,
     onTempoUp: () -> Unit,
     onPlay: () -> Unit,
     onStop: () -> Unit,
-    onUndo: () -> Unit,
-    onRedo: () -> Unit,
-    onClearTrack: () -> Unit,
 ) {
-    val eventCount = noteCount + restCount
 
     Row(
         modifier = Modifier
@@ -1007,9 +1010,6 @@ private fun HeaderBar(
         if (isPlaying) Button(onClick = onStop) { Text("Stop") }
         else Button(onClick = onPlay, enabled = canPlay) { Text("Play") }
 
-        OutlinedButton(onClick = onUndo, enabled = canUndo) { Text("Undo") }
-        OutlinedButton(onClick = onRedo, enabled = canRedo) { Text("Redo") }
-        OutlinedButton(onClick = onClearTrack, enabled = eventCount > 0) { Text("Clear Track") }
     }
 }
 

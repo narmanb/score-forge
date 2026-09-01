@@ -83,6 +83,7 @@ fun ScoreStaffEditor(
     onMoveNote: (eventIndex: Int, pitch: Int, startBeat: Float) -> Unit,
     onMoveRest: (eventIndex: Int, startBeat: Float) -> Unit,
     onDeleteEvent: (eventIndex: Int) -> Unit,
+    onVerticalPan: (dragY: Float) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var draggingEventIndex by remember { mutableIntStateOf(-1) }
@@ -251,7 +252,11 @@ fun ScoreStaffEditor(
                             ) { change, dragAmount ->
                                 val event = events.getOrNull(draggingEventIndex)
                                 if (event == null) {
-                                    scrollState.dispatchRawDelta(-dragAmount.x)
+                                    if (abs(dragAmount.x) >= abs(dragAmount.y)) {
+                                        scrollState.dispatchRawDelta(-dragAmount.x)
+                                    } else {
+                                        onVerticalPan(dragAmount.y)
+                                    }
                                     change.consume()
                                     return@detectDragGestures
                                 }

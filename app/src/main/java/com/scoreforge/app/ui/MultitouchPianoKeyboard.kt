@@ -40,6 +40,10 @@ fun MultitouchPianoKeyboard(
     octaveShift: Int,
     entryMode: PianoEntryMode,
     liveRecordingActive: Boolean,
+    canUndo: Boolean,
+    canRedo: Boolean,
+    onUndo: () -> Unit,
+    onRedo: () -> Unit,
     onEntryModeChanged: (PianoEntryMode) -> Unit,
     onStopLive: () -> Unit,
     onToggleChordMode: () -> Unit,
@@ -214,6 +218,23 @@ fun MultitouchPianoKeyboard(
             Text("Piano", style = MaterialTheme.typography.labelMedium, color = Color.White)
 
             ChamferedControlButton(
+                label = "↶",
+                onClick = {
+                    releaseAllPitches()
+                    onUndo()
+                },
+                enabled = canUndo,
+            )
+            ChamferedControlButton(
+                label = "↷",
+                onClick = {
+                    releaseAllPitches()
+                    onRedo()
+                },
+                enabled = canRedo,
+            )
+
+            ChamferedControlButton(
                 label = "Oct −",
                 onClick = {
                     releaseAllPitches()
@@ -286,7 +307,7 @@ fun MultitouchPianoKeyboard(
                     selected = chordMode,
                 )
                 ChamferedControlButton(
-                    label = "Next",
+                    label = "Next Chord",
                     onClick = {
                         releaseAllPitches()
                         onAdvanceChord()

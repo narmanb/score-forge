@@ -33,7 +33,7 @@ data class ScoreTrack(
             id = id.coerceAtLeast(1),
             name = name.replace('\t', ' ').replace('\n', ' ').trim().ifBlank { "Track $id" }.take(80),
             events = safeEvents,
-            cursorBeat = maxOf(cursorBeat.coerceAtLeast(0f), ScoreTimeline.endBeat(safeEvents)),
+            cursorBeat = cursorBeat.coerceAtLeast(0f),
             presetBank = presetBank?.coerceAtLeast(0),
             presetProgram = presetProgram?.coerceIn(0, 127),
             volume = volume.coerceIn(MIN_VOLUME, MAX_VOLUME),

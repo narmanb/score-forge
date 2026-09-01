@@ -34,8 +34,11 @@ import kotlinx.coroutines.withContext
 @Composable
 fun ProjectFileControls(
     projectName: String,
+    activeTrackName: String,
+    canClearTrack: Boolean,
     snapshotProvider: () -> ScoreProjectSnapshot,
     onNewProject: () -> Unit,
+    onClearTrack: () -> Unit,
     onRenameProject: (String) -> Unit,
     onOpenProject: (ScoreProjectSnapshot) -> Unit,
     modifier: Modifier = Modifier,
@@ -125,6 +128,16 @@ fun ProjectFileControls(
 
         OutlinedButton(onClick = { newProjectDialogOpen = true }) {
             Text("New")
+        }
+
+        OutlinedButton(
+            onClick = {
+                onClearTrack()
+                status = "Cleared $activeTrackName"
+            },
+            enabled = canClearTrack,
+        ) {
+            Text("Clear Track")
         }
 
         OutlinedButton(
