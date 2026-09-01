@@ -34,10 +34,10 @@ jobs:
         run: |
           mkdir -p app/src/main/assets/soundfonts
           curl --fail --location --retry 3 \
-            --output app/src/main/assets/soundfonts/FluidR3Mono_GM.sf3 \
-            https://raw.githubusercontent.com/musescore/MuseScore/2.1/share/sound/FluidR3Mono_GM.sf3
-          ACTUAL_BLOB="$(git hash-object app/src/main/assets/soundfonts/FluidR3Mono_GM.sf3)"
-          EXPECTED_BLOB="555bf79687570ad7ea9d4aba6cb5bfbc1724cdb2"
+            --output app/src/main/assets/soundfonts/GeneralUser-GS.sf2 \
+            https://raw.githubusercontent.com/mrbumpy409/GeneralUser-GS/684543d5e5efaef08d02be50dcda8d552478fa60/GeneralUser-GS.sf2
+          ACTUAL_BLOB="$(git hash-object app/src/main/assets/soundfonts/GeneralUser-GS.sf2)"
+          EXPECTED_BLOB="298b552d2e9d1307e03e5c5c99d2c046aaed9ec3"
           test "$ACTUAL_BLOB" = "$EXPECTED_BLOB" || {
             echo "Starter SoundFont integrity check failed: $ACTUAL_BLOB" >&2
             exit 1
