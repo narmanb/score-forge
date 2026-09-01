@@ -6,11 +6,13 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -19,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -64,29 +67,76 @@ fun MultitouchPianoKeyboard(
         }
     }
 
-    Column(modifier = modifier.background(MaterialTheme.colorScheme.surfaceVariant)) {
+    fun releaseAllPitches() {
+        activePitchCounts.keys.toList().forEach { pitch ->
+            activePitchCounts.remove(pitch)
+            onPitchUp(pitch)
+        }
+    }
+
+    // An octave change rebuilds the visible key-to-MIDI mapping. Never carry a held key from
+    // the old range into the new one.
+    LaunchedEffect(pitchOffset) {
+        releaseAllPitches()
+    }
+
+    Column(
+        modifier = Modifier
+            .height(170.dp)
+            .then(modifier)
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 12.dp, vertical = 3.dp),
+                .padding(horizontal = 8.dp, vertical = 1.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            Text(
-                if (chordMode) "Piano chord step entry • hold multiple keys" else "Piano step entry • press, hold, and slide",
-                style = MaterialTheme.typography.labelLarge,
-            )
+            Text("Piano", style = MaterialTheme.typography.labelLarge)
             Spacer(modifier = Modifier.weight(1f))
-            OutlinedButton(onClick = onOctaveDown, enabled = safeOctaveShift > -4) {
+
+            OutlinedButton(
+                onClick = {
+                    releaseAllPitches()
+                    onOctaveDown()
+                },
+                enabled = safeOctaveShift > -4,
+                modifier = Modifier.height(34.dp),
+                contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
+            ) {
                 Text("Oct −")
             }
-            OutlinedButton(onClick = onOctaveUp, enabled = safeOctaveShift < 3) {
+            OutlinedButton(
+                onClick = {
+                    releaseAllPitches()
+                    onOctaveUp()
+                },
+                enabled = safeOctaveShift < 3,
+                modifier = Modifier.height(34.dp),
+                contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
+            ) {
                 Text("Oct +")
             }
-            OutlinedButton(onClick = onToggleChordMode) {
-                Text(if (chordMode) "Chord: On" else "Chord: Off")
+            OutlinedButton(
+                onClick = {
+                    releaseAllPitches()
+                    onToggleChordMode()
+                },
+                modifier = Modifier.height(34.dp),
+                contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
+            ) {
+                Text(if (chordMode) "Chord On" else "Chord Off")
             }
-            OutlinedButton(onClick = onAdvanceChord, enabled = chordMode) {
+            OutlinedButton(
+                onClick = {
+                    releaseAllPitches()
+                    onAdvanceChord()
+                },
+                enabled = chordMode,
+                modifier = Modifier.height(34.dp),
+                contentPadding = PaddingValues(horizontal = 9.dp, vertical = 0.dp),
+            ) {
                 Text("Next")
             }
             Text(
@@ -100,7 +150,7 @@ fun MultitouchPianoKeyboard(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(horizontal = 12.dp, vertical = 3.dp)
+                .padding(horizontal = 8.dp, vertical = 2.dp)
                 .pointerInput(chordMode, pitchOffset) {
                     val pointerPitches = mutableMapOf<PointerId, Int>()
 
