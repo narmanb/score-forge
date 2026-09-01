@@ -1,6 +1,7 @@
 package com.scoreforge.app.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -47,5 +48,41 @@ class StaffTimelineLayoutTest {
         assertEquals(StaffTimelineLayout.MIN_ZOOM, StaffTimelineLayout.clampZoom(0.1f), 0.0001f)
         assertEquals(1f, StaffTimelineLayout.clampZoom(1f), 0.0001f)
         assertEquals(StaffTimelineLayout.MAX_ZOOM, StaffTimelineLayout.clampZoom(9f), 0.0001f)
+    }
+
+    @Test
+    fun entryFollowWaitsUntilCursorPassesAnchor() {
+        val target = StaffTimelineLayout.entryAutoFollowTarget(
+            cursorBeat = 10f,
+            currentScrollPx = 0,
+            maxScrollPx = 1000,
+            viewportWidthPx = 1000f,
+            timelineLeftPx = 80f,
+            pixelsPerBeat = 56f,
+        )
+        assertNull(target)
+    }
+
+    @Test
+    fun entryFollowAdvancesByCursorMovementAfterAnchor() {
+        val first = StaffTimelineLayout.entryAutoFollowTarget(
+            cursorBeat = 11f,
+            currentScrollPx = 0,
+            maxScrollPx = 1000,
+            viewportWidthPx = 1000f,
+            timelineLeftPx = 80f,
+            pixelsPerBeat = 56f,
+        )
+        val second = StaffTimelineLayout.entryAutoFollowTarget(
+            cursorBeat = 12f,
+            currentScrollPx = first ?: 0,
+            maxScrollPx = 1000,
+            viewportWidthPx = 1000f,
+            timelineLeftPx = 80f,
+            pixelsPerBeat = 56f,
+        )
+
+        assertEquals(56, first)
+        assertEquals(112, second)
     }
 }
