@@ -2,7 +2,8 @@ package com.scoreforge.app.ui
 
 /** Shared horizontal mapping between staff pixels and musical beats. */
 object StaffTimeMapping {
-    const val LEFT_MARGIN_PX = 30f
+    // Leave room for the clef/time-signature header before beat zero.
+    const val LEFT_MARGIN_PX = 120f
     const val RIGHT_MARGIN_PX = 20f
 
     fun xAtBeat(beat: Float, visibleBeats: Float, width: Float): Float {
