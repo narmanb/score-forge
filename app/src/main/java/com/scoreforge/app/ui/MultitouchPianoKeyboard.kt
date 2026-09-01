@@ -22,8 +22,10 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -47,9 +49,13 @@ fun MultitouchPianoKeyboard(
 ) {
     val activePitchCounts = remember { mutableStateMapOf<Int, Int>() }
     val safeOctaveShift = octaveShift.coerceIn(-4, 3)
-    val pitchOffset = safeOctaveShift * 12
+    val currentOctaveShift by rememberUpdatedState(safeOctaveShift)
 
-    fun actualPitch(layoutPitch: Int): Int = (layoutPitch + pitchOffset).coerceIn(0, 127)
+    fun visualPitch(layoutPitch: Int): Int =
+        PianoTouchLayout.shiftedPitch(layoutPitch, safeOctaveShift)
+
+    fun livePitch(layoutPitch: Int): Int =
+        PianoTouchLayout.shiftedPitch(layoutPitch, currentOctaveShift)
 
     fun activatePitch(pitch: Int) {
         val previous = activePitchCounts[pitch] ?: 0
@@ -74,9 +80,10 @@ fun MultitouchPianoKeyboard(
         }
     }
 
-    // An octave change rebuilds the visible key-to-MIDI mapping. Never carry a held key from
-    // the old range into the new one.
-    LaunchedEffect(pitchOffset) {
+    // The pointer-input coroutine intentionally stays alive across octave changes and reads the
+    // latest shift through rememberUpdatedState. This prevents it from being one recomposition
+    // behind the labels after Oct +/- is pressed.
+    LaunchedEffect(safeOctaveShift) {
         releaseAllPitches()
     }
 
@@ -140,7 +147,7 @@ fun MultitouchPianoKeyboard(
                 Text("Next")
             }
             Text(
-                "${PitchNames.name(actualPitch(60))}–${PitchNames.name(actualPitch(83))}",
+                "${PitchNames.name(visualPitch(60))}–${PitchNames.name(visualPitch(83))}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -151,7 +158,7 @@ fun MultitouchPianoKeyboard(
                 .fillMaxWidth()
                 .weight(1f)
                 .padding(horizontal = 8.dp, vertical = 2.dp)
-                .pointerInput(chordMode, pitchOffset) {
+                .pointerInput(chordMode) {
                     val pointerPitches = mutableMapOf<PointerId, Int>()
 
                     try {
@@ -167,7 +174,7 @@ fun MultitouchPianoKeyboard(
                                             y = change.position.y,
                                             width = size.width.toFloat(),
                                             height = size.height.toFloat(),
-                                        )?.let(::actualPitch)
+                                        )?.let(::livePitch)
                                         if (newPitch != null) {
                                             pointerPitches[change.id] = newPitch
                                             activatePitch(newPitch)
@@ -179,7 +186,7 @@ fun MultitouchPianoKeyboard(
                                             y = change.position.y,
                                             width = size.width.toFloat(),
                                             height = size.height.toFloat(),
-                                        )?.let(::actualPitch)
+                                        )?.let(::livePitch)
                                         if (newPitch != oldPitch) {
                                             if (oldPitch != null) deactivatePitch(oldPitch)
                                             if (newPitch != null) {
@@ -207,7 +214,7 @@ fun MultitouchPianoKeyboard(
 
             Row(modifier = Modifier.fillMaxSize()) {
                 PianoTouchLayout.whitePitches.forEach { layoutPitch ->
-                    val pitch = actualPitch(layoutPitch)
+                    val pitch = visualPitch(layoutPitch)
                     val active = activePitchCounts.containsKey(pitch)
                     Box(
                         modifier = Modifier
@@ -228,7 +235,7 @@ fun MultitouchPianoKeyboard(
             }
 
             PianoTouchLayout.blackKeys.forEach { key ->
-                val pitch = actualPitch(key.midiPitch)
+                val pitch = visualPitch(key.midiPitch)
                 val active = activePitchCounts.containsKey(pitch)
                 Box(
                     modifier = Modifier
