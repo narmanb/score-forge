@@ -12,7 +12,7 @@ android {
         applicationId = "com.scoreforge.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 13
+        versionCode = 14
         versionName = "0.2.11"
 
         externalNativeBuild {
