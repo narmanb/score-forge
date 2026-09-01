@@ -17,10 +17,10 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -37,25 +37,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.scoreforge.app.music.PitchNames
 
-private val PianoControlShape = GenericShape { size, _ ->
-    val cut = minOf(size.width, size.height) * 0.20f
-    moveTo(cut, 0f)
-    lineTo(size.width - cut, 0f)
-    lineTo(size.width, cut)
-    lineTo(size.width, size.height - cut)
-    lineTo(size.width - cut, size.height)
-    lineTo(cut, size.height)
-    lineTo(0f, size.height - cut)
-    lineTo(0f, cut)
-    close()
-}
-
 @Composable
 fun MultitouchPianoKeyboard(
     chordMode: Boolean,
     octaveShift: Int,
+    entryMode: PianoEntryMode,
+    onEntryModeChanged: (PianoEntryMode) -> Unit,
     onToggleChordMode: () -> Unit,
     onAdvanceChord: () -> Unit,
+    onInsertRest: () -> Unit,
     onOctaveDown: () -> Unit,
     onOctaveUp: () -> Unit,
     onPitchDown: (Int) -> Unit,
@@ -110,7 +100,7 @@ fun MultitouchPianoKeyboard(
                 .fillMaxWidth()
                 .weight(1f)
                 .padding(horizontal = 8.dp, vertical = 1.dp)
-                .pointerInput(chordMode) {
+                .pointerInput(chordMode, entryMode) {
                     val pointerPitches = mutableMapOf<PointerId, Int>()
 
                     try {
@@ -224,7 +214,7 @@ fun MultitouchPianoKeyboard(
                 },
                 enabled = safeOctaveShift > -4,
                 modifier = Modifier.height(26.dp),
-                shape = PianoControlShape,
+                shape = ChamferedControlShape,
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
             ) {
                 Text("Oct −", style = MaterialTheme.typography.labelMedium)
@@ -236,37 +226,92 @@ fun MultitouchPianoKeyboard(
                 },
                 enabled = safeOctaveShift < 3,
                 modifier = Modifier.height(26.dp),
-                shape = PianoControlShape,
+                shape = ChamferedControlShape,
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
             ) {
                 Text("Oct +", style = MaterialTheme.typography.labelMedium)
             }
+
+            Text("Mode", style = MaterialTheme.typography.labelSmall)
+            if (entryMode == PianoEntryMode.STEP) {
+                FilledTonalButton(
+                    onClick = {},
+                    modifier = Modifier.height(26.dp),
+                    shape = ChamferedControlShape,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                ) { Text("Step", style = MaterialTheme.typography.labelMedium) }
+            } else {
+                OutlinedButton(
+                    onClick = {
+                        releaseAllPitches()
+                        onEntryModeChanged(PianoEntryMode.STEP)
+                    },
+                    modifier = Modifier.height(26.dp),
+                    shape = ChamferedControlShape,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                ) { Text("Step", style = MaterialTheme.typography.labelMedium) }
+            }
+
+            if (entryMode == PianoEntryMode.NATURAL) {
+                FilledTonalButton(
+                    onClick = {},
+                    modifier = Modifier.height(26.dp),
+                    shape = ChamferedControlShape,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                ) { Text("Natural", style = MaterialTheme.typography.labelMedium) }
+            } else {
+                OutlinedButton(
+                    onClick = {
+                        releaseAllPitches()
+                        onEntryModeChanged(PianoEntryMode.NATURAL)
+                    },
+                    modifier = Modifier.height(26.dp),
+                    shape = ChamferedControlShape,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                ) { Text("Natural", style = MaterialTheme.typography.labelMedium) }
+            }
+
             FilledTonalButton(
                 onClick = {
                     releaseAllPitches()
-                    onToggleChordMode()
+                    onInsertRest()
                 },
                 modifier = Modifier.height(26.dp),
-                shape = PianoControlShape,
+                shape = ChamferedControlShape,
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
             ) {
-                Text(
-                    if (chordMode) "Chord On" else "Chord Off",
-                    style = MaterialTheme.typography.labelMedium,
-                )
+                Text("Rest", style = MaterialTheme.typography.labelMedium)
             }
-            FilledTonalButton(
-                onClick = {
-                    releaseAllPitches()
-                    onAdvanceChord()
-                },
-                enabled = chordMode,
-                modifier = Modifier.height(26.dp),
-                shape = PianoControlShape,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-            ) {
-                Text("Next", style = MaterialTheme.typography.labelMedium)
+
+            if (entryMode == PianoEntryMode.STEP) {
+                FilledTonalButton(
+                    onClick = {
+                        releaseAllPitches()
+                        onToggleChordMode()
+                    },
+                    modifier = Modifier.height(26.dp),
+                    shape = ChamferedControlShape,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                ) {
+                    Text(
+                        if (chordMode) "Chord On" else "Chord Off",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                }
+                FilledTonalButton(
+                    onClick = {
+                        releaseAllPitches()
+                        onAdvanceChord()
+                    },
+                    enabled = chordMode,
+                    modifier = Modifier.height(26.dp),
+                    shape = ChamferedControlShape,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                ) {
+                    Text("Next", style = MaterialTheme.typography.labelMedium)
+                }
             }
+
             Text(
                 "${PitchNames.name(visualPitch(60))}–${PitchNames.name(visualPitch(83))}",
                 style = MaterialTheme.typography.labelSmall,
