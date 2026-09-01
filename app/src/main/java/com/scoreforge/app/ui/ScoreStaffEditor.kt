@@ -142,6 +142,30 @@ fun ScoreStaffEditor(
                 }
             }
 
+            LaunchedEffect(
+                cursorBeat,
+                events.size,
+                transport.isPlaying,
+                safeZoom,
+                scrollState.maxValue,
+                viewportWidthPx,
+                beatWidthPx,
+            ) {
+                if (transport.isPlaying) return@LaunchedEffect
+                val target = StaffTimelineLayout.entryAutoFollowTarget(
+                    cursorBeat = cursorBeat,
+                    currentScrollPx = scrollState.value,
+                    maxScrollPx = scrollState.maxValue,
+                    viewportWidthPx = viewportWidthPx,
+                    timelineLeftPx = timelineLeftPx,
+                    pixelsPerBeat = beatWidthPx,
+                ) ?: return@LaunchedEffect
+
+                if (target != scrollState.value) {
+                    scrollState.animateScrollTo(target)
+                }
+            }
+
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -227,9 +251,6 @@ fun ScoreStaffEditor(
                             ) { change, dragAmount ->
                                 val event = events.getOrNull(draggingEventIndex)
                                 if (event == null) {
-                                    // The canvas owns drag gestures so its note-move detector used to
-                                    // starve horizontalScroll. Explicitly pan the timeline whenever a
-                                    // drag begins on empty score space.
                                     scrollState.dispatchRawDelta(-dragAmount.x)
                                     change.consume()
                                     return@detectDragGestures
