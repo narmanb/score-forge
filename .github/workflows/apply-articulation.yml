@@ -17,7 +17,21 @@ jobs:
           ref: feature/articulation-controls
 
       - name: Apply articulation patch
-        run: python ci/apply_articulation_patch.py
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('ci/apply_articulation_patch.py')
+          text = p.read_text()
+          text = text.replace(
+              "versionCode = 13\\n        versionName = \"0.2.11\"",
+              "versionCode = 14\\n        versionName = \"0.2.11\"",
+          ).replace(
+              "versionCode = 14\\n        versionName = \"0.2.12\"",
+              "versionCode = 15\\n        versionName = \"0.2.12\"",
+          )
+          p.write_text(text)
+          PY
+          python ci/apply_articulation_patch.py
 
       - name: Commit source changes
         run: |
