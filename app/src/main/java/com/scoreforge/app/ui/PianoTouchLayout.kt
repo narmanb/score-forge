@@ -26,8 +26,12 @@ object PianoTouchLayout {
     const val BLACK_KEY_WIDTH_FRACTION = 0.64f
     const val BLACK_KEY_X_OFFSET_FRACTION = 0.68f
 
+    /** The one authoritative conversion from a displayed keyboard key to its played MIDI pitch. */
+    fun shiftedPitch(layoutPitch: Int, octaveShift: Int): Int =
+        (layoutPitch + octaveShift.coerceIn(-4, 3) * 12).coerceIn(0, 127)
+
     /**
-     * Returns the MIDI pitch under a point in keyboard-local pixels.
+     * Returns the unshifted layout MIDI pitch under a point in keyboard-local pixels.
      * Black keys are tested first because they visually overlap the white keys.
      */
     fun pitchAt(
