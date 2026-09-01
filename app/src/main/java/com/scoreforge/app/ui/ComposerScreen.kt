@@ -755,7 +755,9 @@ private fun DurationSelector(
         if (dotted) Button(onClick = onToggleDotted) { Text("Dot •") }
         else OutlinedButton(onClick = onToggleDotted) { Text("Dot") }
 
-        Button(onClick = onInsertRest) { Text(if (dotted) "Dotted Rest" else "Rest") }
+        OutlinedButton(onClick = onInsertRest) {
+            Text(if (dotted) "Insert Dotted Rest" else "Insert Rest")
+        }
 
         if (tieActive) Button(onClick = onToggleTie, enabled = tieEnabled) { Text("Tie →") }
         else OutlinedButton(onClick = onToggleTie, enabled = tieEnabled) { Text("Tie →") }
