@@ -42,6 +42,7 @@ import com.scoreforge.app.audio.ScoreTransportBus
 import com.scoreforge.app.audio.SoundFontEngine
 import com.scoreforge.app.music.LiveEntryTiming
 import com.scoreforge.app.music.NaturalEntryTiming
+import com.scoreforge.app.music.NoteArticulation
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
 import com.scoreforge.app.music.ScoreEditHistory
@@ -85,6 +86,7 @@ fun ScoreForgeComposerScreen() {
     var projectName by remember { mutableStateOf("Untitled") }
     var selectedDuration by remember { mutableStateOf(NoteDuration.QUARTER) }
     var selectedDotted by remember { mutableStateOf(false) }
+    var selectedArticulation by remember { mutableStateOf(NoteArticulation.NORMAL) }
     var bpm by remember { mutableIntStateOf(120) }
     var isPlaying by remember { mutableStateOf(false) }
     var chordMode by remember { mutableStateOf(false) }
@@ -154,6 +156,7 @@ fun ScoreForgeComposerScreen() {
             cursorBeat = current.cursorBeat,
             selectedDuration = selectedDuration,
             selectedDotted = selectedDotted,
+            selectedArticulation = selectedArticulation,
             pianoOctaveShift = pianoOctaveShift,
             staffSharpInput = staffSharpInput,
             tracks = frozenTracks,
@@ -255,6 +258,7 @@ fun ScoreForgeComposerScreen() {
                     duration = NoteDuration.SIXTEENTH,
                     startBeat = noteStartBeat,
                     dotted = false,
+                    articulation = selectedArticulation,
                 ),
                 cursorBeat = maxOf(it.cursorBeat, noteStartBeat + NoteDuration.SIXTEENTH.beats),
             )
@@ -291,6 +295,7 @@ fun ScoreForgeComposerScreen() {
         bpm = snapshot.bpm.coerceIn(30, 300)
         selectedDuration = snapshot.selectedDuration
         selectedDotted = snapshot.selectedDotted
+        selectedArticulation = snapshot.selectedArticulation
         pianoOctaveShift = snapshot.pianoOctaveShift.coerceIn(-4, 3)
         staffSharpInput = snapshot.staffSharpInput
         chordMode = false
@@ -319,6 +324,7 @@ fun ScoreForgeComposerScreen() {
         bpm,
         selectedDuration,
         selectedDotted,
+        selectedArticulation,
         pianoOctaveShift,
         staffSharpInput,
     ) {
@@ -420,6 +426,7 @@ fun ScoreForgeComposerScreen() {
                 cursorBeat = 0f,
                 selectedDuration = NoteDuration.QUARTER,
                 selectedDotted = false,
+                selectedArticulation = NoteArticulation.NORMAL,
                 pianoOctaveShift = 0,
                 staffSharpInput = false,
                 tracks = listOf(blankTrack),
@@ -481,6 +488,7 @@ fun ScoreForgeComposerScreen() {
             duration = selectedDuration,
             startBeat = quantizedStart,
             dotted = selectedDotted,
+            articulation = selectedArticulation,
         )
         val nextCursor = when {
             advanceCursor && chordMode -> track.cursorBeat
@@ -547,6 +555,7 @@ fun ScoreForgeComposerScreen() {
                     duration = duration,
                     startBeat = groupStart,
                     dotted = false,
+                    articulation = selectedArticulation,
                 ),
                 cursorBeat = if (finalizingGroup) finalCursor else groupStart,
             )
@@ -875,6 +884,7 @@ fun ScoreForgeComposerScreen() {
                         liveRecordingActive = liveRecordingActive,
                         selectedDuration = selectedDuration,
                         selectedDotted = selectedDotted,
+                        selectedArticulation = selectedArticulation,
                         tieEnabled = canTieSelected,
                         tieActive = selectedTieActive,
                         canUndo = canUndo,
@@ -883,6 +893,7 @@ fun ScoreForgeComposerScreen() {
                         onRedo = ::redoScore,
                         onDurationSelected = { selectedDuration = it },
                         onToggleDotted = { selectedDotted = !selectedDotted },
+                        onArticulationSelected = { selectedArticulation = it },
                         onToggleTie = ::toggleSelectedTie,
                         onEntryModeChanged = { mode ->
                             if (pianoEntryMode == PianoEntryMode.LIVE) stopLiveRecording()

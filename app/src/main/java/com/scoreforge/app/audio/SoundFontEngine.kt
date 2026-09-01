@@ -1,5 +1,6 @@
 package com.scoreforge.app.audio
 
+import com.scoreforge.app.music.ScoreArticulations
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
@@ -262,10 +263,25 @@ class SoundFontEngine private constructor(
                     val suppressOn = ScoreTies.isContinuation(notes, index)
                     val suppressOff = ScoreTies.hasValidTie(notes, index)
                     val onFrame = (note.startBeat * secondsPerBeat * sampleRate).toInt().coerceAtLeast(0)
+                    val playbackEndBeat = if (suppressOn || suppressOff) {
+                        note.startBeat + note.effectiveBeats
+                    } else {
+                        ScoreArticulations.playbackEndBeat(notes, index)
+                    }
                     val offFrame = (
-                        (note.startBeat + note.effectiveBeats) * secondsPerBeat * sampleRate
+                        playbackEndBeat * secondsPerBeat * sampleRate
                         ).toInt().coerceAtLeast(onFrame + 1)
-                    if (!suppressOn) add(MidiEvent(onFrame, true, note.midiPitch, note.velocity, channel))
+                    if (!suppressOn) {
+                        add(
+                            MidiEvent(
+                                onFrame,
+                                true,
+                                note.midiPitch,
+                                ScoreArticulations.playbackVelocity(note),
+                                channel,
+                            )
+                        )
+                    }
                     if (!suppressOff) add(MidiEvent(offFrame, false, note.midiPitch, 0, channel))
                 }
             }

@@ -14,6 +14,14 @@ enum class NoteDuration(val beats: Float, val displayName: String) {
     fun effectiveBeats(dotted: Boolean): Float = beats * if (dotted) 1.5f else 1f
 }
 
+enum class NoteArticulation(val displayName: String) {
+    NORMAL("Normal"),
+    STACCATO("Staccato"),
+    TENUTO("Tenuto"),
+    ACCENT("Accent"),
+    LEGATO("Legato"),
+}
+
 sealed interface ScoreEvent {
     val duration: NoteDuration
     val startBeat: Float
@@ -30,6 +38,7 @@ data class ScoreNote(
     val velocity: Int = 96,
     override val dotted: Boolean = false,
     val tieToNext: Boolean = false,
+    val articulation: NoteArticulation = NoteArticulation.NORMAL,
 ) : ScoreEvent
 
 data class ScoreRest(
@@ -37,6 +46,56 @@ data class ScoreRest(
     override val startBeat: Float = 0f,
     override val dotted: Boolean = false,
 ) : ScoreEvent
+
+/** Playback interpretation for written articulation without changing score timing. */
+object ScoreArticulations {
+    private const val EPSILON = 0.001f
+
+    fun playbackVelocity(note: ScoreNote): Int = when (note.articulation) {
+        NoteArticulation.ACCENT -> (note.velocity + 22).coerceIn(1, 127)
+        NoteArticulation.TENUTO -> (note.velocity + 4).coerceIn(1, 127)
+        else -> note.velocity.coerceIn(1, 127)
+    }
+
+    fun playbackEndBeat(notes: List<ScoreNote>, noteIndex: Int): Float {
+        val note = notes.getOrNull(noteIndex) ?: return 0f
+        val writtenEnd = note.startBeat + note.effectiveBeats
+
+        // Ties already define a continuous written chain and take precedence over articulation gates.
+        if (ScoreTies.hasValidTie(notes, noteIndex) || ScoreTies.isContinuation(notes, noteIndex)) {
+            return writtenEnd
+        }
+
+        return when (note.articulation) {
+            NoteArticulation.NORMAL,
+            NoteArticulation.TENUTO -> writtenEnd
+
+            NoteArticulation.STACCATO ->
+                note.startBeat + (note.effectiveBeats * 0.50f).coerceAtLeast(0.08f)
+
+            NoteArticulation.ACCENT ->
+                note.startBeat + (note.effectiveBeats * 0.90f).coerceAtLeast(0.08f)
+
+            NoteArticulation.LEGATO -> {
+                val next = notes
+                    .asSequence()
+                    .filter { it.startBeat > note.startBeat + EPSILON }
+                    .minByOrNull { it.startBeat }
+                if (next == null || next.startBeat > writtenEnd + 0.25f) {
+                    writtenEnd
+                } else if (next.midiPitch == note.midiPitch) {
+                    // Avoid a late note-off cutting off a newly-started identical pitch.
+                    maxOf(writtenEnd, next.startBeat)
+                } else {
+                    maxOf(
+                        writtenEnd,
+                        next.startBeat + minOf(0.08f, note.effectiveBeats * 0.08f),
+                    )
+                }
+            }
+        }
+    }
+}
 
 object ScoreTimeline {
     const val BEATS_PER_MEASURE = 4f

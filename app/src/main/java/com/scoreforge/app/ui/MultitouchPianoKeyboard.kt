@@ -34,6 +34,7 @@ import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import com.scoreforge.app.music.NoteArticulation
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
 
@@ -45,6 +46,7 @@ fun MultitouchPianoKeyboard(
     liveRecordingActive: Boolean,
     selectedDuration: NoteDuration,
     selectedDotted: Boolean,
+    selectedArticulation: NoteArticulation,
     tieEnabled: Boolean,
     tieActive: Boolean,
     canUndo: Boolean,
@@ -53,6 +55,7 @@ fun MultitouchPianoKeyboard(
     onRedo: () -> Unit,
     onDurationSelected: (NoteDuration) -> Unit,
     onToggleDotted: () -> Unit,
+    onArticulationSelected: (NoteArticulation) -> Unit,
     onToggleTie: () -> Unit,
     onEntryModeChanged: (PianoEntryMode) -> Unit,
     onStopLive: () -> Unit,
@@ -69,6 +72,7 @@ fun MultitouchPianoKeyboard(
     val safeOctaveShift = octaveShift.coerceIn(-4, 3)
     val currentOctaveShift by rememberUpdatedState(safeOctaveShift)
     var durationPaletteOpen by remember { mutableStateOf(false) }
+    var articulationPaletteOpen by remember { mutableStateOf(false) }
 
     fun visualPitch(layoutPitch: Int): Int =
         PianoTouchLayout.shiftedPitch(layoutPitch, safeOctaveShift)
@@ -265,6 +269,24 @@ fun MultitouchPianoKeyboard(
                     selected = tieActive,
                     enabled = tieEnabled,
                 )
+            } else if (articulationPaletteOpen) {
+                ChamferedControlButton(
+                    label = "← Back",
+                    onClick = {
+                        releaseAllPitches()
+                        articulationPaletteOpen = false
+                    },
+                )
+                NoteArticulation.entries.forEach { articulation ->
+                    ChamferedControlButton(
+                        label = articulationControlLabel(articulation, includePrefix = false),
+                        onClick = {
+                            releaseAllPitches()
+                            onArticulationSelected(articulation)
+                        },
+                        selected = selectedArticulation == articulation,
+                    )
+                }
             } else {
                 ChamferedControlButton(
                     label = "↶",
@@ -342,7 +364,17 @@ fun MultitouchPianoKeyboard(
                     label = durationControlLabel(selectedDuration, selectedDotted),
                     onClick = {
                         releaseAllPitches()
+                        articulationPaletteOpen = false
                         durationPaletteOpen = true
+                    },
+                )
+
+                ChamferedControlButton(
+                    label = articulationControlLabel(selectedArticulation, includePrefix = true),
+                    onClick = {
+                        releaseAllPitches()
+                        durationPaletteOpen = false
+                        articulationPaletteOpen = true
                     },
                 )
 
@@ -383,6 +415,21 @@ fun MultitouchPianoKeyboard(
         }
 
     }
+}
+
+private fun articulationControlLabel(
+    articulation: NoteArticulation,
+    includePrefix: Boolean,
+): String {
+    val glyph = when (articulation) {
+        NoteArticulation.NORMAL -> ""
+        NoteArticulation.STACCATO -> "• "
+        NoteArticulation.TENUTO -> "— "
+        NoteArticulation.ACCENT -> "> "
+        NoteArticulation.LEGATO -> "⌒ "
+    }
+    val core = "$glyph${articulation.displayName}"
+    return if (includePrefix) "Art $core" else core
 }
 
 private fun durationControlLabel(duration: NoteDuration, dotted: Boolean): String {

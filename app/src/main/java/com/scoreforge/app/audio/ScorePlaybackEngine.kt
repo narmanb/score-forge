@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import com.scoreforge.app.music.NoteDuration
+import com.scoreforge.app.music.ScoreArticulations
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
@@ -260,8 +261,11 @@ class ScorePlaybackEngine {
 
             notes.forEachIndexed { index, note ->
                 if (ScoreTies.isContinuation(notes, index)) return@forEachIndexed
-                val end = ScoreTies.chainEndBeat(notes, index).takeIf { it > note.startBeat }
-                    ?: (note.startBeat + note.effectiveBeats)
+                val end = if (ScoreTies.hasValidTie(notes, index)) {
+                    ScoreTies.chainEndBeat(notes, index)
+                } else {
+                    ScoreArticulations.playbackEndBeat(notes, index)
+                }.takeIf { it > note.startBeat } ?: (note.startBeat + note.effectiveBeats)
                 renderFallbackNote(
                     note = note,
                     durationBeats = end - note.startBeat,
@@ -299,7 +303,7 @@ class ScorePlaybackEngine {
         val noteSeconds = durationBeats.coerceAtLeast(0.001f) * secondsPerBeat
         val noteSamples = (noteSeconds * sampleRate).toInt().coerceAtLeast(1)
         val frequency = 440.0 * Math.pow(2.0, (note.midiPitch - 69) / 12.0)
-        val velocityGain = note.velocity.coerceIn(1, 127) / 127f
+        val velocityGain = ScoreArticulations.playbackVelocity(note) / 127f
 
         for (i in 0 until noteSamples) {
             val target = startSample + i
@@ -338,13 +342,16 @@ class ScorePlaybackEngine {
 
         notes.forEachIndexed { index, note ->
             if (ScoreTies.isContinuation(notes, index)) return@forEachIndexed
-            val chainEnd = ScoreTies.chainEndBeat(notes, index).takeIf { it > note.startBeat }
-                ?: (note.startBeat + note.effectiveBeats)
+            val chainEnd = if (ScoreTies.hasValidTie(notes, index)) {
+                ScoreTies.chainEndBeat(notes, index)
+            } else {
+                ScoreArticulations.playbackEndBeat(notes, index)
+            }.takeIf { it > note.startBeat } ?: (note.startBeat + note.effectiveBeats)
             val startSample = (note.startBeat * secondsPerBeat * sampleRate).toInt()
             val noteSeconds = (chainEnd - note.startBeat) * secondsPerBeat
             val noteSamples = (noteSeconds * sampleRate).toInt().coerceAtLeast(1)
             val frequency = 440.0 * Math.pow(2.0, (note.midiPitch - 69) / 12.0)
-            val velocityGain = note.velocity.coerceIn(1, 127) / 127f
+            val velocityGain = ScoreArticulations.playbackVelocity(note) / 127f
 
             for (i in 0 until noteSamples) {
                 val target = startSample + i
