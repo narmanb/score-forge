@@ -269,6 +269,14 @@ fun MultitouchPianoKeyboard(
                     selected = tieActive,
                     enabled = tieEnabled,
                 )
+                ChamferedControlButton(
+                    label = "Rest",
+                    onClick = {
+                        releaseAllPitches()
+                        onInsertRest()
+                    },
+                    enabled = entryMode != PianoEntryMode.LIVE,
+                )
             } else if (articulationPaletteOpen) {
                 ChamferedControlButton(
                     label = "← Back",
