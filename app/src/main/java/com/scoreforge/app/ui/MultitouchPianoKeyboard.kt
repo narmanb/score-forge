@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,9 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -42,7 +39,9 @@ fun MultitouchPianoKeyboard(
     chordMode: Boolean,
     octaveShift: Int,
     entryMode: PianoEntryMode,
+    liveRecordingActive: Boolean,
     onEntryModeChanged: (PianoEntryMode) -> Unit,
+    onStopLive: () -> Unit,
     onToggleChordMode: () -> Unit,
     onAdvanceChord: () -> Unit,
     onInsertRest: () -> Unit,
@@ -93,7 +92,7 @@ fun MultitouchPianoKeyboard(
         modifier = Modifier
             .height(170.dp)
             .then(modifier)
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(ComposerControlStripColor)
     ) {
         BoxWithConstraints(
             modifier = Modifier
@@ -123,20 +122,26 @@ fun MultitouchPianoKeyboard(
                                             change.consume()
                                         }
                                     } else if (change.previousPressed && change.pressed) {
-                                        val newPitch = PianoTouchLayout.pitchAt(
-                                            x = change.position.x,
-                                            y = change.position.y,
-                                            width = size.width.toFloat(),
-                                            height = size.height.toFloat(),
-                                        )?.let(::livePitch)
-                                        if (newPitch != oldPitch) {
-                                            if (oldPitch != null) deactivatePitch(oldPitch)
-                                            if (newPitch != null) {
-                                                pointerPitches[change.id] = newPitch
-                                                activatePitch(newPitch)
-                                            } else {
-                                                pointerPitches.remove(change.id)
+                                        if (entryMode == PianoEntryMode.STEP) {
+                                            val newPitch = PianoTouchLayout.pitchAt(
+                                                x = change.position.x,
+                                                y = change.position.y,
+                                                width = size.width.toFloat(),
+                                                height = size.height.toFloat(),
+                                            )?.let(::livePitch)
+                                            if (newPitch != oldPitch) {
+                                                if (oldPitch != null) deactivatePitch(oldPitch)
+                                                if (newPitch != null) {
+                                                    pointerPitches[change.id] = newPitch
+                                                    activatePitch(newPitch)
+                                                } else {
+                                                    pointerPitches.remove(change.id)
+                                                }
+                                                change.consume()
                                             }
+                                        } else if (oldPitch != null) {
+                                            // Natural and Live mode lock one finger to the key it first pressed.
+                                            // Small finger drift must never reset the hold timer or change pitch.
                                             change.consume()
                                         }
                                     } else if (change.previousPressed && !change.pressed) {
@@ -163,7 +168,7 @@ fun MultitouchPianoKeyboard(
                             .width(whiteKeyWidth)
                             .fillMaxHeight()
                             .background(if (active) Color(0xFFD5E5FF) else Color.White)
-                            .border(0.6.dp, Color(0xFF555555)),
+                            .border(0.8.dp, Color(0xFF555555)),
                         contentAlignment = Alignment.BottomCenter,
                     ) {
                         Text(
@@ -199,123 +204,101 @@ fun MultitouchPianoKeyboard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(30.dp)
+                .height(32.dp)
+                .background(ComposerControlStripColor)
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 6.dp),
+                .padding(horizontal = 6.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            Text("Piano", style = MaterialTheme.typography.labelMedium)
+            Text("Piano", style = MaterialTheme.typography.labelMedium, color = Color.White)
 
-            FilledTonalButton(
+            ChamferedControlButton(
+                label = "Oct −",
                 onClick = {
                     releaseAllPitches()
                     onOctaveDown()
                 },
                 enabled = safeOctaveShift > -4,
-                modifier = Modifier.height(26.dp),
-                shape = ChamferedControlShape,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-            ) {
-                Text("Oct −", style = MaterialTheme.typography.labelMedium)
-            }
-            FilledTonalButton(
+            )
+            ChamferedControlButton(
+                label = "Oct +",
                 onClick = {
                     releaseAllPitches()
                     onOctaveUp()
                 },
                 enabled = safeOctaveShift < 3,
-                modifier = Modifier.height(26.dp),
-                shape = ChamferedControlShape,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-            ) {
-                Text("Oct +", style = MaterialTheme.typography.labelMedium)
-            }
+            )
 
-            Text("Mode", style = MaterialTheme.typography.labelSmall)
-            if (entryMode == PianoEntryMode.STEP) {
-                FilledTonalButton(
-                    onClick = {},
-                    modifier = Modifier.height(26.dp),
-                    shape = ChamferedControlShape,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                ) { Text("Step", style = MaterialTheme.typography.labelMedium) }
-            } else {
-                OutlinedButton(
-                    onClick = {
+            Text("Mode", style = MaterialTheme.typography.labelSmall, color = Color.White)
+            ChamferedControlButton(
+                label = "Step",
+                onClick = {
+                    if (entryMode != PianoEntryMode.STEP) {
                         releaseAllPitches()
                         onEntryModeChanged(PianoEntryMode.STEP)
-                    },
-                    modifier = Modifier.height(26.dp),
-                    shape = ChamferedControlShape,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                ) { Text("Step", style = MaterialTheme.typography.labelMedium) }
-            }
-
-            if (entryMode == PianoEntryMode.NATURAL) {
-                FilledTonalButton(
-                    onClick = {},
-                    modifier = Modifier.height(26.dp),
-                    shape = ChamferedControlShape,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                ) { Text("Natural", style = MaterialTheme.typography.labelMedium) }
-            } else {
-                OutlinedButton(
-                    onClick = {
+                    }
+                },
+                selected = entryMode == PianoEntryMode.STEP,
+            )
+            ChamferedControlButton(
+                label = "Natural",
+                onClick = {
+                    if (entryMode != PianoEntryMode.NATURAL) {
                         releaseAllPitches()
                         onEntryModeChanged(PianoEntryMode.NATURAL)
-                    },
-                    modifier = Modifier.height(26.dp),
-                    shape = ChamferedControlShape,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                ) { Text("Natural", style = MaterialTheme.typography.labelMedium) }
-            }
+                    }
+                },
+                selected = entryMode == PianoEntryMode.NATURAL,
+            )
+            ChamferedControlButton(
+                label = when {
+                    entryMode == PianoEntryMode.LIVE && liveRecordingActive -> "Stop Live"
+                    entryMode == PianoEntryMode.LIVE -> "Live Armed"
+                    else -> "Live"
+                },
+                onClick = {
+                    if (entryMode == PianoEntryMode.LIVE) {
+                        if (liveRecordingActive) onStopLive()
+                    } else {
+                        releaseAllPitches()
+                        onEntryModeChanged(PianoEntryMode.LIVE)
+                    }
+                },
+                selected = entryMode == PianoEntryMode.LIVE,
+            )
 
-            FilledTonalButton(
+            ChamferedControlButton(
+                label = "Rest",
                 onClick = {
                     releaseAllPitches()
                     onInsertRest()
                 },
-                modifier = Modifier.height(26.dp),
-                shape = ChamferedControlShape,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-            ) {
-                Text("Rest", style = MaterialTheme.typography.labelMedium)
-            }
+            )
 
             if (entryMode == PianoEntryMode.STEP) {
-                FilledTonalButton(
+                ChamferedControlButton(
+                    label = if (chordMode) "Chord On" else "Chord Off",
                     onClick = {
                         releaseAllPitches()
                         onToggleChordMode()
                     },
-                    modifier = Modifier.height(26.dp),
-                    shape = ChamferedControlShape,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                ) {
-                    Text(
-                        if (chordMode) "Chord On" else "Chord Off",
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                }
-                FilledTonalButton(
+                    selected = chordMode,
+                )
+                ChamferedControlButton(
+                    label = "Next",
                     onClick = {
                         releaseAllPitches()
                         onAdvanceChord()
                     },
                     enabled = chordMode,
-                    modifier = Modifier.height(26.dp),
-                    shape = ChamferedControlShape,
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                ) {
-                    Text("Next", style = MaterialTheme.typography.labelMedium)
-                }
+                )
             }
 
             Text(
                 "${PitchNames.name(visualPitch(60))}–${PitchNames.name(visualPitch(83))}",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = Color.White,
             )
         }
     }
