@@ -36,6 +36,28 @@ class PianoTouchLayoutTest {
     }
 
     @Test
+    fun octaveShiftChangesEveryKeyByExactlyTwelveSemitones() {
+        PianoTouchLayout.whitePitches.forEach { pitch ->
+            assertEquals(
+                PianoTouchLayout.shiftedPitch(pitch, 0) + 12,
+                PianoTouchLayout.shiftedPitch(pitch, 1),
+            )
+        }
+        PianoTouchLayout.blackKeys.forEach { key ->
+            assertEquals(
+                PianoTouchLayout.shiftedPitch(key.midiPitch, 0) + 12,
+                PianoTouchLayout.shiftedPitch(key.midiPitch, 1),
+            )
+        }
+    }
+
+    @Test
+    fun octaveShiftIsClampedToSupportedKeyboardRange() {
+        assertEquals(12, PianoTouchLayout.shiftedPitch(60, -99))
+        assertEquals(96, PianoTouchLayout.shiftedPitch(60, 99))
+    }
+
+    @Test
     fun pointsOutsideKeyboardReturnNull() {
         assertNull(PianoTouchLayout.pitchAt(-1f, 50f, width, height))
         assertNull(PianoTouchLayout.pitchAt(width, 50f, width, height))
