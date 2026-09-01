@@ -25,7 +25,8 @@ object SoundFontRepository {
     private const val NO_PRESET = -1
 
     const val STARTER_DISPLAY_NAME = "Starter Instruments"
-    private const val STARTER_FILE_NAME = "FluidR3Mono_GM.sf3"
+    private const val STARTER_FILE_NAME = "GeneralUser-GS.sf2"
+    private const val LEGACY_STARTER_FILE_NAME = "FluidR3Mono_GM.sf3"
     private const val STARTER_ASSET_PATH = "soundfonts/$STARTER_FILE_NAME"
 
     /**
@@ -61,11 +62,8 @@ object SoundFontRepository {
             ?.takeIf { it.isNotBlank() }
             ?: "imported.sf2"
 
-        require(
-            displayName.endsWith(".sf2", ignoreCase = true) ||
-                displayName.endsWith(".sf3", ignoreCase = true)
-        ) {
-            "Score Forge supports .sf2 and .sf3 SoundFonts."
+        require(displayName.endsWith(".sf2", ignoreCase = true)) {
+            "This Android audio build currently supports .sf2 SoundFonts."
         }
 
         val safeName = displayName
@@ -108,14 +106,20 @@ object SoundFontRepository {
         val path = prefs.getString(KEY_PATH, null)?.takeIf { it.isNotBlank() } ?: return null
         val file = File(path)
 
+        // 0.2.2 briefly bundled an SF3 bank, but the Android FluidSynth binary does not include
+        // libsndfile/Ogg support. Drop that saved selection so upgrades immediately install the
+        // compatible SF2 starter bank instead of retrying the known-incompatible file.
+        if (file.name.equals(LEGACY_STARTER_FILE_NAME, ignoreCase = true)) {
+            clearActiveSelection(context)
+            return null
+        }
+
         if (!file.isFile) {
             clearActiveSelection(context)
             return null
         }
 
-        if (!file.name.endsWith(".sf2", ignoreCase = true) &&
-            !file.name.endsWith(".sf3", ignoreCase = true)
-        ) {
+        if (!file.name.endsWith(".sf2", ignoreCase = true)) {
             clearActiveSelection(context)
             return null
         }
