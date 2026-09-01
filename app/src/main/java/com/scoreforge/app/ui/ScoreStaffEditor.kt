@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -30,7 +31,9 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,12 +87,12 @@ fun ScoreStaffEditor(
 ) {
     var draggingEventIndex by remember { mutableIntStateOf(-1) }
     var zoom by remember { mutableFloatStateOf(1f) }
+    var staffInputEnabled by rememberSaveable { mutableStateOf(true) }
     val scrollState = rememberScrollState()
     val density = LocalDensity.current
     val transport by ScoreTransportBus.state.collectAsState()
-    val eventsEndBeat = ScoreTimeline.endBeat(events)
     val contentBeats = StaffTimelineLayout.contentBeats(
-        eventsEndBeat = eventsEndBeat,
+        eventsEndBeat = ScoreTimeline.endBeat(events),
         editCursorBeat = cursorBeat,
         playheadBeat = transport.beat,
     )
@@ -135,9 +138,7 @@ fun ScoreStaffEditor(
                     else -> null
                 }
                 if (target != null) {
-                    scrollState.scrollTo(
-                        target.roundToInt().coerceIn(0, scrollState.maxValue)
-                    )
+                    scrollState.scrollTo(target.roundToInt().coerceIn(0, scrollState.maxValue))
                 }
             }
 
@@ -157,27 +158,28 @@ fun ScoreStaffEditor(
                             contentBeats,
                             beatWidthPx,
                             timelineLeftPx,
+                            staffInputEnabled,
                         ) {
                             detectTapGestures(
                                 onLongPress = { position ->
                                     val geometry = staffGeometry(events, size.height.toFloat())
                                     val eventIndex = nearestEditableEventIndex(
-                                        events = events,
-                                        point = position,
-                                        timelineLeftPx = timelineLeftPx,
-                                        pixelsPerBeat = beatWidthPx,
-                                        geometry = geometry,
+                                        events,
+                                        position,
+                                        timelineLeftPx,
+                                        beatWidthPx,
+                                        geometry,
                                     )
                                     if (eventIndex >= 0) onDeleteEvent(eventIndex)
                                 },
                                 onTap = { position ->
                                     val geometry = staffGeometry(events, size.height.toFloat())
                                     val existingIndex = nearestEditableEventIndex(
-                                        events = events,
-                                        point = position,
-                                        timelineLeftPx = timelineLeftPx,
-                                        pixelsPerBeat = beatWidthPx,
-                                        geometry = geometry,
+                                        events,
+                                        position,
+                                        timelineLeftPx,
+                                        beatWidthPx,
+                                        geometry,
                                     )
                                     if (existingIndex >= 0) {
                                         onSelectEvent(existingIndex)
@@ -192,15 +194,15 @@ fun ScoreStaffEditor(
                                         )
                                     ).coerceIn(0f, contentBeats)
 
-                                    // The slim ruler above the notes is the transport seek area.
-                                    if (position.y <= geometry.staffTop - geometry.lineSpacing * 0.85f) {
+                                    val rulerTap =
+                                        position.y <= geometry.staffTop - geometry.lineSpacing * 0.85f
+                                    if (rulerTap || !staffInputEnabled) {
                                         ScoreTransportBus.seek(tappedBeat)
                                         onSelectEvent(-1)
                                         return@detectTapGestures
                                     }
 
-                                    val pitch = pitchFromY(position.y, geometry)
-                                    onAddPitch(pitch, tappedBeat)
+                                    onAddPitch(pitchFromY(position.y, geometry), tappedBeat)
                                 },
                             )
                         }
@@ -209,11 +211,11 @@ fun ScoreStaffEditor(
                                 onDragStart = { position ->
                                     val geometry = staffGeometry(events, size.height.toFloat())
                                     draggingEventIndex = nearestEditableEventIndex(
-                                        events = events,
-                                        point = position,
-                                        timelineLeftPx = timelineLeftPx,
-                                        pixelsPerBeat = beatWidthPx,
-                                        geometry = geometry,
+                                        events,
+                                        position,
+                                        timelineLeftPx,
+                                        beatWidthPx,
+                                        geometry,
                                     )
                                     if (draggingEventIndex >= 0) {
                                         onSelectEvent(draggingEventIndex)
@@ -222,11 +224,20 @@ fun ScoreStaffEditor(
                                 },
                                 onDragEnd = { draggingEventIndex = -1 },
                                 onDragCancel = { draggingEventIndex = -1 },
-                            ) { change, _ ->
+                            ) { change, dragAmount ->
                                 val event = events.getOrNull(draggingEventIndex)
-                                    ?: return@detectDragGestures
+                                if (event == null) {
+                                    // The canvas owns drag gestures so its note-move detector used to
+                                    // starve horizontalScroll. Explicitly pan the timeline whenever a
+                                    // drag begins on empty score space.
+                                    scrollState.dispatchRawDelta(-dragAmount.x)
+                                    change.consume()
+                                    return@detectDragGestures
+                                }
+
                                 val geometry = staffGeometry(events, size.height.toFloat())
-                                val latestStart = (contentBeats - event.effectiveBeats).coerceAtLeast(0f)
+                                val latestStart =
+                                    (contentBeats - event.effectiveBeats).coerceAtLeast(0f)
                                 val movedBeat = ScoreTimeline.quantizeBeat(
                                     StaffTimelineLayout.beatAtX(
                                         change.position.x,
@@ -239,15 +250,15 @@ fun ScoreStaffEditor(
                                     is ScoreNote -> onMoveNote(
                                         draggingEventIndex,
                                         pitchFromY(
-                                            y = change.position.y,
-                                            geometry = geometry,
+                                            change.position.y,
+                                            geometry,
                                             preferSharp = PitchNames.hasSharp(event.midiPitch),
                                         ),
                                         movedBeat,
                                     )
-
                                     is ScoreRest -> onMoveRest(draggingEventIndex, movedBeat)
                                 }
+                                change.consume()
                             }
                         },
                 ) {
@@ -268,31 +279,28 @@ fun ScoreStaffEditor(
                             1.8f,
                         )
                     }
-
                     drawLine(
-                        color = Color(0xFF202020),
-                        start = Offset(staffLeft, geometry.staffTop),
-                        end = Offset(staffLeft, geometry.staffBottom),
-                        strokeWidth = 2.1f,
+                        Color(0xFF202020),
+                        Offset(staffLeft, geometry.staffTop),
+                        Offset(staffLeft, geometry.staffBottom),
+                        2.1f,
                     )
-                    drawNotationHeader(
-                        geometry = geometry,
-                        timelineLeftPx = timelineLeftPx,
-                    )
+                    drawNotationHeader(geometry, timelineLeftPx)
 
-                    // Small ruler ticks above the staff: tap here to place the transport playhead.
                     var rulerBeat = 0f
                     while (rulerBeat <= contentBeats + 0.001f) {
                         val x = StaffTimelineLayout.xAtBeat(rulerBeat, timelineLeftPx, beatWidthPx)
-                        val isMeasure = (rulerBeat % ScoreTimeline.BEATS_PER_MEASURE) < 0.001f
+                        val isMeasure =
+                            (rulerBeat % ScoreTimeline.BEATS_PER_MEASURE) < 0.001f
                         drawLine(
-                            color = Color(0xFF8A8880),
-                            start = Offset(x, geometry.rulerY),
-                            end = Offset(
+                            Color(0xFF8A8880),
+                            Offset(x, geometry.rulerY),
+                            Offset(
                                 x,
-                                geometry.rulerY + geometry.lineSpacing * if (isMeasure) 0.45f else 0.24f,
+                                geometry.rulerY +
+                                    geometry.lineSpacing * if (isMeasure) 0.45f else 0.24f,
                             ),
-                            strokeWidth = if (isMeasure) 1.5f else 1f,
+                            if (isMeasure) 1.5f else 1f,
                         )
                         rulerBeat += 1f
                     }
@@ -305,10 +313,10 @@ fun ScoreStaffEditor(
                             beatWidthPx,
                         )
                         drawLine(
-                            color = Color(0xFF303030),
-                            start = Offset(x, geometry.staffTop),
-                            end = Offset(x, geometry.staffBottom),
-                            strokeWidth = if (measureBeat == 0f) 2.1f else 1.3f,
+                            Color(0xFF303030),
+                            Offset(x, geometry.staffTop),
+                            Offset(x, geometry.staffBottom),
+                            if (measureBeat == 0f) 2.1f else 1.3f,
                         )
                         measureBeat += ScoreTimeline.BEATS_PER_MEASURE
                     }
@@ -316,19 +324,18 @@ fun ScoreStaffEditor(
                     events.forEachIndexed { index, event ->
                         when (event) {
                             is ScoreNote -> drawScoreNote(
-                                note = event,
-                                timelineLeftPx = timelineLeftPx,
-                                pixelsPerBeat = beatWidthPx,
-                                geometry = geometry,
-                                selected = index == selectedEventIndex,
+                                event,
+                                timelineLeftPx,
+                                beatWidthPx,
+                                geometry,
+                                index == selectedEventIndex,
                             )
-
                             is ScoreRest -> drawScoreRest(
-                                rest = event,
-                                timelineLeftPx = timelineLeftPx,
-                                pixelsPerBeat = beatWidthPx,
-                                geometry = geometry,
-                                selected = index == selectedEventIndex,
+                                event,
+                                timelineLeftPx,
+                                beatWidthPx,
+                                geometry,
+                                index == selectedEventIndex,
                             )
                         }
                     }
@@ -341,13 +348,7 @@ fun ScoreStaffEditor(
                             ?: return@forEachIndexed
                         val target = events.getOrNull(targetIndex) as? ScoreNote
                             ?: return@forEachIndexed
-                        drawTieCurve(
-                            source = event,
-                            target = target,
-                            timelineLeftPx = timelineLeftPx,
-                            pixelsPerBeat = beatWidthPx,
-                            geometry = geometry,
-                        )
+                        drawTieCurve(event, target, timelineLeftPx, beatWidthPx, geometry)
                     }
 
                     val playheadX = StaffTimelineLayout.xAtBeat(
@@ -356,10 +357,10 @@ fun ScoreStaffEditor(
                         beatWidthPx,
                     )
                     drawLine(
-                        color = Color(0xFF6A52A3),
-                        start = Offset(playheadX, geometry.rulerY - geometry.lineSpacing * 0.18f),
-                        end = Offset(playheadX, geometry.staffBottom + geometry.lineSpacing * 1.35f),
-                        strokeWidth = 3f,
+                        Color(0xFF6A52A3),
+                        Offset(playheadX, geometry.rulerY - geometry.lineSpacing * 0.18f),
+                        Offset(playheadX, geometry.staffBottom + geometry.lineSpacing * 1.35f),
+                        3f,
                     )
                 }
             }
@@ -373,6 +374,23 @@ fun ScoreStaffEditor(
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (staffInputEnabled) {
+                    Button(
+                        onClick = { staffInputEnabled = false },
+                        modifier = Modifier.height(28.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) { Text("Input On", style = MaterialTheme.typography.labelSmall) }
+                } else {
+                    OutlinedButton(
+                        onClick = { staffInputEnabled = true },
+                        modifier = Modifier.height(28.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color(0xFF222222)
+                        ),
+                    ) { Text("Input Off", style = MaterialTheme.typography.labelSmall) }
+                }
+
                 OutlinedButton(
                     onClick = {
                         zoom = StaffTimelineLayout.clampZoom(
@@ -382,10 +400,10 @@ fun ScoreStaffEditor(
                     enabled = zoom > StaffTimelineLayout.MIN_ZOOM + 0.001f,
                     modifier = Modifier.height(28.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF222222)),
-                ) {
-                    Text("−")
-                }
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color(0xFF222222)
+                    ),
+                ) { Text("−") }
                 Text(
                     "${(StaffTimelineLayout.clampZoom(zoom) * 100f).roundToInt()}%",
                     color = Color(0xFF333333),
@@ -400,10 +418,10 @@ fun ScoreStaffEditor(
                     enabled = zoom < StaffTimelineLayout.MAX_ZOOM - 0.001f,
                     modifier = Modifier.height(28.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF222222)),
-                ) {
-                    Text("+")
-                }
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = Color(0xFF222222)
+                    ),
+                ) { Text("+") }
             }
         }
     }
@@ -425,7 +443,9 @@ private fun staffGeometry(events: List<ScoreEvent>, height: Float): StaffGeometr
 
     val topLimit = height * 0.045f
     val bottomLimit = height * 0.955f
-    while (spacing > minSpacing && notes.any {
+    while (
+        spacing > minSpacing &&
+        notes.any {
             val y = noteYAt(it.midiPitch, spacing)
             y < topLimit || y > bottomLimit
         }
@@ -450,12 +470,12 @@ private fun DrawScope.drawNotationHeader(
             color = ink
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-            textSize = geometry.lineSpacing * 2.55f
+            textSize = geometry.lineSpacing * 2.35f
         }
         canvas.nativeCanvas.drawText(
             "𝄞",
             timelineLeftPx * 0.34f,
-            geometry.staffTop + geometry.lineSpacing * 3.30f,
+            geometry.staffTop + geometry.lineSpacing * 3.24f,
             clefPaint,
         )
 
@@ -498,18 +518,18 @@ private fun DrawScope.drawScoreNote(
 
     if (selected) {
         drawCircle(
-            color = Color(0xFF5B78A5),
-            radius = maxOf(10f, geometry.lineSpacing * 0.34f),
-            center = Offset(x, y),
+            Color(0xFF5B78A5),
+            maxOf(10f, geometry.lineSpacing * 0.34f),
+            Offset(x, y),
             style = Stroke(width = 2.3f),
         )
     }
 
     if (PitchNames.hasSharp(note.midiPitch)) {
         drawSharpAccidental(
-            x = x - geometry.lineSpacing * 0.62f,
-            y = y,
-            scale = geometry.lineSpacing / 40f,
+            x - geometry.lineSpacing * 0.62f,
+            y,
+            geometry.lineSpacing / 40f,
         )
     }
 
@@ -534,29 +554,29 @@ private fun DrawScope.drawScoreNote(
     if (note.duration != NoteDuration.WHOLE) {
         val stemUp = y >= geometry.middleLine
         val stemX = x + if (stemUp) noteWidth * 0.43f else -noteWidth * 0.43f
-        val stemEndY = y + if (stemUp) -geometry.lineSpacing * 2.6f else geometry.lineSpacing * 2.6f
+        val stemEndY = y +
+            if (stemUp) -geometry.lineSpacing * 2.6f else geometry.lineSpacing * 2.6f
         val stemWidth = maxOf(1.6f, geometry.lineSpacing * 0.055f)
         drawLine(Color(0xFF111111), Offset(stemX, y), Offset(stemX, stemEndY), stemWidth)
 
         if (note.duration == NoteDuration.EIGHTH || note.duration == NoteDuration.SIXTEENTH) {
-            val flagDirection = if (stemUp) 1f else -1f
-            val flagYDirection = if (stemUp) 1f else -1f
+            val direction = if (stemUp) 1f else -1f
             drawLine(
                 Color(0xFF111111),
                 Offset(stemX, stemEndY),
                 Offset(
-                    stemX + geometry.lineSpacing * 0.52f * flagDirection,
-                    stemEndY + geometry.lineSpacing * 0.58f * flagYDirection,
+                    stemX + geometry.lineSpacing * 0.52f * direction,
+                    stemEndY + geometry.lineSpacing * 0.58f * direction,
                 ),
                 stemWidth,
             )
             if (note.duration == NoteDuration.SIXTEENTH) {
                 drawLine(
                     Color(0xFF111111),
-                    Offset(stemX, stemEndY + geometry.lineSpacing * 0.18f * flagYDirection),
+                    Offset(stemX, stemEndY + geometry.lineSpacing * 0.18f * direction),
                     Offset(
-                        stemX + geometry.lineSpacing * 0.52f * flagDirection,
-                        stemEndY + geometry.lineSpacing * 0.76f * flagYDirection,
+                        stemX + geometry.lineSpacing * 0.52f * direction,
+                        stemEndY + geometry.lineSpacing * 0.76f * direction,
                     ),
                     stemWidth,
                 )
@@ -631,9 +651,9 @@ private fun DrawScope.drawScoreRest(
 
     if (selected) {
         drawCircle(
-            color = Color(0xFF5B78A5),
-            radius = maxOf(11f, geometry.lineSpacing * 0.38f),
-            center = Offset(x, middleY),
+            Color(0xFF5B78A5),
+            maxOf(11f, geometry.lineSpacing * 0.38f),
+            Offset(x, middleY),
             style = Stroke(width = 2.3f),
         )
     }
@@ -644,13 +664,11 @@ private fun DrawScope.drawScoreRest(
             val lineY = geometry.staffTop + geometry.lineSpacing
             drawRect(ink, Offset(x - 9f * scale, lineY), Size(18f * scale, 6f * scale))
         }
-
         NoteDuration.HALF -> drawRect(
             ink,
             Offset(x - 9f * scale, middleY - 6f * scale),
             Size(18f * scale, 6f * scale),
         )
-
         NoteDuration.QUARTER -> {
             val path = Path().apply {
                 moveTo(x + 3f * scale, middleY - geometry.lineSpacing * 1.05f)
@@ -661,13 +679,17 @@ private fun DrawScope.drawScoreRest(
             }
             drawPath(path, ink, style = Stroke(width = maxOf(2.4f, 3.5f * scale)))
         }
-
         NoteDuration.EIGHTH,
         NoteDuration.SIXTEENTH -> {
             val stemTop = middleY - geometry.lineSpacing * 0.90f
             val stemBottom = middleY + geometry.lineSpacing * 0.65f
             val width = maxOf(2f, 2.7f * scale)
-            drawLine(ink, Offset(x + 2f * scale, stemTop), Offset(x + 2f * scale, stemBottom), width)
+            drawLine(
+                ink,
+                Offset(x + 2f * scale, stemTop),
+                Offset(x + 2f * scale, stemBottom),
+                width,
+            )
             drawOval(
                 ink,
                 Offset(x - 5f * scale, stemBottom - 3f * scale),
@@ -683,7 +705,10 @@ private fun DrawScope.drawScoreRest(
                 drawLine(
                     ink,
                     Offset(x + 2f * scale, stemTop + 6f * scale),
-                    Offset(x + 12f * scale, stemTop + geometry.lineSpacing * 0.34f + 6f * scale),
+                    Offset(
+                        x + 12f * scale,
+                        stemTop + geometry.lineSpacing * 0.34f + 6f * scale,
+                    ),
                     width,
                 )
             }
@@ -721,7 +746,6 @@ private fun pitchFromY(
         } else {
             !pitchIsSharp && bestIsSharp
         }
-
         if (distance < bestDistance || (distance == bestDistance && preferredSpelling)) {
             bestDistance = distance
             bestPitch = pitch
