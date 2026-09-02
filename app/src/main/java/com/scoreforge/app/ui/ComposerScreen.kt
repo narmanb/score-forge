@@ -52,6 +52,7 @@ import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreProjectRepository
 import com.scoreforge.app.music.ScoreProjectSnapshot
 import com.scoreforge.app.music.ScoreRest
+import com.scoreforge.app.music.ScoreTimeSignatures
 import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
 import com.scoreforge.app.music.ScoreTrack
@@ -89,6 +90,7 @@ fun ScoreForgeComposerScreen() {
     var selectedDotted by rememberSaveable { mutableStateOf(false) }
     var selectedArticulation by rememberSaveable { mutableStateOf(NoteArticulation.NORMAL) }
     var bpm by rememberSaveable { mutableIntStateOf(120) }
+    var timeSignatures by remember { mutableStateOf(listOf(ScoreTimeSignatures.DEFAULT)) }
     var isPlaying by remember { mutableStateOf(false) }
     var chordMode by rememberSaveable { mutableStateOf(StepChordMode.OFF) }
     var pianoEntryMode by rememberSaveable { mutableStateOf(PianoEntryMode.STEP) }
@@ -163,6 +165,7 @@ fun ScoreForgeComposerScreen() {
             tracks = frozenTracks,
             activeTrackIndex = index,
             projectName = projectName,
+            timeSignatures = timeSignatures,
         )
     }
 
@@ -299,6 +302,7 @@ fun ScoreForgeComposerScreen() {
         selectedArticulation = snapshot.selectedArticulation
         pianoOctaveShift = snapshot.pianoOctaveShift.coerceIn(-4, 3)
         staffSharpInput = snapshot.staffSharpInput
+        timeSignatures = snapshot.effectiveTimeSignatures()
         mixerGestureHistoryRecorded = false
         if (clearHistory) editHistory.clear()
         syncHistoryButtons()
@@ -321,6 +325,7 @@ fun ScoreForgeComposerScreen() {
         activeTrackIndex,
         projectName,
         bpm,
+        timeSignatures,
         selectedDuration,
         selectedDotted,
         selectedArticulation,
@@ -767,7 +772,15 @@ fun ScoreForgeComposerScreen() {
                     trackCount = tracks.size,
                     noteCount = activeNoteCount,
                     restCount = activeRestCount,
-                    measureCount = ScoreTimeline.measureCount(emptyList(), arrangementEndBeat),
+                    measureCount = ScoreTimeline.measureCount(
+                        emptyList(),
+                        arrangementEndBeat,
+                        timeSignatures = timeSignatures,
+                    ),
+                    timeSignatureLabel = ScoreTimeSignatures.atBeat(
+                        timeSignatures,
+                        activeCursorBeat,
+                    ).displayName,
                     bpm = bpm,
                     cursorBeat = activeCursorBeat,
                     isPlaying = isPlaying,
@@ -787,6 +800,22 @@ fun ScoreForgeComposerScreen() {
                     onClearTrack = ::clearActiveTrack,
                     onRenameProject = ::renameProject,
                     onOpenProject = ::openProject,
+                )
+
+                TimeSignatureControls(
+                    timeSignatures = timeSignatures,
+                    cursorBeat = activeCursorBeat,
+                    onSetSignature = { startBeat, numerator, denominator ->
+                        timeSignatures = ScoreTimeSignatures.withChange(
+                            timeSignatures,
+                            startBeat,
+                            numerator,
+                            denominator,
+                        )
+                    },
+                    onRemoveSignature = { startBeat ->
+                        timeSignatures = ScoreTimeSignatures.withoutChange(timeSignatures, startBeat)
+                    },
                 )
 
                 TrackControls(
@@ -848,6 +877,7 @@ fun ScoreForgeComposerScreen() {
                         events = activeEvents,
                         selectedDuration = selectedDuration,
                         cursorBeat = activeCursorBeat,
+                        timeSignatures = timeSignatures,
                         selectedEventIndex = selectedEventIndex,
                         isPlaying = isPlaying,
                         canPlay = playableNoteCount > 0 && !liveRecordingActive,
@@ -874,6 +904,7 @@ fun ScoreForgeComposerScreen() {
                         events = activeEvents,
                         selectedDuration = selectedDuration,
                         cursorBeat = activeCursorBeat,
+                        timeSignatures = timeSignatures,
                         octaveShift = pianoOctaveShift,
                         selectedEventIndex = selectedEventIndex,
                         onAddPitch = { pitch, tappedBeat ->
@@ -983,6 +1014,7 @@ private fun HeaderBar(
     noteCount: Int,
     restCount: Int,
     measureCount: Int,
+    timeSignatureLabel: String,
     bpm: Int,
     cursorBeat: Float,
     isPlaying: Boolean,
@@ -1005,7 +1037,7 @@ private fun HeaderBar(
         Column {
             Text("Score Forge", style = MaterialTheme.typography.titleLarge, color = Color.White)
             Text(
-                "$projectName • $activeTrackName • $trackCount tracks • 4/4 • $measureCount measures • beat ${formatBeat(cursorBeat)} • $noteCount notes • $restCount rests",
+                "$projectName • $activeTrackName • $trackCount tracks • $timeSignatureLabel • $measureCount measures • beat ${formatBeat(cursorBeat)} • $noteCount notes • $restCount rests",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFFE0DCE5),
             )
