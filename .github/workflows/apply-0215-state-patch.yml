@@ -1,0 +1,32 @@
+name: Apply 0.2.15 rotation state patch
+
+on:
+  push:
+    branches:
+      - feature/midi-import-rotation-state
+    paths:
+      - tools/apply_0215_state_patch.py
+      - .github/workflows/apply-0215-state-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/midi-import-rotation-state
+          fetch-depth: 0
+      - name: Apply source patch
+        run: python tools/apply_0215_state_patch.py
+      - name: Remove one-time patch files
+        run: rm tools/apply_0215_state_patch.py .github/workflows/apply-0215-state-patch.yml
+      - name: Commit source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Preserve editor state across rotation"
+          git push origin HEAD:feature/midi-import-rotation-state
