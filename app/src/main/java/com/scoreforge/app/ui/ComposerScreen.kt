@@ -89,7 +89,7 @@ fun ScoreForgeComposerScreen() {
     var selectedArticulation by remember { mutableStateOf(NoteArticulation.NORMAL) }
     var bpm by remember { mutableIntStateOf(120) }
     var isPlaying by remember { mutableStateOf(false) }
-    var chordMode by remember { mutableStateOf(false) }
+    var chordMode by remember { mutableStateOf(StepChordMode.OFF) }
     var pianoEntryMode by remember { mutableStateOf(PianoEntryMode.STEP) }
     var naturalGroupStartBeat by remember { mutableStateOf<Float?>(null) }
     var naturalGroupMaxBeats by remember { mutableStateOf(0f) }
@@ -298,7 +298,7 @@ fun ScoreForgeComposerScreen() {
         selectedArticulation = snapshot.selectedArticulation
         pianoOctaveShift = snapshot.pianoOctaveShift.coerceIn(-4, 3)
         staffSharpInput = snapshot.staffSharpInput
-        chordMode = false
+        chordMode = StepChordMode.OFF
         pianoEntryMode = PianoEntryMode.STEP
         mixerGestureHistoryRecorded = false
         if (clearHistory) editHistory.clear()
@@ -396,6 +396,16 @@ fun ScoreForgeComposerScreen() {
         }
     }
 
+    fun startPlayback() {
+        if (playableNoteCount <= 0 || liveRecordingActive || isPlaying) return
+        isPlaying = true
+        playback.playTracks(
+            tracks = tracks,
+            bpm = bpm,
+            throughBeat = ScoreTracks.endBeat(tracks),
+        ) { isPlaying = false }
+    }
+
     fun stopPlayback() {
         playback.stop()
         isPlaying = false
@@ -491,7 +501,7 @@ fun ScoreForgeComposerScreen() {
             articulation = selectedArticulation,
         )
         val nextCursor = when {
-            advanceCursor && chordMode -> track.cursorBeat
+            advanceCursor && chordMode.holdsStepCursor -> track.cursorBeat
             advanceCursor -> quantizedStart + inputBeats
             else -> maxOf(track.cursorBeat, quantizedStart + inputBeats)
         }
@@ -586,7 +596,7 @@ fun ScoreForgeComposerScreen() {
             replaceActiveTrack {
                 it.copy(
                     events = updatedEvents,
-                    cursorBeat = if (chordMode) it.cursorBeat else ScoreTimeline.endBeat(updatedEvents),
+                    cursorBeat = if (chordMode.holdsStepCursor) it.cursorBeat else ScoreTimeline.endBeat(updatedEvents),
                 )
             }
             selectedEventIndex = -1
@@ -602,7 +612,7 @@ fun ScoreForgeComposerScreen() {
         replaceActiveTrack {
             it.copy(
                 events = updatedEvents,
-                cursorBeat = if (chordMode) it.cursorBeat else ScoreTimeline.endBeat(updatedEvents),
+                cursorBeat = if (chordMode.holdsStepCursor) it.cursorBeat else ScoreTimeline.endBeat(updatedEvents),
             )
         }
         selectedEventIndex = eventIndex.coerceAtMost(currentTrack().events.lastIndex)
@@ -617,7 +627,7 @@ fun ScoreForgeComposerScreen() {
         replaceActiveTrack {
             it.copy(
                 events = updatedEvents,
-                cursorBeat = if (chordMode) it.cursorBeat else ScoreTimeline.endBeat(updatedEvents),
+                cursorBeat = if (chordMode.holdsStepCursor) it.cursorBeat else ScoreTimeline.endBeat(updatedEvents),
             )
         }
         selectedEventIndex = eventIndex.coerceAtMost(currentTrack().events.lastIndex)
@@ -758,16 +768,7 @@ fun ScoreForgeComposerScreen() {
                     canPlay = playableNoteCount > 0 && !liveRecordingActive,
                     onTempoDown = { bpm = (bpm - 5).coerceAtLeast(30) },
                     onTempoUp = { bpm = (bpm + 5).coerceAtMost(300) },
-                    onPlay = {
-                        if (playableNoteCount > 0 && !liveRecordingActive) {
-                            isPlaying = true
-                            playback.playTracks(
-                                tracks = tracks,
-                                bpm = bpm,
-                                throughBeat = ScoreTracks.endBeat(tracks),
-                            ) { isPlaying = false }
-                        }
-                    },
+                    onPlay = ::startPlayback,
                     onStop = ::stopPlayback,
                 )
 
@@ -842,6 +843,10 @@ fun ScoreForgeComposerScreen() {
                         selectedDuration = selectedDuration,
                         cursorBeat = activeCursorBeat,
                         selectedEventIndex = selectedEventIndex,
+                        isPlaying = isPlaying,
+                        canPlay = playableNoteCount > 0 && !liveRecordingActive,
+                        onPlay = ::startPlayback,
+                        onStop = ::stopPlayback,
                         onAddPitch = { naturalPitch, tappedBeat ->
                             val pitch = if (staffSharpInput) {
                                 PitchNames.sharpenIfAvailable(naturalPitch)
@@ -899,22 +904,24 @@ fun ScoreForgeComposerScreen() {
                             if (pianoEntryMode == PianoEntryMode.LIVE) stopLiveRecording()
                             cancelNaturalEntryGroup()
                             LiveInstrumentBus.allNotesOff()
-                            chordMode = false
+                            chordMode = StepChordMode.OFF
                             if (mode == PianoEntryMode.LIVE) stopPlayback()
                             pianoEntryMode = mode
                         },
                         onStopLive = ::stopLiveRecording,
-                        onToggleChordMode = {
+                        onCycleChordMode = {
                             LiveInstrumentBus.allNotesOff()
-                            val track = currentTrack()
-                            if (chordMode) {
-                                chordMode = false
-                                replaceActiveTrack {
+                            val previous = chordMode
+                            val next = previous.next()
+                            chordMode = next
+                            when {
+                                next == StepChordMode.OFF -> replaceActiveTrack {
                                     it.copy(cursorBeat = maxOf(it.cursorBeat, ScoreTimeline.endBeat(it.events)))
                                 }
-                            } else {
-                                chordMode = true
-                                replaceActiveTrack { it.copy(cursorBeat = ScoreTimeline.endBeat(track.events)) }
+                                previous == StepChordMode.OFF -> {
+                                    val track = currentTrack()
+                                    replaceActiveTrack { it.copy(cursorBeat = ScoreTimeline.endBeat(track.events)) }
+                                }
                             }
                         },
                         onAdvanceChord = {
