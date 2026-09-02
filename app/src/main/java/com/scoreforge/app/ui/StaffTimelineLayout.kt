@@ -1,7 +1,8 @@
 package com.scoreforge.app.ui
 
+import com.scoreforge.app.music.ScoreTimeSignature
+import com.scoreforge.app.music.ScoreTimeSignatures
 import com.scoreforge.app.music.ScoreTimeline
-import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 object StaffTimelineLayout {
@@ -21,12 +22,20 @@ object StaffTimelineLayout {
         eventsEndBeat: Float,
         editCursorBeat: Float,
         playheadBeat: Float,
+        timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
     ): Float {
         val furthest = maxOf(eventsEndBeat, editCursorBeat, playheadBeat, 0f)
-        val withWorkingMeasure = furthest + ScoreTimeline.BEATS_PER_MEASURE
-        val rounded = ceil(withWorkingMeasure / ScoreTimeline.BEATS_PER_MEASURE) *
-            ScoreTimeline.BEATS_PER_MEASURE
-        return maxOf(DEFAULT_VISIBLE_BEATS, rounded)
+        val activeMeter = ScoreTimeSignatures.atBeat(timeSignatures, furthest)
+        val throughWorkingMeasure = furthest + activeMeter.beatsPerMeasure
+        return maxOf(
+            DEFAULT_VISIBLE_BEATS,
+            ScoreTimeline.visibleBeats(
+                events = emptyList(),
+                minimumMeasures = 4,
+                throughBeat = throughWorkingMeasure,
+                timeSignatures = timeSignatures,
+            ),
+        )
     }
 
     fun xAtBeat(beat: Float, timelineLeftPx: Float, pixelsPerBeat: Float): Float =
