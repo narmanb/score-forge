@@ -38,9 +38,37 @@ import com.scoreforge.app.music.NoteArticulation
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
 
+enum class StepChordMode {
+    OFF,
+    MANUAL,
+    AUTO;
+
+    val holdsStepCursor: Boolean
+        get() = this != OFF
+
+    fun next(): StepChordMode = when (this) {
+        OFF -> MANUAL
+        MANUAL -> AUTO
+        AUTO -> OFF
+    }
+}
+
+internal object AutoChordAdvancePolicy {
+    fun shouldAdvance(
+        mode: StepChordMode,
+        hadPressedPointers: Boolean,
+        hasPressedPointers: Boolean,
+        chordHadNote: Boolean,
+    ): Boolean =
+        mode == StepChordMode.AUTO &&
+            hadPressedPointers &&
+            !hasPressedPointers &&
+            chordHadNote
+}
+
 @Composable
 fun MultitouchPianoKeyboard(
-    chordMode: Boolean,
+    chordMode: StepChordMode,
     octaveShift: Int,
     entryMode: PianoEntryMode,
     liveRecordingActive: Boolean,
@@ -59,7 +87,7 @@ fun MultitouchPianoKeyboard(
     onToggleTie: () -> Unit,
     onEntryModeChanged: (PianoEntryMode) -> Unit,
     onStopLive: () -> Unit,
-    onToggleChordMode: () -> Unit,
+    onCycleChordMode: () -> Unit,
     onAdvanceChord: () -> Unit,
     onInsertRest: () -> Unit,
     onOctaveDown: () -> Unit,
@@ -120,6 +148,8 @@ fun MultitouchPianoKeyboard(
                 .padding(horizontal = 8.dp, vertical = 1.dp)
                 .pointerInput(chordMode, entryMode) {
                     val pointerPitches = mutableMapOf<PointerId, Int>()
+                    var hadPressedPointers = false
+                    var autoChordHadNote = false
 
                     try {
                         awaitPointerEventScope {
@@ -138,6 +168,9 @@ fun MultitouchPianoKeyboard(
                                         if (newPitch != null) {
                                             pointerPitches[change.id] = newPitch
                                             activatePitch(newPitch)
+                                            if (entryMode == PianoEntryMode.STEP && chordMode == StepChordMode.AUTO) {
+                                                autoChordHadNote = true
+                                            }
                                             change.consume()
                                         }
                                     } else if (change.previousPressed && change.pressed) {
@@ -168,6 +201,21 @@ fun MultitouchPianoKeyboard(
                                         change.consume()
                                     }
                                 }
+
+                                val hasPressedPointers = event.changes.any { it.pressed }
+                                if (
+                                    entryMode == PianoEntryMode.STEP &&
+                                    AutoChordAdvancePolicy.shouldAdvance(
+                                        mode = chordMode,
+                                        hadPressedPointers = hadPressedPointers,
+                                        hasPressedPointers = hasPressedPointers,
+                                        chordHadNote = autoChordHadNote,
+                                    )
+                                ) {
+                                    onAdvanceChord()
+                                    autoChordHadNote = false
+                                }
+                                hadPressedPointers = hasPressedPointers
                             }
                         }
                     } finally {
@@ -397,12 +445,16 @@ fun MultitouchPianoKeyboard(
 
                 if (entryMode == PianoEntryMode.STEP) {
                     ChamferedControlButton(
-                        label = if (chordMode) "Chord On" else "Chord Off",
+                        label = when (chordMode) {
+                            StepChordMode.OFF -> "Chord Off"
+                            StepChordMode.MANUAL -> "Chord Manual"
+                            StepChordMode.AUTO -> "Chord Auto"
+                        },
                         onClick = {
                             releaseAllPitches()
-                            onToggleChordMode()
+                            onCycleChordMode()
                         },
-                        selected = chordMode,
+                        selected = chordMode != StepChordMode.OFF,
                     )
                     ChamferedControlButton(
                         label = "Next Chord",
@@ -410,7 +462,7 @@ fun MultitouchPianoKeyboard(
                             releaseAllPitches()
                             onAdvanceChord()
                         },
-                        enabled = chordMode,
+                        enabled = chordMode != StepChordMode.OFF,
                     )
                 }
 

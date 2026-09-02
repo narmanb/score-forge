@@ -78,6 +78,10 @@ fun ScoreStaffEditor(
     selectedDuration: NoteDuration,
     cursorBeat: Float,
     selectedEventIndex: Int,
+    isPlaying: Boolean = false,
+    canPlay: Boolean = false,
+    onPlay: () -> Unit = {},
+    onStop: () -> Unit = {},
     onAddPitch: (pitch: Int, startBeat: Float) -> Unit,
     onSelectEvent: (eventIndex: Int) -> Unit,
     onBeginMove: (eventIndex: Int) -> Unit,
@@ -396,6 +400,23 @@ fun ScoreStaffEditor(
                         }
                     }
 
+                    val entryCursorX = StaffTimelineLayout.xAtBeat(
+                        cursorBeat.coerceIn(0f, contentBeats),
+                        timelineLeftPx,
+                        beatWidthPx,
+                    )
+                    drawLine(
+                        Color(0xFFB34747),
+                        Offset(entryCursorX, geometry.rulerY + geometry.lineSpacing * 0.22f),
+                        Offset(entryCursorX, geometry.staffBottom + geometry.lineSpacing * 0.72f),
+                        1.5f,
+                    )
+                    drawCircle(
+                        Color(0xFFB34747),
+                        radius = 4f,
+                        center = Offset(entryCursorX, geometry.rulerY + geometry.lineSpacing * 0.12f),
+                    )
+
                     val playheadX = StaffTimelineLayout.xAtBeat(
                         transport.beat.coerceIn(0f, contentBeats),
                         timelineLeftPx,
@@ -419,6 +440,24 @@ fun ScoreStaffEditor(
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (isPlaying) {
+                    Button(
+                        onClick = onStop,
+                        modifier = Modifier.height(28.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                    ) { Text("■", style = MaterialTheme.typography.labelSmall) }
+                } else {
+                    OutlinedButton(
+                        onClick = onPlay,
+                        enabled = canPlay,
+                        modifier = Modifier.height(28.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = Color(0xFF222222)
+                        ),
+                    ) { Text("▶", style = MaterialTheme.typography.labelSmall) }
+                }
+
                 if (staffInputEnabled) {
                     Button(
                         onClick = { staffInputEnabled = false },
