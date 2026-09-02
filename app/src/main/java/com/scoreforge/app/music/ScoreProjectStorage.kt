@@ -32,6 +32,7 @@ data class ScoreProjectSnapshot(
     val projectName: String = "Untitled",
     val timeSignatures: List<ScoreTimeSignature> =
         tracks.firstOrNull()?.timeSignatures ?: listOf(ScoreTimeSignatures.DEFAULT),
+    val metronomeEnabled: Boolean = false,
 ) {
     fun effectiveTracks(): List<ScoreTrack> {
         val signatures = effectiveTimeSignatures()
@@ -83,6 +84,7 @@ object ScoreProjectCodec {
         append(MAGIC).append('\t').append(VERSION).append('\n')
         append("PROJECT_NAME\t").append(snapshot.safeProjectName()).append('\n')
         append("BPM\t").append(snapshot.bpm.coerceIn(30, 300)).append('\n')
+        append("METRONOME\t").append(if (snapshot.metronomeEnabled) 1 else 0).append('\n')
         snapshot.effectiveTimeSignatures().forEach { signature ->
             append("TIME_SIGNATURE\t")
                 .append(signature.startBeat).append('\t')
@@ -149,6 +151,7 @@ object ScoreProjectCodec {
     private fun decodeV2(lines: List<String>): ScoreProjectSnapshot {
         var projectName = "Untitled"
         var bpm = 120
+        var metronomeEnabled = false
         var selectedDuration = NoteDuration.QUARTER
         var selectedDotted = false
         var selectedArticulation = NoteArticulation.NORMAL
@@ -170,6 +173,7 @@ object ScoreProjectCodec {
             when (parts.firstOrNull()) {
                 "PROJECT_NAME" -> projectName = cleanProjectName(parts.getOrNull(1).orEmpty())
                 "BPM" -> parts.getOrNull(1)?.toIntOrNull()?.let { bpm = it.coerceIn(30, 300) }
+                "METRONOME" -> metronomeEnabled = parts.getOrNull(1) == "1"
                 "TIME_SIGNATURE" -> decodeTimeSignature(parts)?.let(timeSignatures::add)
                 "DURATION" -> parseDuration(parts.getOrNull(1))?.let { selectedDuration = it }
                 "DOTTED_INPUT" -> selectedDotted = parts.getOrNull(1) == "1"
@@ -211,6 +215,7 @@ object ScoreProjectCodec {
             activeTrackIndex = safeActiveIndex,
             projectName = projectName,
             timeSignatures = ScoreTimeSignatures.normalize(timeSignatures),
+            metronomeEnabled = metronomeEnabled,
         )
     }
 

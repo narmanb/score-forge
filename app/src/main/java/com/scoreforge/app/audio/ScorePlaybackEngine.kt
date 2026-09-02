@@ -7,6 +7,10 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import com.scoreforge.app.music.NoteDuration
+import com.scoreforge.app.music.MetronomeAccent
+import com.scoreforge.app.music.ScoreMetronome
+import com.scoreforge.app.music.ScoreTimeSignature
+import com.scoreforge.app.music.ScoreTimeSignatures
 import com.scoreforge.app.music.ScoreArticulations
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreTies
@@ -45,6 +49,8 @@ class ScorePlaybackEngine {
         notes: List<ScoreNote>,
         bpm: Int,
         throughBeat: Float = ScoreTimeline.endBeat(notes),
+        metronomeEnabled: Boolean = false,
+        timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
         onFinished: () -> Unit = {},
     ) {
         val compatibilityTrack = ScoreTrack(
@@ -57,6 +63,8 @@ class ScorePlaybackEngine {
             tracks = listOf(compatibilityTrack),
             bpm = bpm,
             throughBeat = throughBeat,
+            metronomeEnabled = metronomeEnabled,
+            timeSignatures = timeSignatures,
             onFinished = onFinished,
         )
     }
@@ -65,6 +73,8 @@ class ScorePlaybackEngine {
         tracks: List<ScoreTrack>,
         bpm: Int,
         throughBeat: Float = ScoreTracks.endBeat(tracks),
+        metronomeEnabled: Boolean = false,
+        timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
         onFinished: () -> Unit = {},
     ) {
         val playableTracks = ScoreTracks.audibleTracks(tracks)
@@ -87,7 +97,15 @@ class ScorePlaybackEngine {
         ScoreTransportBus.begin(startBeat, safeThroughBeat)
 
         thread(name = "ScoreForgePlayback", isDaemon = true) {
-            val rendered = renderBestAvailableTracks(playableTracks, safeBpm, safeThroughBeat)
+            var rendered = renderBestAvailableTracks(playableTracks, safeBpm, safeThroughBeat)
+            if (metronomeEnabled && rendered.pcm.isNotEmpty()) {
+                rendered = mixMetronome(
+                    rendered = rendered,
+                    bpm = safeBpm,
+                    throughBeat = safeThroughBeat,
+                    timeSignatures = timeSignatures,
+                )
+            }
             if (myGeneration != generation || rendered.pcm.isEmpty()) {
                 if (myGeneration == generation) ScoreTransportBus.stop()
                 return@thread
@@ -198,6 +216,53 @@ class ScorePlaybackEngine {
             ),
             channels = 2,
         )
+    }
+
+    private fun mixMetronome(
+        rendered: RenderedAudio,
+        bpm: Int,
+        throughBeat: Float,
+        timeSignatures: List<ScoreTimeSignature>,
+    ): RenderedAudio {
+        if (rendered.pcm.isEmpty()) return rendered
+
+        val mixed = rendered.pcm.copyOf()
+        val channels = rendered.channels.coerceAtLeast(1)
+        val totalFrames = mixed.size / channels
+        val secondsPerBeat = 60f / bpm.coerceIn(30, 300)
+        val clickFrames = (sampleRate * 0.032f).toInt().coerceAtLeast(1)
+
+        ScoreMetronome.clicks(timeSignatures, throughBeat).forEach { click ->
+            val startFrame = (click.beat * secondsPerBeat * sampleRate).toInt()
+            val (frequency, gain) = when (click.accent) {
+                MetronomeAccent.DOWNBEAT -> 1_600.0 to 0.34f
+                MetronomeAccent.GROUP -> 1_250.0 to 0.26f
+                MetronomeAccent.BEAT -> 950.0 to 0.18f
+            }
+
+            for (i in 0 until clickFrames) {
+                val frame = startFrame + i
+                if (frame !in 0 until totalFrames) break
+                val t = i.toDouble() / sampleRate
+                val progress = i.toFloat() / clickFrames
+                val envelope = (1f - progress).coerceIn(0f, 1f).let { it * it }
+                val clickSample = (
+                    sin(2.0 * PI * frequency * t) *
+                        envelope *
+                        gain *
+                        Short.MAX_VALUE
+                    ).toInt()
+
+                repeat(channels) { channel ->
+                    val sampleIndex = frame * channels + channel
+                    mixed[sampleIndex] = (mixed[sampleIndex].toInt() + clickSample)
+                        .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                        .toShort()
+                }
+            }
+        }
+
+        return RenderedAudio(mixed, rendered.channels)
     }
 
     private fun createStaticTrack(pcm: ShortArray, channels: Int): AudioTrack =
