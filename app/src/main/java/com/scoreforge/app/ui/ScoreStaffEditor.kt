@@ -290,15 +290,19 @@ fun ScoreStaffEditor(
                                 ).coerceIn(0f, latestStart)
 
                                 when (event) {
-                                    is ScoreNote -> onMoveNote(
-                                        draggingEventIndex,
-                                        pitchFromY(
+                                    is ScoreNote -> {
+                                        val naturalPitch = pitchFromY(
                                             change.position.y,
                                             geometry,
-                                            preferSharp = PitchNames.hasSharp(event.midiPitch),
-                                        ),
-                                        movedBeat,
-                                    )
+                                            preferSharp = false,
+                                        )
+                                        val movedKey = ScoreKeySignatures.atBeat(keySignatures, movedBeat)
+                                        onMoveNote(
+                                            draggingEventIndex,
+                                            ScoreKeySignatures.applyToNaturalPitch(naturalPitch, movedKey),
+                                            movedBeat,
+                                        )
+                                    }
                                     is ScoreRest -> onMoveRest(draggingEventIndex, movedBeat)
                                 }
                                 change.consume()

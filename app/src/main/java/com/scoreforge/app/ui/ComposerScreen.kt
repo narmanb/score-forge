@@ -922,10 +922,14 @@ fun ScoreForgeComposerScreen() {
                         onPlay = ::startPlayback,
                         onStop = ::stopPlayback,
                         onAddPitch = { naturalPitch, tappedBeat ->
+                            val keyedPitch = ScoreKeySignatures.applyToNaturalPitch(
+                                naturalPitch,
+                                ScoreKeySignatures.atBeat(keySignatures, tappedBeat),
+                            )
                             val pitch = if (staffSharpInput) {
                                 PitchNames.sharpenIfAvailable(naturalPitch)
                             } else {
-                                naturalPitch
+                                keyedPitch
                             }
                             insertNoteAt(pitch, tappedBeat, preview = true, advanceCursor = false)
                         },
