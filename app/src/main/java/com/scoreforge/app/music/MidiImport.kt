@@ -30,9 +30,10 @@ data class MidiImportResult(
  * Small dependency-free Standard MIDI File (SMF) importer.
  *
  * Version 1 intentionally targets the information Score Forge can already edit well: note pitch,
- * start, written duration, velocity, track/channel grouping, tempo, program, bank, volume and pan.
- * Continuous controllers, automation and mid-song tempo changes are retained only as warnings until
- * Score Forge has a model that can represent them without silently pretending they were preserved.
+ * start, written duration, velocity, track/channel grouping, tempo, time signatures, program,
+ * bank, volume and pan. Continuous controllers, automation and mid-song tempo changes are retained
+ * only as warnings until Score Forge has a model that can represent them without silently pretending
+ * they were preserved.
  */
 object MidiImporter {
     private const val HEADER = "MThd"
@@ -60,11 +61,18 @@ object MidiImporter {
 
     private data class TempoEvent(val tick: Long, val microsecondsPerQuarter: Int)
 
+    private data class TimeSignatureEvent(
+        val tick: Long,
+        val numerator: Int,
+        val denominator: Int,
+    )
+
     private data class ParsedMidi(
         val ticksPerQuarter: Int,
         val notes: List<RawNote>,
         val states: Map<Pair<Int, Int>, TrackChannelState>,
         val tempoEvents: List<TempoEvent>,
+        val timeSignatureEvents: List<TimeSignatureEvent>,
         val sourceTrackNames: Map<Int, String>,
         val warnings: MutableList<String>,
     )
@@ -77,6 +85,11 @@ object MidiImporter {
 
         val warnings = parsed.warnings.toMutableList()
         val bpm = resolveBpm(parsed.tempoEvents, warnings)
+        val timeSignatures = resolveTimeSignatures(
+            events = parsed.timeSignatureEvents,
+            ticksPerQuarter = parsed.ticksPerQuarter,
+            warnings = warnings,
+        )
         val grouped = parsed.notes.groupBy { it.sourceTrack to it.channel }
             .entries
             .sortedWith(compareBy({ it.key.first }, { it.key.second }))
@@ -148,6 +161,7 @@ object MidiImporter {
             tracks = tracks,
             activeTrackIndex = 0,
             projectName = safeName,
+            timeSignatures = timeSignatures,
         )
         return MidiImportResult(
             snapshot = snapshot,
@@ -192,6 +206,42 @@ object MidiImporter {
         return bpm
     }
 
+    private fun resolveTimeSignatures(
+        events: List<TimeSignatureEvent>,
+        ticksPerQuarter: Int,
+        warnings: MutableList<String>,
+    ): List<ScoreTimeSignature> {
+        if (events.isEmpty()) return listOf(ScoreTimeSignatures.DEFAULT)
+
+        val resolved = mutableListOf<ScoreTimeSignature>()
+        events.sortedBy { it.tick }
+            .groupBy { it.tick }
+            .forEach { (tick, atTick) ->
+                val distinct = atTick.map { it.numerator to it.denominator }.distinct()
+                val chosen = atTick.last()
+                if (distinct.size > 1) {
+                    val beat = tick.toFloat() / ticksPerQuarter.toFloat()
+                    warnings += "Conflicting MIDI time signatures at beat ${formatBeat(beat)}; ${chosen.numerator}/${chosen.denominator} was used."
+                }
+                resolved += ScoreTimeSignature(
+                    startBeat = tick.toFloat() / ticksPerQuarter.toFloat(),
+                    numerator = chosen.numerator,
+                    denominator = chosen.denominator,
+                )
+            }
+
+        return ScoreTimeSignatures.normalize(resolved)
+    }
+
+    private fun formatBeat(beat: Float): String {
+        val rounded = (beat * 1000f).roundToInt() / 1000f
+        return if (abs(rounded - rounded.toInt()) < 0.001f) {
+            rounded.toInt().toString()
+        } else {
+            rounded.toString()
+        }
+    }
+
     private fun parse(bytes: ByteArray): ParsedMidi {
         val cursor = Cursor(bytes)
         require(cursor.readAscii(4) == HEADER) { "This file does not have a Standard MIDI header." }
@@ -210,9 +260,9 @@ object MidiImporter {
         val notes = mutableListOf<RawNote>()
         val states = mutableMapOf<Pair<Int, Int>, TrackChannelState>()
         val tempoEvents = mutableListOf<TempoEvent>()
+        val timeSignatureEvents = mutableListOf<TimeSignatureEvent>()
         val sourceTrackNames = mutableMapOf<Int, String>()
         val warnings = mutableListOf<String>()
-        var foundTimeSignatureChange = false
         var parsedTracks = 0
 
         while (cursor.remaining >= 8 && parsedTracks < trackCount) {
@@ -230,22 +280,20 @@ object MidiImporter {
                 notes = notes,
                 states = states,
                 tempoEvents = tempoEvents,
+                timeSignatureEvents = timeSignatureEvents,
                 sourceTrackNames = sourceTrackNames,
-                onNonFourFour = { foundTimeSignatureChange = true },
             )
             parsedTracks += 1
         }
 
         require(parsedTracks > 0) { "No MIDI track chunks were found." }
         if (format == 2) warnings += "Format-2 MIDI sequences were imported as parallel Score Forge tracks."
-        if (foundTimeSignatureChange) {
-            warnings += "Score Forge currently displays 4/4; non-4/4 MIDI time signatures were not preserved."
-        }
         return ParsedMidi(
             ticksPerQuarter = ticksPerQuarter,
             notes = notes,
             states = states,
             tempoEvents = tempoEvents,
+            timeSignatureEvents = timeSignatureEvents,
             sourceTrackNames = sourceTrackNames,
             warnings = warnings,
         )
@@ -257,8 +305,8 @@ object MidiImporter {
         notes: MutableList<RawNote>,
         states: MutableMap<Pair<Int, Int>, TrackChannelState>,
         tempoEvents: MutableList<TempoEvent>,
+        timeSignatureEvents: MutableList<TimeSignatureEvent>,
         sourceTrackNames: MutableMap<Int, String>,
-        onNonFourFour: () -> Unit,
     ) {
         val cursor = Cursor(bytes)
         val active = mutableMapOf<Pair<Int, Int>, ArrayDeque<Pair<Long, Int>>>()
@@ -304,8 +352,14 @@ object MidiImporter {
                         }
                         0x58 -> if (payload.size >= 2) {
                             val numerator = payload[0].toInt() and 0xFF
-                            val denominator = 1 shl (payload[1].toInt() and 0xFF).coerceIn(0, 7)
-                            if (numerator != 4 || denominator != 4) onNonFourFour()
+                            val denominatorPower = payload[1].toInt() and 0xFF
+                            if (numerator in 1..32 && denominatorPower in 0..7) {
+                                timeSignatureEvents += TimeSignatureEvent(
+                                    tick = tick,
+                                    numerator = numerator,
+                                    denominator = 1 shl denominatorPower,
+                                )
+                            }
                         }
                     }
                 }
