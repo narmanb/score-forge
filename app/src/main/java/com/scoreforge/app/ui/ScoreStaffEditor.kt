@@ -619,18 +619,24 @@ private fun DrawScope.drawTimeSignatureChange(
         signature.startBeat,
         timelineLeftPx,
         pixelsPerBeat,
-    ) + geometry.lineSpacing * 0.38f
+    ) + geometry.lineSpacing * 0.58f
     drawIntoCanvas { canvas ->
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.rgb(32, 32, 32)
-            textAlign = Paint.Align.LEFT
+            textAlign = Paint.Align.CENTER
             typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
-            textSize = geometry.lineSpacing * 0.78f
+            textSize = geometry.lineSpacing * 0.92f
         }
         canvas.nativeCanvas.drawText(
-            signature.displayName,
+            signature.numerator.toString(),
             x,
-            geometry.staffTop - geometry.lineSpacing * 0.34f,
+            geometry.staffTop + geometry.lineSpacing * 1.62f,
+            paint,
+        )
+        canvas.nativeCanvas.drawText(
+            signature.denominator.toString(),
+            x,
+            geometry.staffTop + geometry.lineSpacing * 3.58f,
             paint,
         )
     }
