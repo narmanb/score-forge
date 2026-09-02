@@ -156,12 +156,17 @@ object ScorePitchSpelling {
                 val octave = base / 12 - 1
                 val keyAlteration = ScoreKeySignatures.alterationForLetter(key, letter)
                 val preference = when {
+                    // Best: the pitch is exactly what the active key signature already specifies.
                     alteration == keyAlteration -> 0
-                    key.fifths < 0 && alteration == -1 -> 1
-                    key.fifths > 0 && alteration == 1 -> 1
-                    key.fifths == 0 && alteration == 1 -> 1
-                    alteration == 0 -> 2
-                    else -> 3
+                    // Next: an explicit natural cancels a sharp/flat from the active signature.
+                    alteration == 0 && keyAlteration != 0 -> 1
+                    // Then prefer chromatic spellings that match the key's sharp/flat direction.
+                    key.fifths < 0 && alteration == -1 -> 2
+                    key.fifths > 0 && alteration == 1 -> 2
+                    key.fifths == 0 && alteration == 1 -> 2
+                    // Remaining natural spelling is still preferable to an opposite-direction accidental.
+                    alteration == 0 -> 3
+                    else -> 4
                 }
                 candidates += Candidate(letter, octave, alteration, keyAlteration, preference)
             }
