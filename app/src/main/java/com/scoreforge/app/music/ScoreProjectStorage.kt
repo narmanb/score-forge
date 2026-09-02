@@ -30,22 +30,30 @@ data class ScoreProjectSnapshot(
     ),
     val activeTrackIndex: Int = 0,
     val projectName: String = "Untitled",
+    val timeSignatures: List<ScoreTimeSignature> =
+        tracks.firstOrNull()?.timeSignatures ?: listOf(ScoreTimeSignatures.DEFAULT),
 ) {
-    fun effectiveTracks(): List<ScoreTrack> =
-        tracks.takeIf { it.isNotEmpty() }
+    fun effectiveTracks(): List<ScoreTrack> {
+        val signatures = effectiveTimeSignatures()
+        return tracks.takeIf { it.isNotEmpty() }
             ?.take(ScoreTracks.MAX_TRACKS)
-            ?.map { it.normalized() }
+            ?.map { it.copy(timeSignatures = signatures).normalized() }
             ?: listOf(
                 ScoreTrack(
                     id = 1,
                     name = "Track 1",
                     events = events,
                     cursorBeat = cursorBeat,
+                    timeSignatures = signatures,
                 ).normalized()
             )
+    }
 
     fun effectiveActiveTrackIndex(): Int =
         activeTrackIndex.coerceIn(0, effectiveTracks().lastIndex)
+
+    fun effectiveTimeSignatures(): List<ScoreTimeSignature> =
+        ScoreTimeSignatures.normalize(timeSignatures)
 
     fun safeProjectName(): String = cleanProjectName(projectName)
 
@@ -75,6 +83,12 @@ object ScoreProjectCodec {
         append(MAGIC).append('\t').append(VERSION).append('\n')
         append("PROJECT_NAME\t").append(snapshot.safeProjectName()).append('\n')
         append("BPM\t").append(snapshot.bpm.coerceIn(30, 300)).append('\n')
+        snapshot.effectiveTimeSignatures().forEach { signature ->
+            append("TIME_SIGNATURE\t")
+                .append(signature.startBeat).append('\t')
+                .append(signature.numerator).append('\t')
+                .append(signature.denominator).append('\n')
+        }
         append("DURATION\t").append(snapshot.selectedDuration.name).append('\n')
         append("DOTTED_INPUT\t").append(if (snapshot.selectedDotted) 1 else 0).append('\n')
         append("ARTICULATION\t").append(snapshot.selectedArticulation.name).append('\n')
@@ -141,6 +155,7 @@ object ScoreProjectCodec {
         var pianoOctaveShift = 0
         var staffSharpInput = false
         var activeTrackIndex = 0
+        val timeSignatures = mutableListOf<ScoreTimeSignature>()
         val tracks = mutableListOf<ScoreTrack>()
         var trackBuilder: TrackBuilder? = null
 
@@ -155,6 +170,7 @@ object ScoreProjectCodec {
             when (parts.firstOrNull()) {
                 "PROJECT_NAME" -> projectName = cleanProjectName(parts.getOrNull(1).orEmpty())
                 "BPM" -> parts.getOrNull(1)?.toIntOrNull()?.let { bpm = it.coerceIn(30, 300) }
+                "TIME_SIGNATURE" -> decodeTimeSignature(parts)?.let(timeSignatures::add)
                 "DURATION" -> parseDuration(parts.getOrNull(1))?.let { selectedDuration = it }
                 "DOTTED_INPUT" -> selectedDotted = parts.getOrNull(1) == "1"
                 "ARTICULATION" -> parseArticulation(parts.getOrNull(1))?.let {
@@ -194,6 +210,7 @@ object ScoreProjectCodec {
             tracks = safeTracks,
             activeTrackIndex = safeActiveIndex,
             projectName = projectName,
+            timeSignatures = ScoreTimeSignatures.normalize(timeSignatures),
         )
     }
 
@@ -257,6 +274,16 @@ object ScoreProjectCodec {
         val volume = parts.getOrNull(8)?.toIntOrNull() ?: ScoreTrack.DEFAULT_VOLUME
         val pan = parts.getOrNull(9)?.toIntOrNull() ?: ScoreTrack.CENTER_PAN
         return TrackBuilder(id, name, cursorBeat, bank, program, muted, solo, volume, pan)
+    }
+
+    private fun decodeTimeSignature(parts: List<String>): ScoreTimeSignature? {
+        if (parts.size < 4) return null
+        val startBeat = parts[1].toFloatOrNull()?.takeIf { it >= 0f } ?: return null
+        val numerator = parts[2].toIntOrNull()?.takeIf { it in 1..32 } ?: return null
+        val denominator = parts[3].toIntOrNull()
+            ?.takeIf { it in ScoreTimeSignatures.SUPPORTED_DENOMINATORS }
+            ?: return null
+        return ScoreTimeSignature(startBeat, numerator, denominator).normalized()
     }
 
     private fun decodeNote(parts: List<String>): ScoreNote? {

@@ -22,6 +22,10 @@ class ScoreProjectCodecTest {
             pianoOctaveShift = -2,
             staffSharpInput = true,
             projectName = "Night Drive",
+            timeSignatures = listOf(
+                ScoreTimeSignature(0f, 3, 4),
+                ScoreTimeSignature(6f, 5, 8),
+            ),
         )
 
         assertEquals(original, ScoreProjectCodec.decode(ScoreProjectCodec.encode(original)))
@@ -63,6 +67,10 @@ class ScoreProjectCodecTest {
             activeTrackIndex = 1,
             bpm = 132,
             projectName = "Boss Theme",
+            timeSignatures = listOf(
+                ScoreTimeSignature(0f, 7, 8),
+                ScoreTimeSignature(7f, 4, 4),
+            ),
         )
 
         val decoded = requireNotNull(ScoreProjectCodec.decode(ScoreProjectCodec.encode(original)))
@@ -107,6 +115,7 @@ class ScoreProjectCodecTest {
         assertFalse(oldV2.tracks.single().solo)
         assertEquals(ScoreTrack.DEFAULT_VOLUME, oldV2.tracks.single().volume)
         assertEquals(ScoreTrack.CENTER_PAN, oldV2.tracks.single().pan)
+        assertEquals(listOf(ScoreTimeSignature()), oldV2.timeSignatures)
     }
 
     @Test
@@ -129,6 +138,7 @@ class ScoreProjectCodecTest {
         assertEquals(118, decoded.bpm)
         assertFalse(decoded.selectedDotted)
         assertEquals("Untitled", decoded.projectName)
+        assertEquals(listOf(ScoreTimeSignature()), decoded.timeSignatures)
     }
 
     @Test
@@ -173,6 +183,7 @@ class ScoreProjectCodecTest {
         assertFalse(decoded.selectedDotted)
         assertEquals(1, decoded.tracks.size)
         assertEquals("Untitled", decoded.projectName)
+        assertEquals(listOf(ScoreTimeSignature()), decoded.timeSignatures)
     }
 
     @Test

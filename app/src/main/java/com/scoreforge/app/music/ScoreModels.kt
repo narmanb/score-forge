@@ -1,7 +1,6 @@
 package com.scoreforge.app.music
 
 import kotlin.math.abs
-import kotlin.math.ceil
 import kotlin.math.round
 
 enum class NoteDuration(val beats: Float, val displayName: String) {
@@ -20,6 +19,143 @@ enum class NoteArticulation(val displayName: String) {
     TENUTO("Tenuto"),
     ACCENT("Accent"),
     LEGATO("Legato"),
+}
+
+/** A musical meter beginning at [startBeat], measured in quarter-note beats. */
+data class ScoreTimeSignature(
+    val startBeat: Float = 0f,
+    val numerator: Int = 4,
+    val denominator: Int = 4,
+) {
+    val beatsPerMeasure: Float
+        get() = numerator.coerceAtLeast(1) * (4f / denominator.coerceAtLeast(1).toFloat())
+
+    val displayName: String
+        get() = "$numerator/$denominator"
+
+    fun normalized(): ScoreTimeSignature = ScoreTimeSignatures.normalizeOne(this)
+}
+
+/** Helpers for a project-wide time-signature map, including mid-song meter changes. */
+object ScoreTimeSignatures {
+    private const val EPSILON = 0.001f
+    val DEFAULT = ScoreTimeSignature()
+    val SUPPORTED_DENOMINATORS = listOf(1, 2, 4, 8, 16, 32, 64, 128)
+
+    fun normalizeOne(signature: ScoreTimeSignature): ScoreTimeSignature {
+        val denominator = signature.denominator.takeIf { it in SUPPORTED_DENOMINATORS } ?: 4
+        return signature.copy(
+            startBeat = signature.startBeat.coerceAtLeast(0f),
+            numerator = signature.numerator.coerceIn(1, 32),
+            denominator = denominator,
+        )
+    }
+
+    fun normalize(signatures: List<ScoreTimeSignature>): List<ScoreTimeSignature> {
+        val sorted = signatures
+            .map(::normalizeOne)
+            .sortedBy { it.startBeat }
+        val merged = mutableListOf<ScoreTimeSignature>()
+        sorted.forEach { candidate ->
+            val previous = merged.lastOrNull()
+            if (previous != null && abs(previous.startBeat - candidate.startBeat) <= EPSILON) {
+                merged[merged.lastIndex] = candidate.copy(startBeat = previous.startBeat)
+            } else {
+                merged += candidate
+            }
+        }
+
+        if (merged.isEmpty()) return listOf(DEFAULT)
+        if (merged.first().startBeat > EPSILON) {
+            merged.add(0, DEFAULT)
+        } else {
+            merged[0] = merged[0].copy(startBeat = 0f)
+        }
+        return merged
+    }
+
+    fun atBeat(signatures: List<ScoreTimeSignature>, beat: Float): ScoreTimeSignature {
+        val safeBeat = beat.coerceAtLeast(0f)
+        return normalize(signatures)
+            .lastOrNull { it.startBeat <= safeBeat + EPSILON }
+            ?: DEFAULT
+    }
+
+    /**
+     * Returns barline beats beginning with 0 and continuing through the first barline at or after
+     * [throughBeat]. A meter change itself starts a new measure, even for unusual MIDI files that
+     * place the change before the previous measure would naturally end.
+     */
+    fun measureBoundaries(
+        signatures: List<ScoreTimeSignature>,
+        throughBeat: Float,
+    ): List<Float> {
+        val normalized = normalize(signatures)
+        val target = throughBeat.coerceAtLeast(0f)
+        val boundaries = mutableListOf(0f)
+        if (target <= EPSILON) return boundaries
+
+        var signatureIndex = 0
+        var position = 0f
+        var guard = 0
+        while (position < target - EPSILON && guard++ < 100_000) {
+            while (
+                signatureIndex + 1 < normalized.size &&
+                normalized[signatureIndex + 1].startBeat <= position + EPSILON
+            ) {
+                signatureIndex += 1
+            }
+
+            val signature = normalized[signatureIndex]
+            val naturalEnd = position + signature.beatsPerMeasure.coerceAtLeast(0.125f)
+            val nextChange = normalized.getOrNull(signatureIndex + 1)?.startBeat
+            val nextBoundary = if (
+                nextChange != null &&
+                nextChange > position + EPSILON &&
+                nextChange < naturalEnd - EPSILON
+            ) {
+                nextChange
+            } else {
+                naturalEnd
+            }
+
+            if (nextBoundary <= position + EPSILON) break
+            position = nextBoundary
+            boundaries += position
+        }
+        return boundaries
+    }
+
+    fun measureCount(signatures: List<ScoreTimeSignature>, throughBeat: Float): Int =
+        maxOf(1, measureBoundaries(signatures, throughBeat).size - 1)
+
+    fun endBeatAfterMeasures(signatures: List<ScoreTimeSignature>, measureCount: Int): Float {
+        val normalized = normalize(signatures)
+        var signatureIndex = 0
+        var position = 0f
+        repeat(measureCount.coerceAtLeast(1)) {
+            while (
+                signatureIndex + 1 < normalized.size &&
+                normalized[signatureIndex + 1].startBeat <= position + EPSILON
+            ) {
+                signatureIndex += 1
+            }
+
+            val signature = normalized[signatureIndex]
+            val naturalEnd = position + signature.beatsPerMeasure.coerceAtLeast(0.125f)
+            val nextChange = normalized.getOrNull(signatureIndex + 1)?.startBeat
+            position = if (
+                nextChange != null &&
+                nextChange > position + EPSILON &&
+                nextChange < naturalEnd - EPSILON
+            ) {
+                nextChange
+            } else {
+                naturalEnd
+            }
+        }
+        return position
+    }
 }
 
 sealed interface ScoreEvent {
@@ -98,6 +234,7 @@ object ScoreArticulations {
 }
 
 object ScoreTimeline {
+    /** Compatibility constant for older callers; new meter-aware code should use the signature map. */
     const val BEATS_PER_MEASURE = 4f
     const val EDIT_GRID_BEATS = 0.25f
 
@@ -106,18 +243,30 @@ object ScoreTimeline {
 
     fun nextBeat(events: List<ScoreEvent>): Float = endBeat(events)
 
-    fun measureCount(events: List<ScoreEvent>, throughBeat: Float = endBeat(events)): Int {
-        val furthestBeat = maxOf(endBeat(events), throughBeat, BEATS_PER_MEASURE)
-        return ceil(furthestBeat / BEATS_PER_MEASURE).toInt()
+    fun measureCount(
+        events: List<ScoreEvent>,
+        throughBeat: Float = endBeat(events),
+        timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
+    ): Int {
+        val furthestBeat = maxOf(endBeat(events), throughBeat, 0f)
+        return ScoreTimeSignatures.measureCount(timeSignatures, furthestBeat)
     }
 
     fun visibleBeats(
         events: List<ScoreEvent>,
         minimumMeasures: Int = 4,
         throughBeat: Float = endBeat(events),
+        timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
     ): Float {
-        val measures = maxOf(measureCount(events, throughBeat), minimumMeasures)
-        return measures * BEATS_PER_MEASURE
+        val furthestBeat = maxOf(endBeat(events), throughBeat, 0f)
+        val measures = maxOf(
+            ScoreTimeSignatures.measureCount(timeSignatures, furthestBeat),
+            minimumMeasures,
+        )
+        return maxOf(
+            furthestBeat,
+            ScoreTimeSignatures.endBeatAfterMeasures(timeSignatures, measures),
+        )
     }
 
     fun quantizeBeat(beat: Float, gridBeats: Float = EDIT_GRID_BEATS): Float {

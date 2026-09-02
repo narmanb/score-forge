@@ -40,6 +40,7 @@ class MidiImporterTest {
         assertEquals(1, result.importedTrackCount)
         assertEquals(2, result.importedNoteCount)
         assertEquals("Test Song", result.snapshot.projectName)
+        assertEquals(listOf(ScoreTimeSignature()), result.snapshot.timeSignatures)
         val importedTrack = result.snapshot.tracks.single()
         assertEquals("Piano", importedTrack.name)
         assertEquals(5, importedTrack.presetProgram)
@@ -99,6 +100,61 @@ class MidiImporterTest {
         val result = MidiImporter.import(midi)
         assertEquals(120, result.bpm)
         assertTrue(result.warnings.any { it.contains("Tempo changes") })
+    }
+
+    @Test
+    fun importsTimeSignatureAndMidSongMeterChange() {
+        val midi = midiFile(
+            ticksPerQuarter = 480,
+            tracks = listOf(
+                track(
+                    bytes(
+                        0x00, 0xFF, 0x58, 0x04, 0x03, 0x02, 0x18, 0x08, // 3/4 at beat 0
+                        0x00, 0x90, 60, 96,
+                    ) + varLen(480) + bytes(
+                        0x80, 60, 0,
+                    ) + varLen(960) + bytes(
+                        0xFF, 0x58, 0x04, 0x06, 0x03, 0x18, 0x08, // 6/8 at beat 3
+                        0x00, 0xFF, 0x2F, 0x00,
+                    )
+                )
+            ),
+        )
+
+        val result = MidiImporter.import(midi)
+
+        assertEquals(
+            listOf(
+                ScoreTimeSignature(startBeat = 0f, numerator = 3, denominator = 4),
+                ScoreTimeSignature(startBeat = 3f, numerator = 6, denominator = 8),
+            ),
+            result.snapshot.timeSignatures,
+        )
+        assertFalse(result.warnings.any { it.contains("time signature", ignoreCase = true) })
+    }
+
+    @Test
+    fun insertsDefaultFourFourBeforeLateMidiMeterEvent() {
+        val midi = midiFile(
+            ticksPerQuarter = 480,
+            tracks = listOf(
+                track(
+                    bytes(
+                        0x00, 0x90, 60, 96,
+                    ) + varLen(480) + bytes(
+                        0x80, 60, 0,
+                    ) + varLen(480) + bytes(
+                        0xFF, 0x58, 0x04, 0x05, 0x02, 0x18, 0x08,
+                        0x00, 0xFF, 0x2F, 0x00,
+                    )
+                )
+            ),
+        )
+
+        val result = MidiImporter.import(midi)
+
+        assertEquals(ScoreTimeSignature(), result.snapshot.timeSignatures[0])
+        assertEquals(ScoreTimeSignature(2f, 5, 4), result.snapshot.timeSignatures[1])
     }
 
     private fun midiFile(ticksPerQuarter: Int, tracks: List<ByteArray>): ByteArray {

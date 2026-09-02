@@ -8,6 +8,8 @@ package com.scoreforge.app.music
  * survive even when the SoundFont itself is temporarily unavailable.
  *
  * Mixer values deliberately mirror MIDI conventions: volume is 0..127 and pan is -64..63.
+ * [timeSignatures] mirrors project meter metadata so the current Compose editor can carry it through
+ * track copies without silently dropping imported meter changes before the dedicated meter UI lands.
  */
 data class ScoreTrack(
     val id: Int,
@@ -20,6 +22,7 @@ data class ScoreTrack(
     val solo: Boolean = false,
     val volume: Int = DEFAULT_VOLUME,
     val pan: Int = CENTER_PAN,
+    val timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
 ) {
     val notes: List<ScoreNote>
         get() = events.filterIsInstance<ScoreNote>()
@@ -38,6 +41,7 @@ data class ScoreTrack(
             presetProgram = presetProgram?.coerceIn(0, 127),
             volume = volume.coerceIn(MIN_VOLUME, MAX_VOLUME),
             pan = pan.coerceIn(MIN_PAN, MAX_PAN),
+            timeSignatures = ScoreTimeSignatures.normalize(timeSignatures),
         )
     }
 
@@ -61,7 +65,13 @@ object ScoreTracks {
 
     fun newTrack(tracks: List<ScoreTrack>): ScoreTrack {
         val id = nextId(tracks)
-        return ScoreTrack(id = id, name = "Track $id")
+        val inheritedTimeSignatures = tracks.firstOrNull()?.timeSignatures
+            ?: listOf(ScoreTimeSignatures.DEFAULT)
+        return ScoreTrack(
+            id = id,
+            name = "Track $id",
+            timeSignatures = inheritedTimeSignatures,
+        )
     }
 
     fun audibleTracks(tracks: List<ScoreTrack>): List<ScoreTrack> {
