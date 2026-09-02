@@ -91,6 +91,7 @@ fun ScoreForgeComposerScreen() {
     var selectedArticulation by rememberSaveable { mutableStateOf(NoteArticulation.NORMAL) }
     var bpm by rememberSaveable { mutableIntStateOf(120) }
     var timeSignatures by remember { mutableStateOf(listOf(ScoreTimeSignatures.DEFAULT)) }
+    var metronomeEnabled by rememberSaveable { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(false) }
     var chordMode by rememberSaveable { mutableStateOf(StepChordMode.OFF) }
     var pianoEntryMode by rememberSaveable { mutableStateOf(PianoEntryMode.STEP) }
@@ -166,6 +167,7 @@ fun ScoreForgeComposerScreen() {
             activeTrackIndex = index,
             projectName = projectName,
             timeSignatures = timeSignatures,
+            metronomeEnabled = metronomeEnabled,
         )
     }
 
@@ -303,6 +305,7 @@ fun ScoreForgeComposerScreen() {
         pianoOctaveShift = snapshot.pianoOctaveShift.coerceIn(-4, 3)
         staffSharpInput = snapshot.staffSharpInput
         timeSignatures = snapshot.effectiveTimeSignatures()
+        metronomeEnabled = snapshot.metronomeEnabled
         mixerGestureHistoryRecorded = false
         if (clearHistory) editHistory.clear()
         syncHistoryButtons()
@@ -326,6 +329,7 @@ fun ScoreForgeComposerScreen() {
         projectName,
         bpm,
         timeSignatures,
+        metronomeEnabled,
         selectedDuration,
         selectedDotted,
         selectedArticulation,
@@ -410,6 +414,8 @@ fun ScoreForgeComposerScreen() {
             tracks = tracks,
             bpm = bpm,
             throughBeat = ScoreTracks.endBeat(tracks),
+            metronomeEnabled = metronomeEnabled,
+            timeSignatures = timeSignatures,
         ) { isPlaying = false }
     }
 
@@ -785,6 +791,11 @@ fun ScoreForgeComposerScreen() {
                     cursorBeat = activeCursorBeat,
                     isPlaying = isPlaying,
                     canPlay = playableNoteCount > 0 && !liveRecordingActive,
+                    metronomeEnabled = metronomeEnabled,
+                    onToggleMetronome = {
+                        if (isPlaying) stopPlayback()
+                        metronomeEnabled = !metronomeEnabled
+                    },
                     onTempoDown = { bpm = (bpm - 5).coerceAtLeast(30) },
                     onTempoUp = { bpm = (bpm + 5).coerceAtMost(300) },
                     onPlay = ::startPlayback,
@@ -1019,6 +1030,8 @@ private fun HeaderBar(
     cursorBeat: Float,
     isPlaying: Boolean,
     canPlay: Boolean,
+    metronomeEnabled: Boolean,
+    onToggleMetronome: () -> Unit,
     onTempoDown: () -> Unit,
     onTempoUp: () -> Unit,
     onPlay: () -> Unit,
@@ -1069,6 +1082,12 @@ private fun HeaderBar(
             enabled = bpm < 300,
             compact = false,
         )
+
+        if (metronomeEnabled) {
+            Button(onClick = onToggleMetronome) { Text("Metronome On") }
+        } else {
+            OutlinedButton(onClick = onToggleMetronome) { Text("Metronome Off") }
+        }
 
         if (isPlaying) Button(onClick = onStop) { Text("Stop") }
         else Button(onClick = onPlay, enabled = canPlay) { Text("Play") }
