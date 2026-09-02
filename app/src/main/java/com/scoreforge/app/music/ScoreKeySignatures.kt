@@ -122,6 +122,15 @@ object ScoreKeySignatures {
             else -> 0
         }
     }
+
+    /** Applies the active signature alteration to a natural pitch selected from a staff position. */
+    fun applyToNaturalPitch(naturalMidiPitch: Int, signature: ScoreKeySignature): Int {
+        val safePitch = naturalMidiPitch.coerceIn(0, 127)
+        val pitchClass = safePitch % 12
+        if (pitchClass !in setOf(0, 2, 4, 5, 7, 9, 11)) return safePitch
+        val letter = ((PitchNames.diatonicPosition(safePitch) % 7) + 7) % 7
+        return (safePitch + alterationForLetter(signature, letter)).coerceIn(0, 127)
+    }
 }
 
 enum class ScoreAccidental {
