@@ -61,7 +61,7 @@ class MidiImporterTest {
                 track(
                     bytes(
                         0x00, 0x90, 60, 90,
-                    ) + varLen(360) + bytes(0x80, 60, 0) +
+                    ) + varLen(350) + bytes(0x80, 60, 0) +
                         bytes(0x00, 0x91, 67, 90) + varLen(240) +
                         bytes(0x81, 67, 0, 0x00, 0xFF, 0x2F, 0x00)
                 )
