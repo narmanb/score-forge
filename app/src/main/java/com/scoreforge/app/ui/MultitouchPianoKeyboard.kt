@@ -38,7 +38,7 @@ import com.scoreforge.app.music.NoteArticulation
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
 
-internal enum class StepChordMode {
+enum class StepChordMode {
     OFF,
     MANUAL,
     AUTO;
