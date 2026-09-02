@@ -92,7 +92,7 @@ fun ScoreStaffEditor(
     modifier: Modifier = Modifier,
 ) {
     var draggingEventIndex by remember { mutableIntStateOf(-1) }
-    var zoom by remember { mutableFloatStateOf(1f) }
+    var zoom by rememberSaveable { mutableFloatStateOf(1f) }
     var staffInputEnabled by rememberSaveable { mutableStateOf(true) }
     val scrollState = rememberScrollState()
     val density = LocalDensity.current

@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -84,22 +85,22 @@ fun ScoreForgeComposerScreen() {
     var activeTrackIndex by remember { mutableIntStateOf(0) }
     var selectedEventIndex by remember { mutableIntStateOf(-1) }
     var projectName by remember { mutableStateOf("Untitled") }
-    var selectedDuration by remember { mutableStateOf(NoteDuration.QUARTER) }
-    var selectedDotted by remember { mutableStateOf(false) }
-    var selectedArticulation by remember { mutableStateOf(NoteArticulation.NORMAL) }
-    var bpm by remember { mutableIntStateOf(120) }
+    var selectedDuration by rememberSaveable { mutableStateOf(NoteDuration.QUARTER) }
+    var selectedDotted by rememberSaveable { mutableStateOf(false) }
+    var selectedArticulation by rememberSaveable { mutableStateOf(NoteArticulation.NORMAL) }
+    var bpm by rememberSaveable { mutableIntStateOf(120) }
     var isPlaying by remember { mutableStateOf(false) }
-    var chordMode by remember { mutableStateOf(StepChordMode.OFF) }
-    var pianoEntryMode by remember { mutableStateOf(PianoEntryMode.STEP) }
+    var chordMode by rememberSaveable { mutableStateOf(StepChordMode.OFF) }
+    var pianoEntryMode by rememberSaveable { mutableStateOf(PianoEntryMode.STEP) }
     var naturalGroupStartBeat by remember { mutableStateOf<Float?>(null) }
     var naturalGroupMaxBeats by remember { mutableStateOf(0f) }
     var liveRecordingStartedAtMs by remember { mutableStateOf<Long?>(null) }
     var liveRecordingStartBeat by remember { mutableFloatStateOf(0f) }
     var liveRecordingBpm by remember { mutableIntStateOf(120) }
-    var pianoOctaveShift by remember { mutableIntStateOf(0) }
-    var staffSharpInput by remember { mutableStateOf(false) }
-    var editorMode by remember { mutableStateOf(ScoreEditorMode.STAFF) }
-    var showPianoKeyboard by remember { mutableStateOf(true) }
+    var pianoOctaveShift by rememberSaveable { mutableIntStateOf(0) }
+    var staffSharpInput by rememberSaveable { mutableStateOf(false) }
+    var editorMode by rememberSaveable { mutableStateOf(ScoreEditorMode.STAFF) }
+    var showPianoKeyboard by rememberSaveable { mutableStateOf(true) }
     var draftLoaded by remember { mutableStateOf(false) }
     var canUndo by remember { mutableStateOf(false) }
     var canRedo by remember { mutableStateOf(false) }
@@ -298,8 +299,6 @@ fun ScoreForgeComposerScreen() {
         selectedArticulation = snapshot.selectedArticulation
         pianoOctaveShift = snapshot.pianoOctaveShift.coerceIn(-4, 3)
         staffSharpInput = snapshot.staffSharpInput
-        chordMode = StepChordMode.OFF
-        pianoEntryMode = PianoEntryMode.STEP
         mixerGestureHistoryRecorded = false
         if (clearHistory) editHistory.clear()
         syncHistoryButtons()
@@ -387,6 +386,9 @@ fun ScoreForgeComposerScreen() {
     DisposableEffect(playback, soundFontEngine) {
         playback.setSoundFontEngine(soundFontEngine)
         onDispose {
+            // Configuration changes recreate the Activity. Flush the latest score immediately so
+            // a rotation can never reload a draft that is up to 250 ms behind the visible editor.
+            ScoreProjectRepository.saveDraft(context, currentProjectSnapshot())
             cancelNaturalEntryGroup()
             cancelLiveRecording()
             LiveInstrumentBus.allNotesOff()
@@ -417,6 +419,8 @@ fun ScoreForgeComposerScreen() {
         cancelNaturalEntryGroup()
         LiveInstrumentBus.allNotesOff()
         applyProjectSnapshot(snapshot, clearHistory = true)
+        chordMode = StepChordMode.OFF
+        pianoEntryMode = PianoEntryMode.STEP
     }
 
     fun newProject() {
@@ -445,6 +449,8 @@ fun ScoreForgeComposerScreen() {
             ),
             clearHistory = true,
         )
+        chordMode = StepChordMode.OFF
+        pianoEntryMode = PianoEntryMode.STEP
         ScoreTransportBus.seek(0f)
     }
 

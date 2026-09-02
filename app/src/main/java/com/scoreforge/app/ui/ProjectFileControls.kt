@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.scoreforge.app.music.MidiImporter
 import com.scoreforge.app.music.ScoreProjectCodec
 import com.scoreforge.app.music.ScoreProjectSnapshot
 import kotlinx.coroutines.Dispatchers
@@ -49,6 +50,7 @@ fun ProjectFileControls(
     var newProjectDialogOpen by remember { mutableStateOf(false) }
     var renameText by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("Autosave on") }
+    var midiImportWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/octet-stream"),
@@ -115,6 +117,37 @@ fun ProjectFileControls(
         }
     }
 
+    val midiImportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            status = "Importing MIDI…"
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val displayName = queryDisplayName(context, uri).orEmpty()
+                    val projectNameFromFile = displayName
+                        .replace(Regex("(?i)\\.(mid|midi)$"), "")
+                        .trim()
+                        .ifBlank { "Imported MIDI" }
+                    val bytes = context.contentResolver.openInputStream(uri).use { input ->
+                        requireNotNull(input) { "Could not open the selected MIDI file." }
+                        input.readBytes()
+                    }
+                    MidiImporter.import(bytes, projectNameFromFile)
+                }
+            }
+
+            result.onSuccess { imported ->
+                onOpenProject(imported.snapshot)
+                status = imported.statusText()
+                midiImportWarnings = imported.warnings
+            }.onFailure { error ->
+                status = error.message ?: "MIDI import failed"
+            }
+        }
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -164,6 +197,22 @@ fun ProjectFileControls(
             onClick = { openLauncher.launch(arrayOf("*/*")) },
         ) {
             Text("Open")
+        }
+
+        OutlinedButton(
+            onClick = {
+                midiImportWarnings = emptyList()
+                midiImportLauncher.launch(
+                    arrayOf(
+                        "audio/midi",
+                        "audio/x-midi",
+                        "application/x-midi",
+                        "application/octet-stream",
+                    )
+                )
+            },
+        ) {
+            Text("Import MIDI")
         }
 
         Text(
@@ -225,6 +274,21 @@ fun ProjectFileControls(
             dismissButton = {
                 TextButton(onClick = { renameDialogOpen = false }) {
                     Text("Cancel")
+                }
+            },
+        )
+    }
+
+    if (midiImportWarnings.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { midiImportWarnings = emptyList() },
+            title = { Text("MIDI import notes") },
+            text = {
+                Text(midiImportWarnings.joinToString(separator = "\n\n") { "• $it" })
+            },
+            confirmButton = {
+                TextButton(onClick = { midiImportWarnings = emptyList() }) {
+                    Text("OK")
                 }
             },
         )
