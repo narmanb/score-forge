@@ -26,6 +26,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -99,8 +100,8 @@ fun MultitouchPianoKeyboard(
     val activePitchCounts = remember { mutableStateMapOf<Int, Int>() }
     val safeOctaveShift = octaveShift.coerceIn(-4, 3)
     val currentOctaveShift by rememberUpdatedState(safeOctaveShift)
-    var durationPaletteOpen by remember { mutableStateOf(false) }
-    var articulationPaletteOpen by remember { mutableStateOf(false) }
+    var durationPaletteOpen by rememberSaveable { mutableStateOf(false) }
+    var articulationPaletteOpen by rememberSaveable { mutableStateOf(false) }
 
     fun visualPitch(layoutPitch: Int): Int =
         PianoTouchLayout.shiftedPitch(layoutPitch, safeOctaveShift)

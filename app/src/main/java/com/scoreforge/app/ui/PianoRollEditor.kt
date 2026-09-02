@@ -23,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,8 +65,8 @@ fun PianoRollEditor(
     modifier: Modifier = Modifier,
 ) {
     var draggingEventIndex by remember { mutableIntStateOf(-1) }
-    var horizontalOffsetPx by remember { mutableFloatStateOf(0f) }
-    var verticalOffsetPx by remember { mutableFloatStateOf(0f) }
+    var horizontalOffsetPx by rememberSaveable { mutableFloatStateOf(0f) }
+    var verticalOffsetPx by rememberSaveable { mutableFloatStateOf(0f) }
     val transport by ScoreTransportBus.state.collectAsState()
     val lowPitch = PianoRollMapping.lowPitch(octaveShift)
     val highPitch = PianoRollMapping.highPitch(octaveShift)
