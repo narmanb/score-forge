@@ -30,7 +30,7 @@ data class MidiImportResult(
  * Small dependency-free Standard MIDI File (SMF) importer.
  *
  * Version 1 intentionally targets the information Score Forge can already edit well: note pitch,
- * start, written duration, velocity, track/channel grouping, tempo, time signatures, program,
+ * start, written duration, velocity, track/channel grouping, tempo, time signatures, key signatures, program,
  * bank, volume and pan. Continuous controllers, automation and mid-song tempo changes are retained
  * only as warnings until Score Forge has a model that can represent them without silently pretending
  * they were preserved.
@@ -67,12 +67,19 @@ object MidiImporter {
         val denominator: Int,
     )
 
+    private data class KeySignatureEvent(
+        val tick: Long,
+        val fifths: Int,
+        val minor: Boolean,
+    )
+
     private data class ParsedMidi(
         val ticksPerQuarter: Int,
         val notes: List<RawNote>,
         val states: Map<Pair<Int, Int>, TrackChannelState>,
         val tempoEvents: List<TempoEvent>,
         val timeSignatureEvents: List<TimeSignatureEvent>,
+        val keySignatureEvents: List<KeySignatureEvent>,
         val sourceTrackNames: Map<Int, String>,
         val warnings: MutableList<String>,
     )
@@ -87,6 +94,11 @@ object MidiImporter {
         val bpm = resolveBpm(parsed.tempoEvents, warnings)
         val timeSignatures = resolveTimeSignatures(
             events = parsed.timeSignatureEvents,
+            ticksPerQuarter = parsed.ticksPerQuarter,
+            warnings = warnings,
+        )
+        val keySignatures = resolveKeySignatures(
+            events = parsed.keySignatureEvents,
             ticksPerQuarter = parsed.ticksPerQuarter,
             warnings = warnings,
         )
@@ -162,6 +174,7 @@ object MidiImporter {
             activeTrackIndex = 0,
             projectName = safeName,
             timeSignatures = timeSignatures,
+            keySignatures = keySignatures,
         )
         return MidiImportResult(
             snapshot = snapshot,
@@ -233,6 +246,33 @@ object MidiImporter {
         return ScoreTimeSignatures.normalize(resolved)
     }
 
+    private fun resolveKeySignatures(
+        events: List<KeySignatureEvent>,
+        ticksPerQuarter: Int,
+        warnings: MutableList<String>,
+    ): List<ScoreKeySignature> {
+        if (events.isEmpty()) return listOf(ScoreKeySignatures.DEFAULT)
+
+        val resolved = mutableListOf<ScoreKeySignature>()
+        events.sortedBy { it.tick }
+            .groupBy { it.tick }
+            .forEach { (tick, atTick) ->
+                val distinct = atTick.map { it.fifths to it.minor }.distinct()
+                val chosen = atTick.last()
+                if (distinct.size > 1) {
+                    val beat = tick.toFloat() / ticksPerQuarter.toFloat()
+                    warnings += "Conflicting MIDI key signatures at beat ${formatBeat(beat)}; ${ScoreKeySignature(0f, chosen.fifths, chosen.minor).displayName} was used."
+                }
+                resolved += ScoreKeySignature(
+                    startBeat = tick.toFloat() / ticksPerQuarter.toFloat(),
+                    fifths = chosen.fifths,
+                    minor = chosen.minor,
+                )
+            }
+
+        return ScoreKeySignatures.normalize(resolved)
+    }
+
     private fun formatBeat(beat: Float): String {
         val rounded = (beat * 1000f).roundToInt() / 1000f
         return if (abs(rounded - rounded.toInt()) < 0.001f) {
@@ -261,6 +301,7 @@ object MidiImporter {
         val states = mutableMapOf<Pair<Int, Int>, TrackChannelState>()
         val tempoEvents = mutableListOf<TempoEvent>()
         val timeSignatureEvents = mutableListOf<TimeSignatureEvent>()
+        val keySignatureEvents = mutableListOf<KeySignatureEvent>()
         val sourceTrackNames = mutableMapOf<Int, String>()
         val warnings = mutableListOf<String>()
         var parsedTracks = 0
@@ -281,6 +322,7 @@ object MidiImporter {
                 states = states,
                 tempoEvents = tempoEvents,
                 timeSignatureEvents = timeSignatureEvents,
+                keySignatureEvents = keySignatureEvents,
                 sourceTrackNames = sourceTrackNames,
             )
             parsedTracks += 1
@@ -294,6 +336,7 @@ object MidiImporter {
             states = states,
             tempoEvents = tempoEvents,
             timeSignatureEvents = timeSignatureEvents,
+            keySignatureEvents = keySignatureEvents,
             sourceTrackNames = sourceTrackNames,
             warnings = warnings,
         )
@@ -306,6 +349,7 @@ object MidiImporter {
         states: MutableMap<Pair<Int, Int>, TrackChannelState>,
         tempoEvents: MutableList<TempoEvent>,
         timeSignatureEvents: MutableList<TimeSignatureEvent>,
+        keySignatureEvents: MutableList<KeySignatureEvent>,
         sourceTrackNames: MutableMap<Int, String>,
     ) {
         val cursor = Cursor(bytes)
@@ -358,6 +402,17 @@ object MidiImporter {
                                     tick = tick,
                                     numerator = numerator,
                                     denominator = 1 shl denominatorPower,
+                                )
+                            }
+                        }
+                        0x59 -> if (payload.size >= 2) {
+                            val fifths = payload[0].toInt()
+                            val mode = payload[1].toInt() and 0xFF
+                            if (fifths in -7..7 && mode in 0..1) {
+                                keySignatureEvents += KeySignatureEvent(
+                                    tick = tick,
+                                    fifths = fifths,
+                                    minor = mode == 1,
                                 )
                             }
                         }

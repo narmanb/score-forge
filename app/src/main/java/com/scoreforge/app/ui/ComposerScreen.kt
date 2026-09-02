@@ -48,6 +48,7 @@ import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
 import com.scoreforge.app.music.ScoreEditHistory
 import com.scoreforge.app.music.ScoreEditState
+import com.scoreforge.app.music.ScoreKeySignatures
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreProjectRepository
 import com.scoreforge.app.music.ScoreProjectSnapshot
@@ -91,6 +92,7 @@ fun ScoreForgeComposerScreen() {
     var selectedArticulation by rememberSaveable { mutableStateOf(NoteArticulation.NORMAL) }
     var bpm by rememberSaveable { mutableIntStateOf(120) }
     var timeSignatures by remember { mutableStateOf(listOf(ScoreTimeSignatures.DEFAULT)) }
+    var keySignatures by remember { mutableStateOf(listOf(ScoreKeySignatures.DEFAULT)) }
     var metronomeEnabled by rememberSaveable { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(false) }
     var chordMode by rememberSaveable { mutableStateOf(StepChordMode.OFF) }
@@ -167,6 +169,7 @@ fun ScoreForgeComposerScreen() {
             activeTrackIndex = index,
             projectName = projectName,
             timeSignatures = timeSignatures,
+            keySignatures = keySignatures,
             metronomeEnabled = metronomeEnabled,
         )
     }
@@ -305,6 +308,7 @@ fun ScoreForgeComposerScreen() {
         pianoOctaveShift = snapshot.pianoOctaveShift.coerceIn(-4, 3)
         staffSharpInput = snapshot.staffSharpInput
         timeSignatures = snapshot.effectiveTimeSignatures()
+        keySignatures = snapshot.effectiveKeySignatures()
         metronomeEnabled = snapshot.metronomeEnabled
         mixerGestureHistoryRecorded = false
         if (clearHistory) editHistory.clear()
@@ -329,6 +333,7 @@ fun ScoreForgeComposerScreen() {
         projectName,
         bpm,
         timeSignatures,
+        keySignatures,
         metronomeEnabled,
         selectedDuration,
         selectedDotted,
@@ -787,6 +792,10 @@ fun ScoreForgeComposerScreen() {
                         timeSignatures,
                         activeCursorBeat,
                     ).displayName,
+                    keySignatureLabel = ScoreKeySignatures.atBeat(
+                        keySignatures,
+                        activeCursorBeat,
+                    ).displayName,
                     bpm = bpm,
                     cursorBeat = activeCursorBeat,
                     isPlaying = isPlaying,
@@ -826,6 +835,23 @@ fun ScoreForgeComposerScreen() {
                     },
                     onRemoveSignature = { startBeat ->
                         timeSignatures = ScoreTimeSignatures.withoutChange(timeSignatures, startBeat)
+                    },
+                )
+
+                KeySignatureControls(
+                    keySignatures = keySignatures,
+                    timeSignatures = timeSignatures,
+                    cursorBeat = activeCursorBeat,
+                    onSetSignature = { startBeat, fifths, minor ->
+                        keySignatures = ScoreKeySignatures.withChange(
+                            keySignatures,
+                            startBeat,
+                            fifths,
+                            minor,
+                        )
+                    },
+                    onRemoveSignature = { startBeat ->
+                        keySignatures = ScoreKeySignatures.withoutChange(keySignatures, startBeat)
                     },
                 )
 
@@ -889,6 +915,7 @@ fun ScoreForgeComposerScreen() {
                         selectedDuration = selectedDuration,
                         cursorBeat = activeCursorBeat,
                         timeSignatures = timeSignatures,
+                        keySignatures = keySignatures,
                         selectedEventIndex = selectedEventIndex,
                         isPlaying = isPlaying,
                         canPlay = playableNoteCount > 0 && !liveRecordingActive,
@@ -1026,6 +1053,7 @@ private fun HeaderBar(
     restCount: Int,
     measureCount: Int,
     timeSignatureLabel: String,
+    keySignatureLabel: String,
     bpm: Int,
     cursorBeat: Float,
     isPlaying: Boolean,
@@ -1050,7 +1078,7 @@ private fun HeaderBar(
         Column {
             Text("Score Forge", style = MaterialTheme.typography.titleLarge, color = Color.White)
             Text(
-                "$projectName • $activeTrackName • $trackCount tracks • $timeSignatureLabel • $measureCount measures • beat ${formatBeat(cursorBeat)} • $noteCount notes • $restCount rests",
+                "$projectName • $activeTrackName • $trackCount tracks • $timeSignatureLabel • $keySignatureLabel • $measureCount measures • beat ${formatBeat(cursorBeat)} • $noteCount notes • $restCount rests",
                 style = MaterialTheme.typography.bodySmall,
                 color = Color(0xFFE0DCE5),
             )
