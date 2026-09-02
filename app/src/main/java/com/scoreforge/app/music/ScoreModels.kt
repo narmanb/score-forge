@@ -81,6 +81,40 @@ object ScoreTimeSignatures {
             ?: DEFAULT
     }
 
+    fun measureStartAt(signatures: List<ScoreTimeSignature>, beat: Float): Float {
+        val safeBeat = beat.coerceAtLeast(0f)
+        val normalized = normalize(signatures)
+        val active = atBeat(normalized, safeBeat)
+        return measureBoundaries(
+            normalized,
+            safeBeat + active.beatsPerMeasure.coerceAtLeast(0.125f),
+        ).lastOrNull { it <= safeBeat + EPSILON } ?: 0f
+    }
+
+    fun withChange(
+        signatures: List<ScoreTimeSignature>,
+        startBeat: Float,
+        numerator: Int,
+        denominator: Int,
+    ): List<ScoreTimeSignature> {
+        val safeStart = startBeat.coerceAtLeast(0f)
+        val retained = normalize(signatures)
+            .filterNot { abs(it.startBeat - safeStart) <= EPSILON }
+        return normalize(
+            retained + ScoreTimeSignature(safeStart, numerator, denominator).normalized()
+        )
+    }
+
+    fun withoutChange(
+        signatures: List<ScoreTimeSignature>,
+        startBeat: Float,
+    ): List<ScoreTimeSignature> {
+        if (startBeat <= EPSILON) return normalize(signatures)
+        return normalize(
+            normalize(signatures).filterNot { abs(it.startBeat - startBeat) <= EPSILON }
+        )
+    }
+
     /**
      * Returns barline beats beginning with 0 and continuing through the first barline at or after
      * [throughBeat]. A meter change itself starts a new measure, even for unusual MIDI files that

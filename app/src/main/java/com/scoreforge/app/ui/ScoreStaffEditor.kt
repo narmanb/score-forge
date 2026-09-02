@@ -55,6 +55,8 @@ import com.scoreforge.app.music.PitchNames
 import com.scoreforge.app.music.ScoreEvent
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreRest
+import com.scoreforge.app.music.ScoreTimeSignature
+import com.scoreforge.app.music.ScoreTimeSignatures
 import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
 import kotlin.math.abs
@@ -77,6 +79,7 @@ fun ScoreStaffEditor(
     events: List<ScoreEvent>,
     selectedDuration: NoteDuration,
     cursorBeat: Float,
+    timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
     selectedEventIndex: Int,
     isPlaying: Boolean = false,
     canPlay: Boolean = false,
@@ -101,6 +104,7 @@ fun ScoreStaffEditor(
         eventsEndBeat = ScoreTimeline.endBeat(events),
         editCursorBeat = cursorBeat,
         playheadBeat = transport.beat,
+        timeSignatures = timeSignatures,
     )
 
     Box(
@@ -316,13 +320,23 @@ fun ScoreStaffEditor(
                         Offset(staffLeft, geometry.staffBottom),
                         2.1f,
                     )
-                    drawNotationHeader(geometry, timelineLeftPx)
+                    val normalizedTimeSignatures = ScoreTimeSignatures.normalize(timeSignatures)
+                    val measureBoundaries = ScoreTimeSignatures.measureBoundaries(
+                        normalizedTimeSignatures,
+                        contentBeats,
+                    )
+                    drawNotationHeader(
+                        geometry,
+                        timelineLeftPx,
+                        ScoreTimeSignatures.atBeat(normalizedTimeSignatures, 0f),
+                    )
 
                     var rulerBeat = 0f
                     while (rulerBeat <= contentBeats + 0.001f) {
                         val x = StaffTimelineLayout.xAtBeat(rulerBeat, timelineLeftPx, beatWidthPx)
-                        val isMeasure =
-                            (rulerBeat % ScoreTimeline.BEATS_PER_MEASURE) < 0.001f
+                        val isMeasure = measureBoundaries.any {
+                            kotlin.math.abs(it - rulerBeat) < 0.001f
+                        }
                         drawLine(
                             Color(0xFF8A8880),
                             Offset(x, geometry.rulerY),
@@ -336,8 +350,7 @@ fun ScoreStaffEditor(
                         rulerBeat += 1f
                     }
 
-                    var measureBeat = 0f
-                    while (measureBeat <= contentBeats + 0.001f) {
+                    measureBoundaries.forEach { measureBeat ->
                         val x = StaffTimelineLayout.xAtBeat(
                             measureBeat,
                             timelineLeftPx,
@@ -349,7 +362,17 @@ fun ScoreStaffEditor(
                             Offset(x, geometry.staffBottom),
                             if (measureBeat == 0f) 2.1f else 1.3f,
                         )
-                        measureBeat += ScoreTimeline.BEATS_PER_MEASURE
+                    }
+
+                    normalizedTimeSignatures.drop(1).forEach { signature ->
+                        if (signature.startBeat <= contentBeats + 0.001f) {
+                            drawTimeSignatureChange(
+                                signature,
+                                timelineLeftPx,
+                                beatWidthPx,
+                                geometry,
+                            )
+                        }
                     }
 
                     events.forEachIndexed { index, event ->
@@ -547,6 +570,7 @@ private fun staffGeometry(events: List<ScoreEvent>, height: Float): StaffGeometr
 private fun DrawScope.drawNotationHeader(
     geometry: StaffGeometry,
     timelineLeftPx: Float,
+    timeSignature: ScoreTimeSignature,
 ) {
     drawIntoCanvas { canvas ->
         val ink = android.graphics.Color.rgb(20, 20, 20)
@@ -571,16 +595,49 @@ private fun DrawScope.drawNotationHeader(
         }
         val signatureX = timelineLeftPx * 0.70f
         canvas.nativeCanvas.drawText(
-            "4",
+            timeSignature.numerator.toString(),
             signatureX,
             geometry.staffTop + geometry.lineSpacing * 1.72f,
             signaturePaint,
         )
         canvas.nativeCanvas.drawText(
-            "4",
+            timeSignature.denominator.toString(),
             signatureX,
             geometry.staffTop + geometry.lineSpacing * 3.70f,
             signaturePaint,
+        )
+    }
+}
+
+private fun DrawScope.drawTimeSignatureChange(
+    signature: ScoreTimeSignature,
+    timelineLeftPx: Float,
+    pixelsPerBeat: Float,
+    geometry: StaffGeometry,
+) {
+    val x = StaffTimelineLayout.xAtBeat(
+        signature.startBeat,
+        timelineLeftPx,
+        pixelsPerBeat,
+    ) + geometry.lineSpacing * 0.58f
+    drawIntoCanvas { canvas ->
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.rgb(32, 32, 32)
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+            textSize = geometry.lineSpacing * 0.92f
+        }
+        canvas.nativeCanvas.drawText(
+            signature.numerator.toString(),
+            x,
+            geometry.staffTop + geometry.lineSpacing * 1.62f,
+            paint,
+        )
+        canvas.nativeCanvas.drawText(
+            signature.denominator.toString(),
+            x,
+            geometry.staffTop + geometry.lineSpacing * 3.58f,
+            paint,
         )
     }
 }

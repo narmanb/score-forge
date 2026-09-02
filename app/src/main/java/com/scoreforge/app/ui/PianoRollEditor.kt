@@ -42,6 +42,8 @@ import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
 import com.scoreforge.app.music.ScoreEvent
 import com.scoreforge.app.music.ScoreNote
+import com.scoreforge.app.music.ScoreTimeSignature
+import com.scoreforge.app.music.ScoreTimeSignatures
 import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
 import kotlin.math.roundToInt
@@ -55,6 +57,7 @@ fun PianoRollEditor(
     events: List<ScoreEvent>,
     selectedDuration: NoteDuration,
     cursorBeat: Float,
+    timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
     octaveShift: Int,
     selectedEventIndex: Int,
     onAddPitch: (pitch: Int, startBeat: Float) -> Unit,
@@ -72,9 +75,14 @@ fun PianoRollEditor(
     val highPitch = PianoRollMapping.highPitch(octaveShift)
     val visibleNotes = events.filterIsInstance<ScoreNote>()
     val furthestBeat = maxOf(cursorBeat, transport.beat, ScoreTimeline.endBeat(events))
+    val activeMeter = ScoreTimeSignatures.atBeat(timeSignatures, furthestBeat)
     val contentBeats = maxOf(
         PIANO_ROLL_MIN_BEATS,
-        ScoreTimeline.visibleBeats(events, throughBeat = furthestBeat + ScoreTimeline.BEATS_PER_MEASURE),
+        ScoreTimeline.visibleBeats(
+            events,
+            throughBeat = furthestBeat + activeMeter.beatsPerMeasure,
+            timeSignatures = timeSignatures,
+        ),
     )
     val density = LocalDensity.current
 
@@ -322,23 +330,49 @@ fun PianoRollEditor(
                 var gridBeat = 0f
                 while (gridBeat <= contentBeats + 0.001f) {
                     val x = PianoRollMapping.xAtBeat(gridBeat, contentBeats, size.width)
-                    val isMeasure = gridBeat % ScoreTimeline.BEATS_PER_MEASURE == 0f
                     val isQuarter = gridBeat % 1f == 0f
                     drawLine(
-                        color = when {
-                            isMeasure -> Color(0xFF6E747A)
-                            isQuarter -> Color(0xFFAEB4BA)
-                            else -> Color(0xFFD7DADF)
-                        },
+                        color = if (isQuarter) Color(0xFFAEB4BA) else Color(0xFFD7DADF),
                         start = Offset(x, 0f),
                         end = Offset(x, size.height),
-                        strokeWidth = when {
-                            isMeasure -> 2f
-                            isQuarter -> 1.2f
-                            else -> 0.7f
-                        },
+                        strokeWidth = if (isQuarter) 1.2f else 0.7f,
                     )
                     gridBeat += ScoreTimeline.EDIT_GRID_BEATS
+                }
+
+                val normalizedTimeSignatures = ScoreTimeSignatures.normalize(timeSignatures)
+                ScoreTimeSignatures.measureBoundaries(
+                    normalizedTimeSignatures,
+                    contentBeats,
+                ).forEach { boundary ->
+                    val x = PianoRollMapping.xAtBeat(boundary, contentBeats, size.width)
+                    drawLine(
+                        color = Color(0xFF6E747A),
+                        start = Offset(x, 0f),
+                        end = Offset(x, size.height),
+                        strokeWidth = 2f,
+                    )
+                }
+
+                val meterPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = android.graphics.Color.rgb(64, 64, 64)
+                    textSize = 15f
+                    isFakeBoldText = true
+                }
+                normalizedTimeSignatures.drop(1).forEach { signature ->
+                    if (signature.startBeat <= contentBeats + 0.001f) {
+                        val x = PianoRollMapping.xAtBeat(
+                            signature.startBeat,
+                            contentBeats,
+                            size.width,
+                        )
+                        drawContext.canvas.nativeCanvas.drawText(
+                            signature.displayName,
+                            x + 4f,
+                            17f,
+                            meterPaint,
+                        )
+                    }
                 }
 
                 events.forEachIndexed { index, event ->
