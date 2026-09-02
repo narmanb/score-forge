@@ -52,8 +52,12 @@ import com.scoreforge.app.audio.ScoreTransportBus
 import com.scoreforge.app.music.NoteArticulation
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
+import com.scoreforge.app.music.ScoreAccidental
 import com.scoreforge.app.music.ScoreEvent
+import com.scoreforge.app.music.ScoreKeySignature
+import com.scoreforge.app.music.ScoreKeySignatures
 import com.scoreforge.app.music.ScoreNote
+import com.scoreforge.app.music.ScorePitchSpelling
 import com.scoreforge.app.music.ScoreRest
 import com.scoreforge.app.music.ScoreTimeSignature
 import com.scoreforge.app.music.ScoreTimeSignatures
@@ -62,7 +66,7 @@ import com.scoreforge.app.music.ScoreTimeline
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
-private val NOTATION_HEADER_WIDTH = 82.dp
+private val NOTATION_HEADER_WIDTH = 132.dp
 private val TIMELINE_RIGHT_PADDING = 18.dp
 
 private data class StaffGeometry(
@@ -80,6 +84,7 @@ fun ScoreStaffEditor(
     selectedDuration: NoteDuration,
     cursorBeat: Float,
     timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
+    keySignatures: List<ScoreKeySignature> = listOf(ScoreKeySignatures.DEFAULT),
     selectedEventIndex: Int,
     isPlaying: Boolean = false,
     canPlay: Boolean = false,
@@ -196,24 +201,26 @@ fun ScoreStaffEditor(
                         ) {
                             detectTapGestures(
                                 onLongPress = { position ->
-                                    val geometry = staffGeometry(events, size.height.toFloat())
+                                    val geometry = staffGeometry(events, keySignatures, size.height.toFloat())
                                     val eventIndex = nearestEditableEventIndex(
                                         events,
                                         position,
                                         timelineLeftPx,
                                         beatWidthPx,
                                         geometry,
+                                        keySignatures,
                                     )
                                     if (eventIndex >= 0) onDeleteEvent(eventIndex)
                                 },
                                 onTap = { position ->
-                                    val geometry = staffGeometry(events, size.height.toFloat())
+                                    val geometry = staffGeometry(events, keySignatures, size.height.toFloat())
                                     val existingIndex = nearestEditableEventIndex(
                                         events,
                                         position,
                                         timelineLeftPx,
                                         beatWidthPx,
                                         geometry,
+                                        keySignatures,
                                     )
                                     if (existingIndex >= 0) {
                                         onSelectEvent(existingIndex)
@@ -243,13 +250,14 @@ fun ScoreStaffEditor(
                         .pointerInput(events, contentBeats, beatWidthPx, timelineLeftPx) {
                             detectDragGestures(
                                 onDragStart = { position ->
-                                    val geometry = staffGeometry(events, size.height.toFloat())
+                                    val geometry = staffGeometry(events, keySignatures, size.height.toFloat())
                                     draggingEventIndex = nearestEditableEventIndex(
                                         events,
                                         position,
                                         timelineLeftPx,
                                         beatWidthPx,
                                         geometry,
+                                        keySignatures,
                                     )
                                     if (draggingEventIndex >= 0) {
                                         onSelectEvent(draggingEventIndex)
@@ -270,7 +278,7 @@ fun ScoreStaffEditor(
                                     return@detectDragGestures
                                 }
 
-                                val geometry = staffGeometry(events, size.height.toFloat())
+                                val geometry = staffGeometry(events, keySignatures, size.height.toFloat())
                                 val latestStart =
                                     (contentBeats - event.effectiveBeats).coerceAtLeast(0f)
                                 val movedBeat = ScoreTimeline.quantizeBeat(
@@ -282,22 +290,26 @@ fun ScoreStaffEditor(
                                 ).coerceIn(0f, latestStart)
 
                                 when (event) {
-                                    is ScoreNote -> onMoveNote(
-                                        draggingEventIndex,
-                                        pitchFromY(
+                                    is ScoreNote -> {
+                                        val naturalPitch = pitchFromY(
                                             change.position.y,
                                             geometry,
-                                            preferSharp = PitchNames.hasSharp(event.midiPitch),
-                                        ),
-                                        movedBeat,
-                                    )
+                                            preferSharp = false,
+                                        )
+                                        val movedKey = ScoreKeySignatures.atBeat(keySignatures, movedBeat)
+                                        onMoveNote(
+                                            draggingEventIndex,
+                                            ScoreKeySignatures.applyToNaturalPitch(naturalPitch, movedKey),
+                                            movedBeat,
+                                        )
+                                    }
                                     is ScoreRest -> onMoveRest(draggingEventIndex, movedBeat)
                                 }
                                 change.consume()
                             }
                         },
                 ) {
-                    val geometry = staffGeometry(events, size.height)
+                    val geometry = staffGeometry(events, keySignatures, size.height)
                     val staffLeft = with(density) { 10.dp.toPx() }
                     val timelineRight = StaffTimelineLayout.xAtBeat(
                         contentBeats,
@@ -321,6 +333,7 @@ fun ScoreStaffEditor(
                         2.1f,
                     )
                     val normalizedTimeSignatures = ScoreTimeSignatures.normalize(timeSignatures)
+                    val normalizedKeySignatures = ScoreKeySignatures.normalize(keySignatures)
                     val measureBoundaries = ScoreTimeSignatures.measureBoundaries(
                         normalizedTimeSignatures,
                         contentBeats,
@@ -328,6 +341,7 @@ fun ScoreStaffEditor(
                     drawNotationHeader(
                         geometry,
                         timelineLeftPx,
+                        ScoreKeySignatures.atBeat(normalizedKeySignatures, 0f),
                         ScoreTimeSignatures.atBeat(normalizedTimeSignatures, 0f),
                     )
 
@@ -375,6 +389,23 @@ fun ScoreStaffEditor(
                         }
                     }
 
+                    normalizedKeySignatures.drop(1).forEachIndexed { index, signature ->
+                        if (signature.startBeat <= contentBeats + 0.001f) {
+                            val previous = normalizedKeySignatures[index]
+                            val sameBeatAsMeter = normalizedTimeSignatures.drop(1).any {
+                                abs(it.startBeat - signature.startBeat) <= 0.001f
+                            }
+                            drawKeySignatureChange(
+                                signature = signature,
+                                previous = previous,
+                                timelineLeftPx = timelineLeftPx,
+                                pixelsPerBeat = beatWidthPx,
+                                geometry = geometry,
+                                afterTimeSignature = sameBeatAsMeter,
+                            )
+                        }
+                    }
+
                     events.forEachIndexed { index, event ->
                         when (event) {
                             is ScoreNote -> drawScoreNote(
@@ -382,6 +413,7 @@ fun ScoreStaffEditor(
                                 timelineLeftPx,
                                 beatWidthPx,
                                 geometry,
+                                ScoreKeySignatures.atBeat(normalizedKeySignatures, event.startBeat),
                                 index == selectedEventIndex,
                             )
                             is ScoreRest -> drawScoreRest(
@@ -402,7 +434,7 @@ fun ScoreStaffEditor(
                             ?: return@forEachIndexed
                         val target = events.getOrNull(targetIndex) as? ScoreNote
                             ?: return@forEachIndexed
-                        drawTieCurve(event, target, timelineLeftPx, beatWidthPx, geometry)
+                        drawTieCurve(event, target, timelineLeftPx, beatWidthPx, geometry, normalizedKeySignatures)
                     }
 
                     events.forEachIndexed { sourceIndex, event ->
@@ -419,7 +451,7 @@ fun ScoreStaffEditor(
                             ?: return@forEachIndexed
                         val writtenEnd = source.startBeat + source.effectiveBeats
                         if (target.startBeat <= writtenEnd + 0.25f) {
-                            drawLegatoCurve(source, target, timelineLeftPx, beatWidthPx, geometry)
+                            drawLegatoCurve(source, target, timelineLeftPx, beatWidthPx, geometry, normalizedKeySignatures)
                         }
                     }
 
@@ -534,17 +566,22 @@ fun ScoreStaffEditor(
     }
 }
 
-private fun staffGeometry(events: List<ScoreEvent>, height: Float): StaffGeometry {
+private fun staffGeometry(
+    events: List<ScoreEvent>,
+    keySignatures: List<ScoreKeySignature>,
+    height: Float,
+): StaffGeometry {
     val center = height * 0.52f
     val baseSpacing = height * 0.085f
     val minSpacing = height * 0.03f
     val notes = events.filterIsInstance<ScoreNote>()
     var spacing = baseSpacing
 
-    fun noteYAt(pitch: Int, candidateSpacing: Float): Float {
+    fun noteYAt(note: ScoreNote, candidateSpacing: Float): Float {
         val bottom = center + candidateSpacing * 2f
         val e4Diatonic = 4 * 7 + 2
-        val steps = PitchNames.diatonicPosition(pitch) - e4Diatonic
+        val key = ScoreKeySignatures.atBeat(keySignatures, note.startBeat)
+        val steps = ScorePitchSpelling.spell(note.midiPitch, key).diatonicPosition - e4Diatonic
         return bottom - steps * (candidateSpacing / 2f)
     }
 
@@ -553,7 +590,7 @@ private fun staffGeometry(events: List<ScoreEvent>, height: Float): StaffGeometr
     while (
         spacing > minSpacing &&
         notes.any {
-            val y = noteYAt(it.midiPitch, spacing)
+            val y = noteYAt(it, spacing)
             y < topLimit || y > bottomLimit
         }
     ) {
@@ -570,6 +607,7 @@ private fun staffGeometry(events: List<ScoreEvent>, height: Float): StaffGeometr
 private fun DrawScope.drawNotationHeader(
     geometry: StaffGeometry,
     timelineLeftPx: Float,
+    keySignature: ScoreKeySignature,
     timeSignature: ScoreTimeSignature,
 ) {
     drawIntoCanvas { canvas ->
@@ -582,9 +620,15 @@ private fun DrawScope.drawNotationHeader(
         }
         canvas.nativeCanvas.drawText(
             "𝄞",
-            timelineLeftPx * 0.34f,
+            timelineLeftPx * 0.16f,
             geometry.staffTop + geometry.lineSpacing * 3.24f,
             clefPaint,
+        )
+
+        drawKeySignatureSymbols(
+            signature = keySignature,
+            startX = timelineLeftPx * 0.30f,
+            geometry = geometry,
         )
 
         val signaturePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -593,7 +637,7 @@ private fun DrawScope.drawNotationHeader(
             typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
             textSize = geometry.lineSpacing * 1.20f
         }
-        val signatureX = timelineLeftPx * 0.70f
+        val signatureX = timelineLeftPx * 0.86f
         canvas.nativeCanvas.drawText(
             timeSignature.numerator.toString(),
             signatureX,
@@ -607,6 +651,102 @@ private fun DrawScope.drawNotationHeader(
             signaturePaint,
         )
     }
+}
+
+private data class KeySymbolPosition(val letter: Int, val diatonicPosition: Int)
+
+private val sharpKeyPositions = listOf(
+    KeySymbolPosition(3, 5 * 7 + 3), // F5
+    KeySymbolPosition(0, 5 * 7 + 0), // C5
+    KeySymbolPosition(4, 5 * 7 + 4), // G5
+    KeySymbolPosition(1, 5 * 7 + 1), // D5
+    KeySymbolPosition(5, 4 * 7 + 5), // A4
+    KeySymbolPosition(2, 5 * 7 + 2), // E5
+    KeySymbolPosition(6, 4 * 7 + 6), // B4
+)
+
+private val flatKeyPositions = listOf(
+    KeySymbolPosition(6, 4 * 7 + 6), // B4
+    KeySymbolPosition(2, 5 * 7 + 2), // E5
+    KeySymbolPosition(5, 4 * 7 + 5), // A4
+    KeySymbolPosition(1, 5 * 7 + 1), // D5
+    KeySymbolPosition(4, 4 * 7 + 4), // G4
+    KeySymbolPosition(0, 5 * 7 + 0), // C5
+    KeySymbolPosition(3, 4 * 7 + 3), // F4
+)
+
+private fun DrawScope.drawKeySignatureSymbols(
+    signature: ScoreKeySignature,
+    startX: Float,
+    geometry: StaffGeometry,
+    symbolOverride: String? = null,
+    positionsOverride: List<KeySymbolPosition>? = null,
+): Float {
+    val safe = signature.normalized()
+    val positions = positionsOverride ?: when {
+        safe.fifths > 0 -> sharpKeyPositions.take(safe.fifths)
+        safe.fifths < 0 -> flatKeyPositions.take(-safe.fifths)
+        else -> emptyList()
+    }
+    if (positions.isEmpty()) return startX
+    val symbol = symbolOverride ?: if (safe.fifths >= 0) "♯" else "♭"
+    val spacing = geometry.lineSpacing * 0.62f
+    drawIntoCanvas { canvas ->
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.rgb(28, 28, 28)
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.SERIF, Typeface.NORMAL)
+            textSize = geometry.lineSpacing * 1.34f
+        }
+        positions.forEachIndexed { index, item ->
+            canvas.nativeCanvas.drawText(
+                symbol,
+                startX + index * spacing,
+                yForDiatonicPosition(item.diatonicPosition, geometry) + geometry.lineSpacing * 0.34f,
+                paint,
+            )
+        }
+    }
+    return startX + positions.size * spacing
+}
+
+private fun DrawScope.drawKeySignatureChange(
+    signature: ScoreKeySignature,
+    previous: ScoreKeySignature,
+    timelineLeftPx: Float,
+    pixelsPerBeat: Float,
+    geometry: StaffGeometry,
+    afterTimeSignature: Boolean,
+) {
+    var x = StaffTimelineLayout.xAtBeat(signature.startBeat, timelineLeftPx, pixelsPerBeat) +
+        geometry.lineSpacing * if (afterTimeSignature) 2.35f else 0.58f
+
+    val previousPositions = if (previous.fifths > 0) {
+        sharpKeyPositions.take(previous.fifths)
+    } else {
+        flatKeyPositions.take(-previous.fifths)
+    }
+    val cancellations = previousPositions.filter { item ->
+        val oldAlteration = ScoreKeySignatures.alterationForLetter(previous, item.letter)
+        val newAlteration = ScoreKeySignatures.alterationForLetter(signature, item.letter)
+        oldAlteration != 0 && newAlteration != oldAlteration
+    }
+    if (cancellations.isNotEmpty()) {
+        x = drawKeySignatureSymbols(
+            signature = previous,
+            startX = x,
+            geometry = geometry,
+            symbolOverride = "♮",
+            positionsOverride = cancellations,
+        ) + geometry.lineSpacing * 0.18f
+    }
+    drawKeySignatureSymbols(signature, x, geometry)
+}
+
+private fun yForDiatonicPosition(position: Int, geometry: StaffGeometry): Float {
+    val e4Diatonic = 4 * 7 + 2
+    val steps = position - e4Diatonic
+    return geometry.staffBottom - steps * (geometry.lineSpacing / 2f)
 }
 
 private fun DrawScope.drawTimeSignatureChange(
@@ -647,6 +787,7 @@ private fun DrawScope.drawScoreNote(
     timelineLeftPx: Float,
     pixelsPerBeat: Float,
     geometry: StaffGeometry,
+    keySignature: ScoreKeySignature,
     selected: Boolean,
 ) {
     val x = StaffTimelineLayout.xAtBeat(
@@ -654,7 +795,8 @@ private fun DrawScope.drawScoreNote(
         timelineLeftPx,
         pixelsPerBeat,
     )
-    val y = noteY(note.midiPitch, geometry)
+    val spelling = ScorePitchSpelling.spell(note.midiPitch, keySignature)
+    val y = noteY(note.midiPitch, geometry, keySignature)
     drawLedgerLines(x, y, geometry)
 
     if (selected) {
@@ -666,12 +808,15 @@ private fun DrawScope.drawScoreNote(
         )
     }
 
-    if (PitchNames.hasSharp(note.midiPitch)) {
-        drawSharpAccidental(
+    when (spelling.accidental) {
+        ScoreAccidental.SHARP -> drawSharpAccidental(
             x - geometry.lineSpacing * 0.62f,
             y,
             geometry.lineSpacing / 40f,
         )
+        ScoreAccidental.FLAT -> drawTextAccidental("♭", x, y, geometry)
+        ScoreAccidental.NATURAL -> drawTextAccidental("♮", x, y, geometry)
+        ScoreAccidental.NONE -> Unit
     }
 
     val noteWidth = maxOf(10f, geometry.lineSpacing * 0.42f)
@@ -736,6 +881,28 @@ private fun DrawScope.drawScoreNote(
     drawArticulationMark(note, x, y, noteWidth, geometry)
 }
 
+private fun DrawScope.drawTextAccidental(
+    symbol: String,
+    noteX: Float,
+    noteY: Float,
+    geometry: StaffGeometry,
+) {
+    drawIntoCanvas { canvas ->
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.rgb(17, 17, 17)
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.create(Typeface.SERIF, Typeface.NORMAL)
+            textSize = geometry.lineSpacing * 1.20f
+        }
+        canvas.nativeCanvas.drawText(
+            symbol,
+            noteX - geometry.lineSpacing * 0.66f,
+            noteY + geometry.lineSpacing * 0.34f,
+            paint,
+        )
+    }
+}
+
 private fun DrawScope.drawArticulationMark(
     note: ScoreNote,
     x: Float,
@@ -790,6 +957,7 @@ private fun DrawScope.drawLegatoCurve(
     timelineLeftPx: Float,
     pixelsPerBeat: Float,
     geometry: StaffGeometry,
+    keySignatures: List<ScoreKeySignature>,
 ) {
     val sourceX = StaffTimelineLayout.xAtBeat(
         source.startBeat + 0.16f,
@@ -801,8 +969,8 @@ private fun DrawScope.drawLegatoCurve(
         timelineLeftPx,
         pixelsPerBeat,
     )
-    val sourceY = noteY(source.midiPitch, geometry)
-    val targetY = noteY(target.midiPitch, geometry)
+    val sourceY = noteY(source.midiPitch, geometry, ScoreKeySignatures.atBeat(keySignatures, source.startBeat))
+    val targetY = noteY(target.midiPitch, geometry, ScoreKeySignatures.atBeat(keySignatures, target.startBeat))
     val below = (sourceY + targetY) / 2f >= geometry.middleLine
     val baseline = if (below) {
         maxOf(sourceY, targetY) + geometry.lineSpacing * 0.62f
@@ -827,6 +995,7 @@ private fun DrawScope.drawTieCurve(
     timelineLeftPx: Float,
     pixelsPerBeat: Float,
     geometry: StaffGeometry,
+    keySignatures: List<ScoreKeySignature>,
 ) {
     val sourceX = StaffTimelineLayout.xAtBeat(
         source.startBeat + 0.16f,
@@ -838,8 +1007,8 @@ private fun DrawScope.drawTieCurve(
         timelineLeftPx,
         pixelsPerBeat,
     )
-    val sourceY = noteY(source.midiPitch, geometry)
-    val targetY = noteY(target.midiPitch, geometry)
+    val sourceY = noteY(source.midiPitch, geometry, ScoreKeySignatures.atBeat(keySignatures, source.startBeat))
+    val targetY = noteY(target.midiPitch, geometry, ScoreKeySignatures.atBeat(keySignatures, target.startBeat))
     val baseline = maxOf(sourceY, targetY) + geometry.lineSpacing * 0.55f
     val controlY = baseline + geometry.lineSpacing * 0.65f
     val path = Path().apply {
@@ -948,10 +1117,15 @@ private fun DrawScope.drawScoreRest(
     }
 }
 
-private fun noteY(midiPitch: Int, geometry: StaffGeometry): Float {
-    val e4Diatonic = 4 * 7 + 2
-    val steps = PitchNames.diatonicPosition(midiPitch) - e4Diatonic
-    return geometry.staffBottom - steps * (geometry.lineSpacing / 2f)
+private fun noteY(
+    midiPitch: Int,
+    geometry: StaffGeometry,
+    keySignature: ScoreKeySignature = ScoreKeySignatures.DEFAULT,
+): Float {
+    return yForDiatonicPosition(
+        ScorePitchSpelling.spell(midiPitch, keySignature).diatonicPosition,
+        geometry,
+    )
 }
 
 private fun pitchFromY(
@@ -988,6 +1162,7 @@ private fun nearestEditableEventIndex(
     timelineLeftPx: Float,
     pixelsPerBeat: Float,
     geometry: StaffGeometry,
+    keySignatures: List<ScoreKeySignature> = listOf(ScoreKeySignatures.DEFAULT),
 ): Int {
     val restY = geometry.middleLine
     var nearest = -1
@@ -1000,7 +1175,7 @@ private fun nearestEditableEventIndex(
             pixelsPerBeat,
         )
         val y = when (event) {
-            is ScoreNote -> noteY(event.midiPitch, geometry)
+            is ScoreNote -> noteY(event.midiPitch, geometry, ScoreKeySignatures.atBeat(keySignatures, event.startBeat))
             is ScoreRest -> restY
         }
         val dx = point.x - x

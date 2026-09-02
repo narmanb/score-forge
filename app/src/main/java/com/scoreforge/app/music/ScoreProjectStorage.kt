@@ -32,6 +32,7 @@ data class ScoreProjectSnapshot(
     val projectName: String = "Untitled",
     val timeSignatures: List<ScoreTimeSignature> =
         tracks.firstOrNull()?.timeSignatures ?: listOf(ScoreTimeSignatures.DEFAULT),
+    val keySignatures: List<ScoreKeySignature> = listOf(ScoreKeySignatures.DEFAULT),
     val metronomeEnabled: Boolean = false,
 ) {
     fun effectiveTracks(): List<ScoreTrack> {
@@ -55,6 +56,9 @@ data class ScoreProjectSnapshot(
 
     fun effectiveTimeSignatures(): List<ScoreTimeSignature> =
         ScoreTimeSignatures.normalize(timeSignatures)
+
+    fun effectiveKeySignatures(): List<ScoreKeySignature> =
+        ScoreKeySignatures.normalize(keySignatures)
 
     fun safeProjectName(): String = cleanProjectName(projectName)
 
@@ -90,6 +94,12 @@ object ScoreProjectCodec {
                 .append(signature.startBeat).append('\t')
                 .append(signature.numerator).append('\t')
                 .append(signature.denominator).append('\n')
+        }
+        snapshot.effectiveKeySignatures().forEach { signature ->
+            append("KEY_SIGNATURE\t")
+                .append(signature.startBeat).append('\t')
+                .append(signature.fifths).append('\t')
+                .append(if (signature.minor) 1 else 0).append('\n')
         }
         append("DURATION\t").append(snapshot.selectedDuration.name).append('\n')
         append("DOTTED_INPUT\t").append(if (snapshot.selectedDotted) 1 else 0).append('\n')
@@ -159,6 +169,7 @@ object ScoreProjectCodec {
         var staffSharpInput = false
         var activeTrackIndex = 0
         val timeSignatures = mutableListOf<ScoreTimeSignature>()
+        val keySignatures = mutableListOf<ScoreKeySignature>()
         val tracks = mutableListOf<ScoreTrack>()
         var trackBuilder: TrackBuilder? = null
 
@@ -175,6 +186,7 @@ object ScoreProjectCodec {
                 "BPM" -> parts.getOrNull(1)?.toIntOrNull()?.let { bpm = it.coerceIn(30, 300) }
                 "METRONOME" -> metronomeEnabled = parts.getOrNull(1) == "1"
                 "TIME_SIGNATURE" -> decodeTimeSignature(parts)?.let(timeSignatures::add)
+                "KEY_SIGNATURE" -> decodeKeySignature(parts)?.let(keySignatures::add)
                 "DURATION" -> parseDuration(parts.getOrNull(1))?.let { selectedDuration = it }
                 "DOTTED_INPUT" -> selectedDotted = parts.getOrNull(1) == "1"
                 "ARTICULATION" -> parseArticulation(parts.getOrNull(1))?.let {
@@ -215,6 +227,7 @@ object ScoreProjectCodec {
             activeTrackIndex = safeActiveIndex,
             projectName = projectName,
             timeSignatures = ScoreTimeSignatures.normalize(timeSignatures),
+            keySignatures = ScoreKeySignatures.normalize(keySignatures),
             metronomeEnabled = metronomeEnabled,
         )
     }
@@ -289,6 +302,18 @@ object ScoreProjectCodec {
             ?.takeIf { it in ScoreTimeSignatures.SUPPORTED_DENOMINATORS }
             ?: return null
         return ScoreTimeSignature(startBeat, numerator, denominator).normalized()
+    }
+
+    private fun decodeKeySignature(parts: List<String>): ScoreKeySignature? {
+        if (parts.size < 4) return null
+        val startBeat = parts[1].toFloatOrNull()?.takeIf { it >= 0f } ?: return null
+        val fifths = parts[2].toIntOrNull()?.takeIf { it in -7..7 } ?: return null
+        val minor = when (parts[3]) {
+            "0" -> false
+            "1" -> true
+            else -> return null
+        }
+        return ScoreKeySignature(startBeat, fifths, minor).normalized()
     }
 
     private fun decodeNote(parts: List<String>): ScoreNote? {
