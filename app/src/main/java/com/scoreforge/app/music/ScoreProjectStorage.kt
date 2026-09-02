@@ -30,20 +30,24 @@ data class ScoreProjectSnapshot(
     ),
     val activeTrackIndex: Int = 0,
     val projectName: String = "Untitled",
-    val timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
+    val timeSignatures: List<ScoreTimeSignature> =
+        tracks.firstOrNull()?.timeSignatures ?: listOf(ScoreTimeSignatures.DEFAULT),
 ) {
-    fun effectiveTracks(): List<ScoreTrack> =
-        tracks.takeIf { it.isNotEmpty() }
+    fun effectiveTracks(): List<ScoreTrack> {
+        val signatures = effectiveTimeSignatures()
+        return tracks.takeIf { it.isNotEmpty() }
             ?.take(ScoreTracks.MAX_TRACKS)
-            ?.map { it.normalized() }
+            ?.map { it.copy(timeSignatures = signatures).normalized() }
             ?: listOf(
                 ScoreTrack(
                     id = 1,
                     name = "Track 1",
                     events = events,
                     cursorBeat = cursorBeat,
+                    timeSignatures = signatures,
                 ).normalized()
             )
+    }
 
     fun effectiveActiveTrackIndex(): Int =
         activeTrackIndex.coerceIn(0, effectiveTracks().lastIndex)
