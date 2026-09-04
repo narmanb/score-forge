@@ -232,6 +232,8 @@ fun ScoreForgeComposerScreen() {
     fun stopLiveRecording() {
         val startedAt = liveRecordingStartedAtMs ?: run {
             liveHeldInputs.clear()
+            LiveInstrumentBus.allNotesOff()
+            ScoreTransportBus.stop()
             return
         }
         val now = SystemClock.elapsedRealtime()
@@ -250,12 +252,25 @@ fun ScoreForgeComposerScreen() {
     }
 
     fun cancelLiveRecording() {
-        if (liveRecordingStartedAtMs == null && liveHeldInputs.isEmpty()) return
+        // Always stop the shared transport, even if the local Live bookkeeping is already empty.
+        // This repairs the impossible state seen on-device where the purple playhead kept moving
+        // in Natural mode after the Live owner had disappeared.
         liveHeldInputs.keys.toList().forEach { LiveInstrumentBus.noteOff(it) }
         liveHeldInputs.clear()
         LiveInstrumentBus.allNotesOff()
         ScoreTransportBus.stop()
         liveRecordingStartedAtMs = null
+    }
+
+    fun repairUnexpectedTransportForEntry() {
+        val decision = TransportRepairPolicy.decide(
+            isLiveMode = pianoEntryMode == PianoEntryMode.LIVE,
+            liveRecordingActive = liveRecordingStartedAtMs != null,
+            scorePlaybackActive = isPlaying,
+            transportPlaying = ScoreTransportBus.state.value.isPlaying,
+        )
+        if (decision.cancelLiveRecording) cancelLiveRecording()
+        if (decision.stopTransport) playback.stop()
     }
 
     fun beginLivePitch(pitch: Int) {
@@ -409,6 +424,18 @@ fun ScoreForgeComposerScreen() {
             }
             delay(33L)
         }
+    }
+
+    LaunchedEffect(pianoEntryMode, liveRecordingStartedAtMs, isPlaying) {
+        if (pianoEntryMode == PianoEntryMode.LIVE) return@LaunchedEffect
+        val decision = TransportRepairPolicy.decide(
+            isLiveMode = false,
+            liveRecordingActive = liveRecordingStartedAtMs != null,
+            scorePlaybackActive = isPlaying,
+            transportPlaying = ScoreTransportBus.state.value.isPlaying,
+        )
+        if (decision.cancelLiveRecording) cancelLiveRecording()
+        if (decision.stopTransport) playback.stop()
     }
 
     LaunchedEffect(activeTrack.id, activeTrack.volume, activeTrack.pan) {
@@ -568,6 +595,7 @@ fun ScoreForgeComposerScreen() {
     }
 
     fun insertNoteAt(pitch: Int, startBeat: Float, preview: Boolean, advanceCursor: Boolean) {
+        repairUnexpectedTransportForEntry()
         recordBeforeScoreEdit()
         val track = currentTrack()
         val newEventIndex = track.events.size
@@ -675,6 +703,7 @@ fun ScoreForgeComposerScreen() {
     }
 
     fun beginNaturalPitch(pitch: Int) {
+        repairUnexpectedTransportForEntry()
         if (naturalHeldInputs.containsKey(pitch)) return
         val now = SystemClock.elapsedRealtime()
         val previousGroup = naturalCurrentGroup
