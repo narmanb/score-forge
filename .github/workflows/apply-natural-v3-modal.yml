@@ -1,0 +1,26 @@
+name: Apply Natural V3 Modal
+
+on:
+  push:
+    branches: [feature/natural-v3-piano-modal]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/natural-v3-piano-modal
+      - name: Apply source changes
+        run: python tools/apply_natural_v3_modal.py
+      - name: Commit generated source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt app/src/main/java/com/scoreforge/app/ui/PianoRollEditor.kt
+          git commit -m "Add Natural v3 and modal piano roll"
+          git push
