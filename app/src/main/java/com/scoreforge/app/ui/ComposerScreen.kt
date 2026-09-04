@@ -43,6 +43,7 @@ import com.scoreforge.app.audio.ScorePlaybackEngine
 import com.scoreforge.app.audio.ScoreTransportBus
 import com.scoreforge.app.audio.SoundFontEngine
 import com.scoreforge.app.music.ComfortTempo
+import com.scoreforge.app.music.HoldEntryTiming
 import com.scoreforge.app.music.LiveEntryTiming
 import com.scoreforge.app.music.NaturalEntryTiming
 import com.scoreforge.app.music.NoteArticulation
@@ -129,6 +130,7 @@ fun ScoreForgeComposerScreen() {
     var naturalCurrentGroup by remember { mutableStateOf<NaturalOnsetGroup?>(null) }
     var naturalRecentIntervalsMs by remember { mutableStateOf(emptyList<Long>()) }
     var holdCurrentGroup by remember { mutableStateOf<HoldOnsetGroup?>(null) }
+    var holdPreviousGroup by remember { mutableStateOf<HoldOnsetGroup?>(null) }
     var holdPreviewWritten by remember { mutableStateOf<NaturalEntryTiming.WrittenDuration?>(null) }
     var liveRecordingStartedAtMs by remember { mutableStateOf<Long?>(null) }
     var liveRecordingStartBeat by remember { mutableFloatStateOf(0f) }
@@ -174,6 +176,7 @@ fun ScoreForgeComposerScreen() {
         naturalRecentIntervalsMs = emptyList()
         holdHeldInputs.clear()
         holdCurrentGroup = null
+        holdPreviousGroup = null
         holdPreviewWritten = null
     }
 
@@ -363,10 +366,20 @@ fun ScoreForgeComposerScreen() {
         repairUnexpectedTransportForEntry()
         if (holdHeldInputs.containsKey(pitch)) return
         val now = SystemClock.elapsedRealtime()
-        val previousGroup = holdCurrentGroup
-        val joinsCurrentChord = previousGroup != null && holdHeldInputs.isNotEmpty()
-        val startBeat = if (joinsCurrentChord) previousGroup!!.startBeat else currentTrack().cursorBeat
-        val initialWritten = if (joinsCurrentChord) previousGroup!!.currentWritten
+        val activeGroup = holdCurrentGroup
+        val completedAnchor = holdPreviousGroup
+        val joinsCurrentChord = activeGroup != null && holdHeldInputs.isNotEmpty()
+        val startBeat = when {
+            joinsCurrentChord -> activeGroup!!.startBeat
+            completedAnchor != null -> HoldEntryTiming.nextStartBeat(
+                previousStartBeat = completedAnchor.startBeat,
+                previousOnsetMs = completedAnchor.onsetMs,
+                currentOnsetMs = now,
+                bpm = completedAnchor.bpm,
+            )
+            else -> currentTrack().cursorBeat
+        }
+        val initialWritten = if (joinsCurrentChord) activeGroup!!.currentWritten
         else NaturalEntryTiming.writtenForHoldMs(0L, bpm)
 
         if (!joinsCurrentChord) recordBeforeScoreEdit()
@@ -386,7 +399,7 @@ fun ScoreForgeComposerScreen() {
         }
 
         val group = if (joinsCurrentChord) {
-            previousGroup!!.copy(eventIndices = previousGroup.eventIndices + eventIndex)
+            activeGroup!!.copy(eventIndices = activeGroup.eventIndices + eventIndex)
         } else {
             HoldOnsetGroup(
                 onsetMs = now,
@@ -411,6 +424,9 @@ fun ScoreForgeComposerScreen() {
             updateHoldGroupAt(SystemClock.elapsedRealtime())
         }
         if (holdHeldInputs.values.none { it.groupOnsetMs == held.groupOnsetMs }) {
+            // Keep the completed onset as the performance-timing anchor for the next Hold note.
+            // Its written duration is already final; only the next note's start uses this anchor.
+            holdPreviousGroup = holdCurrentGroup
             holdCurrentGroup = null
             syncHistoryButtons()
         }
@@ -421,6 +437,7 @@ fun ScoreForgeComposerScreen() {
         if (holdHeldInputs.isNotEmpty()) LiveInstrumentBus.allNotesOff()
         holdHeldInputs.clear()
         holdCurrentGroup = null
+        holdPreviousGroup = null
     }
 
     fun restoreEditState(state: ScoreEditState) {
