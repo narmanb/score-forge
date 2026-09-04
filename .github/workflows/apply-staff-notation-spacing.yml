@@ -17,6 +17,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: fix/key-signature-spacing
+      - name: Allow repeated tie/slur replacements
+        run: sed -i 's/if count != 1:/if count < 1:/' tools/apply_staff_notation_spacing.py
       - name: Apply staff notation spacing source changes
         run: python tools/apply_staff_notation_spacing.py
       - name: Commit generated source changes
