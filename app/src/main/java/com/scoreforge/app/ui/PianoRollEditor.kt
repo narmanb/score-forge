@@ -12,7 +12,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.requiredHeight
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -161,8 +162,11 @@ fun PianoRollEditor(
                             -verticalOffsetPx.roundToInt(),
                         )
                     }
-                    .width(contentWidth)
-                    .height(contentHeight)
+                    // This canvas intentionally exceeds the viewport so manual panning has
+                    // real off-screen content to reveal. Plain width/height are constrained back
+                    // to the BoxWithConstraints viewport, which can make the offset canvas vanish.
+                    .requiredWidth(contentWidth)
+                    .requiredHeight(contentHeight)
                     .pointerInput(events, contentBeats, lowPitch, highPitch, selectedDuration) {
                         detectTapGestures(
                             onLongPress = { position ->
