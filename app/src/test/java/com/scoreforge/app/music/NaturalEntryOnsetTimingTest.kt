@@ -44,4 +44,42 @@ class NaturalEntryOnsetTimingTest {
         assertFalse(NaturalEntryTiming.shouldUseOnsetAsWrittenDuration(intervalMs, 120))
         assertEquals(6f, NaturalEntryTiming.quantizedOnsetSpacingBeats(intervalMs, 120), 0.001f)
     }
+
+    @Test
+    fun `late next attack after barline keeps final quarter note as quarter`() {
+        val inference = NaturalEntryTiming.inferInterval(
+            intervalMs = 750L,
+            bpm = 120,
+            recentIntervalsMs = listOf(500L, 505L, 495L),
+            beatsToNextBarline = 1f,
+            holdFallbackMs = 180L,
+        )
+
+        assertTrue(inference.phraseBreak)
+        assertEquals(NoteDuration.QUARTER, inference.written.duration)
+        assertFalse(inference.written.dotted)
+        assertEquals(1.5f, NaturalEntryTiming.quantizedOnsetSpacingBeats(750L, 120), 0.001f)
+    }
+
+    @Test
+    fun `same dotted quarter spacing away from barline stays dotted`() {
+        val inference = NaturalEntryTiming.inferInterval(
+            intervalMs = 750L,
+            bpm = 120,
+            recentIntervalsMs = listOf(500L, 500L, 500L),
+            beatsToNextBarline = 2.5f,
+            holdFallbackMs = 180L,
+        )
+
+        assertFalse(inference.phraseBreak)
+        assertEquals(NoteDuration.QUARTER, inference.written.duration)
+        assertTrue(inference.written.dotted)
+    }
+
+    @Test
+    fun `phrase break gap is not learned as the new pulse`() {
+        val recent = listOf(500L, 505L, 495L)
+        assertEquals(recent, NaturalEntryTiming.rememberInterval(recent, 900L, phraseBreak = true))
+        assertEquals(listOf(505L, 495L, 510L), NaturalEntryTiming.rememberInterval(recent, 510L, phraseBreak = false).takeLast(3))
+    }
 }
