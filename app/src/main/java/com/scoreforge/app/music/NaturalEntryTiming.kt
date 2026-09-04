@@ -131,6 +131,24 @@ object NaturalEntryTiming {
         return IntervalInference(written = written, phraseBreak = phraseBreak)
     }
 
+    /**
+     * Resolve the final Natural note before a non-musical UI interaction such as browsing the
+     * staff. UI time must never be interpreted as performed silence. Prefer the learned pulse;
+     * fall back to the released hold only when there is not enough attack history yet.
+     */
+    fun writtenForUiBreak(
+        recentIntervalsMs: List<Long>,
+        bpm: Int,
+        holdFallbackMs: Long,
+    ): WrittenDuration {
+        val expectedMs = expectedPulseMs(recentIntervalsMs)
+        return when {
+            expectedMs != null -> writtenForOnsetIntervalMs(expectedMs, bpm)
+            holdFallbackMs > 0L -> writtenForHoldMs(holdFallbackMs, bpm)
+            else -> WrittenDuration(NoteDuration.QUARTER, false)
+        }
+    }
+
     /** Keep a small rolling pulse history while excluding phrase-break gaps. */
     fun rememberInterval(
         recentIntervalsMs: List<Long>,
