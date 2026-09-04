@@ -610,14 +610,9 @@ fun ScoreStaffEditor(
                     )
                     drawLine(
                         Color(0xFFB34747),
-                        Offset(entryCursorX, geometry.rulerY + geometry.lineSpacing * 0.22f),
+                        Offset(entryCursorX, geometry.staffTop - geometry.lineSpacing * 0.30f),
                         Offset(entryCursorX, geometry.staffBottom + geometry.lineSpacing * 0.72f),
                         1.5f,
-                    )
-                    drawCircle(
-                        Color(0xFFB34747),
-                        radius = 4f,
-                        center = Offset(entryCursorX, geometry.rulerY + geometry.lineSpacing * 0.12f),
                     )
                     val entryHandleTipY = geometry.staffBottom + geometry.lineSpacing * 0.72f
                     val entryHandleBaseY = geometry.staffBottom + geometry.lineSpacing * 1.10f
@@ -642,8 +637,16 @@ fun ScoreStaffEditor(
                     drawLine(
                         Color(0xFF6A52A3),
                         Offset(playheadX, geometry.rulerY - geometry.lineSpacing * 0.18f),
-                        Offset(playheadX, geometry.staffBottom + geometry.lineSpacing * 1.35f),
+                        Offset(playheadX, geometry.staffBottom + geometry.lineSpacing * 0.30f),
                         3f,
+                    )
+                    drawCircle(
+                        Color(0xFF6A52A3),
+                        radius = 4f,
+                        center = Offset(
+                            playheadX,
+                            geometry.rulerY - geometry.lineSpacing * 0.18f,
+                        ),
                     )
                 }
             }

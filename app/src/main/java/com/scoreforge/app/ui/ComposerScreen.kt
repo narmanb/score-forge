@@ -674,6 +674,7 @@ fun ScoreForgeComposerScreen() {
     }
 
     fun moveEntryCursor(beat: Float) {
+        repairUnexpectedTransportForEntry()
         if (pianoEntryMode == PianoEntryMode.NATURAL) {
             finishNaturalPhraseForStaffBrowse()
             LiveInstrumentBus.allNotesOff()
