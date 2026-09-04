@@ -41,6 +41,7 @@ import com.scoreforge.app.audio.LiveInstrumentBus
 import com.scoreforge.app.audio.ScorePlaybackEngine
 import com.scoreforge.app.audio.ScoreTransportBus
 import com.scoreforge.app.audio.SoundFontEngine
+import com.scoreforge.app.music.ComfortTempo
 import com.scoreforge.app.music.LiveEntryTiming
 import com.scoreforge.app.music.NaturalEntryTiming
 import com.scoreforge.app.music.NoteArticulation
@@ -91,6 +92,9 @@ fun ScoreForgeComposerScreen() {
     var selectedDotted by rememberSaveable { mutableStateOf(false) }
     var selectedArticulation by rememberSaveable { mutableStateOf(NoteArticulation.NORMAL) }
     var bpm by rememberSaveable { mutableIntStateOf(120) }
+    var comfortTempoCapturing by rememberSaveable { mutableStateOf(false) }
+    var comfortTempoAttackTimes by remember { mutableStateOf(emptyList<Long>()) }
+    var comfortTempoEstimate by rememberSaveable { mutableStateOf<Int?>(null) }
     var timeSignatures by remember { mutableStateOf(listOf(ScoreTimeSignatures.DEFAULT)) }
     var keySignatures by remember { mutableStateOf(listOf(ScoreKeySignatures.DEFAULT)) }
     var metronomeEnabled by rememberSaveable { mutableStateOf(false) }
@@ -310,6 +314,9 @@ fun ScoreForgeComposerScreen() {
         timeSignatures = snapshot.effectiveTimeSignatures()
         keySignatures = snapshot.effectiveKeySignatures()
         metronomeEnabled = snapshot.metronomeEnabled
+        comfortTempoCapturing = false
+        comfortTempoAttackTimes = emptyList()
+        comfortTempoEstimate = null
         mixerGestureHistoryRecorded = false
         if (clearHistory) editHistory.clear()
         syncHistoryButtons()
@@ -427,6 +434,46 @@ fun ScoreForgeComposerScreen() {
     fun stopPlayback() {
         playback.stop()
         isPlaying = false
+    }
+
+    fun startComfortTempoMeasurement() {
+        stopPlayback()
+        stopLiveRecording()
+        cancelNaturalEntryGroup()
+        LiveInstrumentBus.allNotesOff()
+        comfortTempoAttackTimes = emptyList()
+        comfortTempoEstimate = null
+        comfortTempoCapturing = true
+        showPianoKeyboard = true
+    }
+
+    fun cancelComfortTempoMeasurement() {
+        comfortTempoCapturing = false
+        comfortTempoAttackTimes = emptyList()
+        comfortTempoEstimate = null
+        LiveInstrumentBus.allNotesOff()
+    }
+
+    fun recordComfortTempoAttack(pitch: Int) {
+        if (!comfortTempoCapturing) return
+        val updated = ComfortTempo.addAttack(
+            comfortTempoAttackTimes,
+            SystemClock.elapsedRealtime(),
+        )
+        if (updated.size == comfortTempoAttackTimes.size) return
+        comfortTempoAttackTimes = updated
+        playback.previewPitch(pitch)
+        if (updated.size >= ComfortTempo.REQUIRED_ATTACKS) {
+            comfortTempoEstimate = ComfortTempo.estimateBpm(updated)
+            comfortTempoCapturing = false
+        }
+    }
+
+    fun applyComfortTempoEstimate() {
+        val estimate = comfortTempoEstimate ?: return
+        bpm = estimate.coerceIn(ComfortTempo.MIN_BPM, ComfortTempo.MAX_BPM)
+        comfortTempoEstimate = null
+        comfortTempoAttackTimes = emptyList()
     }
 
     fun openProject(snapshot: ScoreProjectSnapshot) {
@@ -799,7 +846,7 @@ fun ScoreForgeComposerScreen() {
                     bpm = bpm,
                     cursorBeat = activeCursorBeat,
                     isPlaying = isPlaying,
-                    canPlay = playableNoteCount > 0 && !liveRecordingActive,
+                    canPlay = playableNoteCount > 0 && !liveRecordingActive && !comfortTempoCapturing,
                     metronomeEnabled = metronomeEnabled,
                     onToggleMetronome = {
                         if (isPlaying) stopPlayback()
@@ -809,6 +856,16 @@ fun ScoreForgeComposerScreen() {
                     onTempoUp = { bpm = (bpm + 5).coerceAtMost(300) },
                     onPlay = ::startPlayback,
                     onStop = ::stopPlayback,
+                )
+
+                ComfortTempoControls(
+                    capturing = comfortTempoCapturing,
+                    attackCount = comfortTempoAttackTimes.size,
+                    estimatedBpm = comfortTempoEstimate,
+                    onStart = ::startComfortTempoMeasurement,
+                    onCancel = ::cancelComfortTempoMeasurement,
+                    onApply = ::applyComfortTempoEstimate,
+                    onTryAgain = ::startComfortTempoMeasurement,
                 )
 
                 ProjectFileControls(
@@ -918,7 +975,7 @@ fun ScoreForgeComposerScreen() {
                         keySignatures = keySignatures,
                         selectedEventIndex = selectedEventIndex,
                         isPlaying = isPlaying,
-                        canPlay = playableNoteCount > 0 && !liveRecordingActive,
+                        canPlay = playableNoteCount > 0 && !liveRecordingActive && !comfortTempoCapturing,
                         onPlay = ::startPlayback,
                         onStop = ::stopPlayback,
                         onAddPitch = { naturalPitch, tappedBeat ->
@@ -1020,15 +1077,19 @@ fun ScoreForgeComposerScreen() {
                         onOctaveDown = { changePianoOctave(-1) },
                         onOctaveUp = { changePianoOctave(1) },
                         onPitchDown = { pitch ->
-                            when (pianoEntryMode) {
-                                PianoEntryMode.STEP -> {
-                                    insertStepNote(pitch, preview = false)
-                                    if (!LiveInstrumentBus.noteOn(pitch, velocity = 96)) {
-                                        playback.previewPitch(pitch)
+                            if (comfortTempoCapturing) {
+                                recordComfortTempoAttack(pitch)
+                            } else {
+                                when (pianoEntryMode) {
+                                    PianoEntryMode.STEP -> {
+                                        insertStepNote(pitch, preview = false)
+                                        if (!LiveInstrumentBus.noteOn(pitch, velocity = 96)) {
+                                            playback.previewPitch(pitch)
+                                        }
                                     }
+                                    PianoEntryMode.NATURAL -> beginNaturalPitch(pitch)
+                                    PianoEntryMode.LIVE -> beginLivePitch(pitch)
                                 }
-                                PianoEntryMode.NATURAL -> beginNaturalPitch(pitch)
-                                PianoEntryMode.LIVE -> beginLivePitch(pitch)
                             }
                         },
                         onPitchUp = { pitch ->
