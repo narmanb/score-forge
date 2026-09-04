@@ -6,9 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -37,9 +35,9 @@ fun TimeSignatureControls(
         modifier = modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(horizontal = 12.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Text("Time:", style = MaterialTheme.typography.labelLarge)
         Text(active.displayName, style = MaterialTheme.typography.labelLarge)
@@ -49,40 +47,45 @@ fun TimeSignatureControls(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        OutlinedButton(
+        CompactCommandButton(
+            label = "Num −",
             onClick = {
                 onSetSignature(measureStart, (active.numerator - 1).coerceAtLeast(1), active.denominator)
             },
             enabled = active.numerator > 1,
-        ) { Text("Num −") }
+        )
 
-        Button(
+        CompactCommandButton(
+            label = "Num +",
             onClick = {
                 onSetSignature(measureStart, (active.numerator + 1).coerceAtMost(32), active.denominator)
             },
             enabled = active.numerator < 32,
-        ) { Text("Num +") }
+        )
 
-        OutlinedButton(
+        CompactCommandButton(
+            label = "Denom −",
             onClick = {
                 val nextIndex = (denominatorIndex - 1).coerceAtLeast(0)
                 onSetSignature(measureStart, active.numerator, denominators[nextIndex])
             },
             enabled = denominatorIndex > 0,
-        ) { Text("Denom −") }
+        )
 
-        Button(
+        CompactCommandButton(
+            label = "Denom +",
             onClick = {
                 val nextIndex = (denominatorIndex + 1).coerceAtMost(denominators.lastIndex)
                 onSetSignature(measureStart, active.numerator, denominators[nextIndex])
             },
             enabled = denominatorIndex < denominators.lastIndex,
-        ) { Text("Denom +") }
+        )
 
         if (hasExplicitChange) {
-            OutlinedButton(onClick = { onRemoveSignature(measureStart) }) {
-                Text("Remove Change")
-            }
+            CompactCommandButton(
+                label = "Remove Change",
+                onClick = { onRemoveSignature(measureStart) },
+            )
         }
 
         Text(
