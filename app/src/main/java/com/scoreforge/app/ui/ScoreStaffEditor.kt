@@ -98,9 +98,12 @@ fun ScoreStaffEditor(
     onDeleteEvent: (eventIndex: Int) -> Unit,
     onVerticalPan: (dragY: Float) -> Unit = {},
     onManualBrowse: () -> Unit = {},
+    onMoveEntryCursor: (beat: Float) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var draggingEventIndex by remember { mutableIntStateOf(-1) }
+    var draggingPlaybackCursor by remember { mutableStateOf(false) }
+    var draggingEntryCursor by remember { mutableStateOf(false) }
     var manualBrowseNotified by remember { mutableStateOf(false) }
     var zoom by rememberSaveable { mutableFloatStateOf(1f) }
     var staffInputEnabled by rememberSaveable { mutableStateOf(true) }
@@ -263,9 +266,28 @@ fun ScoreStaffEditor(
                                         )
                                     ).coerceIn(0f, contentBeats)
 
-                                    val rulerTap =
-                                        position.y <= geometry.staffTop - geometry.lineSpacing * 0.85f
-                                    if (rulerTap || !staffInputEnabled) {
+                                    when (
+                                        StaffCursorInteraction.zoneForY(
+                                            y = position.y,
+                                            staffTop = geometry.staffTop,
+                                            staffBottom = geometry.staffBottom,
+                                            lineSpacing = geometry.lineSpacing,
+                                        )
+                                    ) {
+                                        StaffCursorZone.PLAYBACK -> {
+                                            ScoreTransportBus.seek(tappedBeat)
+                                            onSelectEvent(-1)
+                                            return@detectTapGestures
+                                        }
+                                        StaffCursorZone.ENTRY -> {
+                                            onMoveEntryCursor(tappedBeat)
+                                            onSelectEvent(-1)
+                                            return@detectTapGestures
+                                        }
+                                        StaffCursorZone.STAFF -> Unit
+                                    }
+
+                                    if (!staffInputEnabled) {
                                         ScoreTransportBus.seek(tappedBeat)
                                         onSelectEvent(-1)
                                         return@detectTapGestures
@@ -279,6 +301,8 @@ fun ScoreStaffEditor(
                             detectDragGestures(
                                 onDragStart = { position ->
                                     manualBrowseNotified = false
+                                    draggingPlaybackCursor = false
+                                    draggingEntryCursor = false
                                     val geometry = staffGeometry(events, keySignatures, size.height.toFloat())
                                     draggingEventIndex = nearestEditableEventIndex(
                                         events,
@@ -292,17 +316,68 @@ fun ScoreStaffEditor(
                                     if (draggingEventIndex >= 0) {
                                         onSelectEvent(draggingEventIndex)
                                         onBeginMove(draggingEventIndex)
+                                    } else {
+                                        val startBeat = ScoreTimeline.quantizeBeat(
+                                            StaffNotationSpacing.beatAtX(
+                                                position.x,
+                                                timelineLeftPx,
+                                                beatWidthPx,
+                                                notationGaps,
+                                            )
+                                        ).coerceIn(0f, contentBeats)
+                                        when (
+                                            StaffCursorInteraction.zoneForY(
+                                                y = position.y,
+                                                staffTop = geometry.staffTop,
+                                                staffBottom = geometry.staffBottom,
+                                                lineSpacing = geometry.lineSpacing,
+                                            )
+                                        ) {
+                                            StaffCursorZone.PLAYBACK -> {
+                                                draggingPlaybackCursor = true
+                                                ScoreTransportBus.seek(startBeat)
+                                                onSelectEvent(-1)
+                                            }
+                                            StaffCursorZone.ENTRY -> {
+                                                draggingEntryCursor = true
+                                                onMoveEntryCursor(startBeat)
+                                                onSelectEvent(-1)
+                                            }
+                                            StaffCursorZone.STAFF -> Unit
+                                        }
                                     }
                                 },
                                 onDragEnd = {
                                     draggingEventIndex = -1
+                                    draggingPlaybackCursor = false
+                                    draggingEntryCursor = false
                                     manualBrowseNotified = false
                                 },
                                 onDragCancel = {
                                     draggingEventIndex = -1
+                                    draggingPlaybackCursor = false
+                                    draggingEntryCursor = false
                                     manualBrowseNotified = false
                                 },
                             ) { change, dragAmount ->
+                                if (draggingPlaybackCursor || draggingEntryCursor) {
+                                    val movedBeat = ScoreTimeline.quantizeBeat(
+                                        StaffNotationSpacing.beatAtX(
+                                            change.position.x,
+                                            timelineLeftPx,
+                                            beatWidthPx,
+                                            notationGaps,
+                                        )
+                                    ).coerceIn(0f, contentBeats)
+                                    if (draggingPlaybackCursor) {
+                                        ScoreTransportBus.seek(movedBeat)
+                                    } else {
+                                        onMoveEntryCursor(movedBeat)
+                                    }
+                                    change.consume()
+                                    return@detectDragGestures
+                                }
+
                                 val event = events.getOrNull(draggingEventIndex)
                                 if (event == null) {
                                     if (abs(dragAmount.x) >= abs(dragAmount.y)) {
@@ -543,6 +618,18 @@ fun ScoreStaffEditor(
                         Color(0xFFB34747),
                         radius = 4f,
                         center = Offset(entryCursorX, geometry.rulerY + geometry.lineSpacing * 0.12f),
+                    )
+                    val entryHandleTipY = geometry.staffBottom + geometry.lineSpacing * 0.72f
+                    val entryHandleBaseY = geometry.staffBottom + geometry.lineSpacing * 1.10f
+                    val entryHandleHalfWidth = geometry.lineSpacing * 0.30f
+                    drawPath(
+                        path = Path().apply {
+                            moveTo(entryCursorX, entryHandleTipY)
+                            lineTo(entryCursorX - entryHandleHalfWidth, entryHandleBaseY)
+                            lineTo(entryCursorX + entryHandleHalfWidth, entryHandleBaseY)
+                            close()
+                        },
+                        color = Color(0xFFB34747),
                     )
 
                     val playheadX = StaffNotationSpacing.xAtBeat(

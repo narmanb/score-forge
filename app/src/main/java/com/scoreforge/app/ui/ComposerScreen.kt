@@ -673,6 +673,18 @@ fun ScoreForgeComposerScreen() {
         cancelNaturalEntryGroup()
     }
 
+    fun moveEntryCursor(beat: Float) {
+        if (pianoEntryMode == PianoEntryMode.NATURAL) {
+            finishNaturalPhraseForStaffBrowse()
+            LiveInstrumentBus.allNotesOff()
+        } else if (pianoEntryMode == PianoEntryMode.LIVE && liveRecordingActive) {
+            stopLiveRecording()
+        }
+        val targetBeat = ScoreTimeline.quantizeBeat(beat).coerceAtLeast(0f)
+        replaceActiveTrack { it.copy(cursorBeat = targetBeat) }
+        selectedEventIndex = -1
+    }
+
     fun finalizeNaturalGroupForNextAttack(group: NaturalOnsetGroup, nextOnsetMs: Long): Float {
         val intervalMs = (nextOnsetMs - group.onsetMs).coerceAtLeast(0L)
         val nextBarline = ScoreTimeSignatures.measureBoundaries(
@@ -1144,6 +1156,7 @@ fun ScoreForgeComposerScreen() {
                                 finishNaturalPhraseForStaffBrowse()
                             }
                         },
+                        onMoveEntryCursor = ::moveEntryCursor,
                         modifier = Modifier.fillMaxWidth().height(300.dp),
                     )
 
