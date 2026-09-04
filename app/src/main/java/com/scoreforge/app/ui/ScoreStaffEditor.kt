@@ -111,6 +111,9 @@ fun ScoreStaffEditor(
         playheadBeat = transport.beat,
         timeSignatures = timeSignatures,
     )
+    val notationGaps = remember(timeSignatures, keySignatures) {
+        StaffNotationSpacing.gaps(timeSignatures, keySignatures)
+    }
 
     Box(
         modifier = Modifier
@@ -131,7 +134,15 @@ fun ScoreStaffEditor(
             val beatWidth = baseBeatWidth * safeZoom
             val contentWidth = maxOf(
                 viewportWidth,
-                NOTATION_HEADER_WIDTH + beatWidth * contentBeats + TIMELINE_RIGHT_PADDING,
+                NOTATION_HEADER_WIDTH +
+                    beatWidth * (
+                        contentBeats + StaffNotationSpacing.totalGapBeatsThrough(
+                            contentBeats,
+                            notationGaps,
+                            includeGapAtBeat = true,
+                        )
+                    ) +
+                    TIMELINE_RIGHT_PADDING,
             )
             val timelineLeftPx = with(density) { NOTATION_HEADER_WIDTH.toPx() }
             val beatWidthPx = with(density) { beatWidth.toPx() }
@@ -139,10 +150,12 @@ fun ScoreStaffEditor(
 
             LaunchedEffect(transport.beat, transport.isPlaying, safeZoom, scrollState.maxValue) {
                 if (!transport.isPlaying || scrollState.maxValue <= 0) return@LaunchedEffect
-                val playheadX = StaffTimelineLayout.xAtBeat(
+                val playheadX = StaffNotationSpacing.xAtBeat(
                     transport.beat,
                     timelineLeftPx,
                     beatWidthPx,
+                    notationGaps,
+                    includeGapAtBeat = true,
                 )
                 val viewportLeft = scrollState.value.toFloat()
                 val rightFollowEdge = viewportLeft + viewportWidthPx * 0.82f
@@ -167,14 +180,21 @@ fun ScoreStaffEditor(
                 beatWidthPx,
             ) {
                 if (transport.isPlaying) return@LaunchedEffect
-                val target = StaffTimelineLayout.entryAutoFollowTarget(
-                    cursorBeat = cursorBeat,
-                    currentScrollPx = scrollState.value,
-                    maxScrollPx = scrollState.maxValue,
-                    viewportWidthPx = viewportWidthPx,
-                    timelineLeftPx = timelineLeftPx,
-                    pixelsPerBeat = beatWidthPx,
-                ) ?: return@LaunchedEffect
+                val cursorX = StaffNotationSpacing.xAtBeat(
+                    cursorBeat,
+                    timelineLeftPx,
+                    beatWidthPx,
+                    notationGaps,
+                    includeGapAtBeat = true,
+                )
+                val viewportLeft = scrollState.value.toFloat()
+                val rightFollowEdge = viewportLeft + viewportWidthPx * 0.86f
+                val leftFollowEdge = viewportLeft + viewportWidthPx * 0.12f
+                val target = when {
+                    cursorX > rightFollowEdge -> cursorX - viewportWidthPx * 0.72f
+                    cursorX < leftFollowEdge -> cursorX - viewportWidthPx * 0.18f
+                    else -> null
+                }?.roundToInt()?.coerceIn(0, scrollState.maxValue) ?: return@LaunchedEffect
 
                 if (target != scrollState.value) {
                     scrollState.animateScrollTo(target)
@@ -198,6 +218,7 @@ fun ScoreStaffEditor(
                             beatWidthPx,
                             timelineLeftPx,
                             staffInputEnabled,
+                            notationGaps,
                         ) {
                             detectTapGestures(
                                 onLongPress = { position ->
@@ -209,6 +230,7 @@ fun ScoreStaffEditor(
                                         beatWidthPx,
                                         geometry,
                                         keySignatures,
+                                        notationGaps,
                                     )
                                     if (eventIndex >= 0) onDeleteEvent(eventIndex)
                                 },
@@ -221,6 +243,7 @@ fun ScoreStaffEditor(
                                         beatWidthPx,
                                         geometry,
                                         keySignatures,
+                                        notationGaps,
                                     )
                                     if (existingIndex >= 0) {
                                         onSelectEvent(existingIndex)
@@ -228,10 +251,11 @@ fun ScoreStaffEditor(
                                     }
 
                                     val tappedBeat = ScoreTimeline.quantizeBeat(
-                                        StaffTimelineLayout.beatAtX(
+                                        StaffNotationSpacing.beatAtX(
                                             position.x,
                                             timelineLeftPx,
                                             beatWidthPx,
+                                            notationGaps,
                                         )
                                     ).coerceIn(0f, contentBeats)
 
@@ -247,7 +271,7 @@ fun ScoreStaffEditor(
                                 },
                             )
                         }
-                        .pointerInput(events, contentBeats, beatWidthPx, timelineLeftPx) {
+                        .pointerInput(events, contentBeats, beatWidthPx, timelineLeftPx, notationGaps) {
                             detectDragGestures(
                                 onDragStart = { position ->
                                     val geometry = staffGeometry(events, keySignatures, size.height.toFloat())
@@ -258,6 +282,7 @@ fun ScoreStaffEditor(
                                         beatWidthPx,
                                         geometry,
                                         keySignatures,
+                                        notationGaps,
                                     )
                                     if (draggingEventIndex >= 0) {
                                         onSelectEvent(draggingEventIndex)
@@ -282,10 +307,11 @@ fun ScoreStaffEditor(
                                 val latestStart =
                                     (contentBeats - event.effectiveBeats).coerceAtLeast(0f)
                                 val movedBeat = ScoreTimeline.quantizeBeat(
-                                    StaffTimelineLayout.beatAtX(
+                                    StaffNotationSpacing.beatAtX(
                                         change.position.x,
                                         timelineLeftPx,
                                         beatWidthPx,
+                                        notationGaps,
                                     )
                                 ).coerceIn(0f, latestStart)
 
@@ -311,10 +337,12 @@ fun ScoreStaffEditor(
                 ) {
                     val geometry = staffGeometry(events, keySignatures, size.height)
                     val staffLeft = with(density) { 10.dp.toPx() }
-                    val timelineRight = StaffTimelineLayout.xAtBeat(
+                    val timelineRight = StaffNotationSpacing.xAtBeat(
                         contentBeats,
                         timelineLeftPx,
                         beatWidthPx,
+                        notationGaps,
+                        includeGapAtBeat = true,
                     )
 
                     repeat(5) { line ->
@@ -347,7 +375,13 @@ fun ScoreStaffEditor(
 
                     var rulerBeat = 0f
                     while (rulerBeat <= contentBeats + 0.001f) {
-                        val x = StaffTimelineLayout.xAtBeat(rulerBeat, timelineLeftPx, beatWidthPx)
+                        val x = StaffNotationSpacing.xAtBeat(
+                            rulerBeat,
+                            timelineLeftPx,
+                            beatWidthPx,
+                            notationGaps,
+                            includeGapAtBeat = false,
+                        )
                         val isMeasure = measureBoundaries.any {
                             kotlin.math.abs(it - rulerBeat) < 0.001f
                         }
@@ -365,10 +399,12 @@ fun ScoreStaffEditor(
                     }
 
                     measureBoundaries.forEach { measureBeat ->
-                        val x = StaffTimelineLayout.xAtBeat(
+                        val x = StaffNotationSpacing.xAtBeat(
                             measureBeat,
                             timelineLeftPx,
                             beatWidthPx,
+                            notationGaps,
+                            includeGapAtBeat = false,
                         )
                         drawLine(
                             Color(0xFF303030),
@@ -385,6 +421,7 @@ fun ScoreStaffEditor(
                                 timelineLeftPx,
                                 beatWidthPx,
                                 geometry,
+                                notationGaps,
                             )
                         }
                     }
@@ -402,6 +439,7 @@ fun ScoreStaffEditor(
                                 pixelsPerBeat = beatWidthPx,
                                 geometry = geometry,
                                 afterTimeSignature = sameBeatAsMeter,
+                                notationGaps = notationGaps,
                             )
                         }
                     }
@@ -415,6 +453,7 @@ fun ScoreStaffEditor(
                                 geometry,
                                 ScoreKeySignatures.atBeat(normalizedKeySignatures, event.startBeat),
                                 index == selectedEventIndex,
+                                notationGaps,
                             )
                             is ScoreRest -> drawScoreRest(
                                 event,
@@ -422,6 +461,7 @@ fun ScoreStaffEditor(
                                 beatWidthPx,
                                 geometry,
                                 index == selectedEventIndex,
+                                notationGaps,
                             )
                         }
                     }
@@ -434,7 +474,15 @@ fun ScoreStaffEditor(
                             ?: return@forEachIndexed
                         val target = events.getOrNull(targetIndex) as? ScoreNote
                             ?: return@forEachIndexed
-                        drawTieCurve(event, target, timelineLeftPx, beatWidthPx, geometry, normalizedKeySignatures)
+                        drawTieCurve(
+                            event,
+                            target,
+                            timelineLeftPx,
+                            beatWidthPx,
+                            geometry,
+                            normalizedKeySignatures,
+                            notationGaps,
+                        )
                     }
 
                     events.forEachIndexed { sourceIndex, event ->
@@ -451,14 +499,24 @@ fun ScoreStaffEditor(
                             ?: return@forEachIndexed
                         val writtenEnd = source.startBeat + source.effectiveBeats
                         if (target.startBeat <= writtenEnd + 0.25f) {
-                            drawLegatoCurve(source, target, timelineLeftPx, beatWidthPx, geometry, normalizedKeySignatures)
+                            drawLegatoCurve(
+                                source,
+                                target,
+                                timelineLeftPx,
+                                beatWidthPx,
+                                geometry,
+                                normalizedKeySignatures,
+                                notationGaps,
+                            )
                         }
                     }
 
-                    val entryCursorX = StaffTimelineLayout.xAtBeat(
+                    val entryCursorX = StaffNotationSpacing.xAtBeat(
                         cursorBeat.coerceIn(0f, contentBeats),
                         timelineLeftPx,
                         beatWidthPx,
+                        notationGaps,
+                        includeGapAtBeat = true,
                     )
                     drawLine(
                         Color(0xFFB34747),
@@ -472,10 +530,12 @@ fun ScoreStaffEditor(
                         center = Offset(entryCursorX, geometry.rulerY + geometry.lineSpacing * 0.12f),
                     )
 
-                    val playheadX = StaffTimelineLayout.xAtBeat(
+                    val playheadX = StaffNotationSpacing.xAtBeat(
                         transport.beat.coerceIn(0f, contentBeats),
                         timelineLeftPx,
                         beatWidthPx,
+                        notationGaps,
+                        includeGapAtBeat = true,
                     )
                     drawLine(
                         Color(0xFF6A52A3),
@@ -690,13 +750,13 @@ private fun DrawScope.drawKeySignatureSymbols(
     }
     if (positions.isEmpty()) return startX
     val symbol = symbolOverride ?: if (safe.fifths >= 0) "♯" else "♭"
-    val spacing = geometry.lineSpacing * 0.62f
+    val spacing = geometry.lineSpacing * 0.52f
     drawIntoCanvas { canvas ->
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = android.graphics.Color.rgb(28, 28, 28)
             textAlign = Paint.Align.CENTER
             typeface = Typeface.create(Typeface.SERIF, Typeface.NORMAL)
-            textSize = geometry.lineSpacing * 1.34f
+            textSize = geometry.lineSpacing * 1.22f
         }
         positions.forEachIndexed { index, item ->
             canvas.nativeCanvas.drawText(
@@ -717,8 +777,15 @@ private fun DrawScope.drawKeySignatureChange(
     pixelsPerBeat: Float,
     geometry: StaffGeometry,
     afterTimeSignature: Boolean,
+    notationGaps: List<StaffNotationGap>,
 ) {
-    var x = StaffTimelineLayout.xAtBeat(signature.startBeat, timelineLeftPx, pixelsPerBeat) +
+    var x = StaffNotationSpacing.xAtBeat(
+        signature.startBeat,
+        timelineLeftPx,
+        pixelsPerBeat,
+        notationGaps,
+        includeGapAtBeat = false,
+    ) +
         geometry.lineSpacing * if (afterTimeSignature) 2.35f else 0.58f
 
     val previousPositions = if (previous.fifths > 0) {
@@ -754,11 +821,14 @@ private fun DrawScope.drawTimeSignatureChange(
     timelineLeftPx: Float,
     pixelsPerBeat: Float,
     geometry: StaffGeometry,
+    notationGaps: List<StaffNotationGap>,
 ) {
-    val x = StaffTimelineLayout.xAtBeat(
+    val x = StaffNotationSpacing.xAtBeat(
         signature.startBeat,
         timelineLeftPx,
         pixelsPerBeat,
+        notationGaps,
+        includeGapAtBeat = false,
     ) + geometry.lineSpacing * 0.58f
     drawIntoCanvas { canvas ->
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -789,12 +859,15 @@ private fun DrawScope.drawScoreNote(
     geometry: StaffGeometry,
     keySignature: ScoreKeySignature,
     selected: Boolean,
+    notationGaps: List<StaffNotationGap>,
 ) {
-    val x = StaffTimelineLayout.xAtBeat(
-        note.startBeat + 0.10f,
+    val x = StaffNotationSpacing.xAtBeat(
+        note.startBeat,
         timelineLeftPx,
         pixelsPerBeat,
-    )
+        notationGaps,
+        includeGapAtBeat = true,
+    ) + pixelsPerBeat * 0.10f
     val spelling = ScorePitchSpelling.spell(note.midiPitch, keySignature)
     val y = noteY(note.midiPitch, geometry, keySignature)
     drawLedgerLines(x, y, geometry)
@@ -958,17 +1031,22 @@ private fun DrawScope.drawLegatoCurve(
     pixelsPerBeat: Float,
     geometry: StaffGeometry,
     keySignatures: List<ScoreKeySignature>,
+    notationGaps: List<StaffNotationGap>,
 ) {
-    val sourceX = StaffTimelineLayout.xAtBeat(
-        source.startBeat + 0.16f,
+    val sourceX = StaffNotationSpacing.xAtBeat(
+        source.startBeat,
         timelineLeftPx,
         pixelsPerBeat,
-    )
-    val targetX = StaffTimelineLayout.xAtBeat(
-        target.startBeat + 0.04f,
+        notationGaps,
+        includeGapAtBeat = true,
+    ) + pixelsPerBeat * 0.16f
+    val targetX = StaffNotationSpacing.xAtBeat(
+        target.startBeat,
         timelineLeftPx,
         pixelsPerBeat,
-    )
+        notationGaps,
+        includeGapAtBeat = true,
+    ) + pixelsPerBeat * 0.04f
     val sourceY = noteY(source.midiPitch, geometry, ScoreKeySignatures.atBeat(keySignatures, source.startBeat))
     val targetY = noteY(target.midiPitch, geometry, ScoreKeySignatures.atBeat(keySignatures, target.startBeat))
     val below = (sourceY + targetY) / 2f >= geometry.middleLine
@@ -996,17 +1074,22 @@ private fun DrawScope.drawTieCurve(
     pixelsPerBeat: Float,
     geometry: StaffGeometry,
     keySignatures: List<ScoreKeySignature>,
+    notationGaps: List<StaffNotationGap>,
 ) {
-    val sourceX = StaffTimelineLayout.xAtBeat(
-        source.startBeat + 0.16f,
+    val sourceX = StaffNotationSpacing.xAtBeat(
+        source.startBeat,
         timelineLeftPx,
         pixelsPerBeat,
-    )
-    val targetX = StaffTimelineLayout.xAtBeat(
-        target.startBeat + 0.04f,
+        notationGaps,
+        includeGapAtBeat = true,
+    ) + pixelsPerBeat * 0.16f
+    val targetX = StaffNotationSpacing.xAtBeat(
+        target.startBeat,
         timelineLeftPx,
         pixelsPerBeat,
-    )
+        notationGaps,
+        includeGapAtBeat = true,
+    ) + pixelsPerBeat * 0.04f
     val sourceY = noteY(source.midiPitch, geometry, ScoreKeySignatures.atBeat(keySignatures, source.startBeat))
     val targetY = noteY(target.midiPitch, geometry, ScoreKeySignatures.atBeat(keySignatures, target.startBeat))
     val baseline = maxOf(sourceY, targetY) + geometry.lineSpacing * 0.55f
@@ -1037,12 +1120,15 @@ private fun DrawScope.drawScoreRest(
     pixelsPerBeat: Float,
     geometry: StaffGeometry,
     selected: Boolean,
+    notationGaps: List<StaffNotationGap>,
 ) {
-    val x = StaffTimelineLayout.xAtBeat(
-        rest.startBeat + 0.10f,
+    val x = StaffNotationSpacing.xAtBeat(
+        rest.startBeat,
         timelineLeftPx,
         pixelsPerBeat,
-    )
+        notationGaps,
+        includeGapAtBeat = true,
+    ) + pixelsPerBeat * 0.10f
     val middleY = geometry.middleLine
     val ink = Color(0xFF111111)
 
@@ -1163,17 +1249,20 @@ private fun nearestEditableEventIndex(
     pixelsPerBeat: Float,
     geometry: StaffGeometry,
     keySignatures: List<ScoreKeySignature> = listOf(ScoreKeySignatures.DEFAULT),
+    notationGaps: List<StaffNotationGap> = emptyList(),
 ): Int {
     val restY = geometry.middleLine
     var nearest = -1
     var bestDistanceSquared = Float.MAX_VALUE
 
     events.forEachIndexed { index, event ->
-        val x = StaffTimelineLayout.xAtBeat(
-            event.startBeat + 0.10f,
+        val x = StaffNotationSpacing.xAtBeat(
+            event.startBeat,
             timelineLeftPx,
             pixelsPerBeat,
-        )
+            notationGaps,
+            includeGapAtBeat = true,
+        ) + pixelsPerBeat * 0.10f
         val y = when (event) {
             is ScoreNote -> noteY(event.midiPitch, geometry, ScoreKeySignatures.atBeat(keySignatures, event.startBeat))
             is ScoreRest -> restY
