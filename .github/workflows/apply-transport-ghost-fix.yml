@@ -1,0 +1,26 @@
+name: Apply Transport Ghost Fix
+
+on:
+  push:
+    branches: [fix/natural-transport-ghost]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/natural-transport-ghost
+      - name: Apply source changes
+        run: python tools/apply_transport_ghost_fix.py
+      - name: Commit generated source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt
+          git commit -m "Prevent ghost transport outside Live mode"
+          git push
