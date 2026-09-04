@@ -6,9 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -38,9 +36,9 @@ fun KeySignatureControls(
         modifier = modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .padding(horizontal = 12.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Text("Key:", style = MaterialTheme.typography.labelLarge)
         Text(active.displayName, style = MaterialTheme.typography.labelLarge)
@@ -50,34 +48,32 @@ fun KeySignatureControls(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
 
-        OutlinedButton(
+        CompactCommandButton(
+            label = "Flatter ♭",
             onClick = {
                 onSetSignature(measureStart, (active.fifths - 1).coerceAtLeast(-7), active.minor)
             },
             enabled = active.fifths > -7,
-        ) { Text("Flatter ♭") }
+        )
 
-        Button(
+        CompactCommandButton(
+            label = "Sharper ♯",
             onClick = {
                 onSetSignature(measureStart, (active.fifths + 1).coerceAtMost(7), active.minor)
             },
             enabled = active.fifths < 7,
-        ) { Text("Sharper ♯") }
+        )
 
-        if (active.minor) {
-            Button(onClick = { onSetSignature(measureStart, active.fifths, false) }) {
-                Text("Minor → Major")
-            }
-        } else {
-            OutlinedButton(onClick = { onSetSignature(measureStart, active.fifths, true) }) {
-                Text("Major → Minor")
-            }
-        }
+        CompactCommandButton(
+            label = if (active.minor) "Minor → Major" else "Major → Minor",
+            onClick = { onSetSignature(measureStart, active.fifths, !active.minor) },
+        )
 
         if (hasExplicitChange) {
-            OutlinedButton(onClick = { onRemoveSignature(measureStart) }) {
-                Text("Remove Change")
-            }
+            CompactCommandButton(
+                label = "Remove Change",
+                onClick = { onRemoveSignature(measureStart) },
+            )
         }
 
         Text(
