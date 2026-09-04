@@ -73,6 +73,8 @@ fun MultitouchPianoKeyboard(
     octaveShift: Int,
     entryMode: PianoEntryMode,
     liveRecordingActive: Boolean,
+    holdPreviewDuration: NoteDuration?,
+    holdPreviewDotted: Boolean,
     selectedDuration: NoteDuration,
     selectedDotted: Boolean,
     selectedArticulation: NoteArticulation,
@@ -193,7 +195,7 @@ fun MultitouchPianoKeyboard(
                                                 change.consume()
                                             }
                                         } else if (oldPitch != null) {
-                                            // Natural and Live mode lock one finger to the key it first pressed.
+                                            // Natural, Hold, and Live modes lock one finger to the key it first pressed.
                                             // Small finger drift must never reset the hold timer or change pitch.
                                             change.consume()
                                         }
@@ -364,6 +366,7 @@ fun MultitouchPianoKeyboard(
 
                 ChamferedControlButton(
                     label = "Oct −",
+                    feedback = UiCommandFeedback.DECREASE,
                     onClick = {
                         releaseAllPitches()
                         onOctaveDown()
@@ -372,6 +375,7 @@ fun MultitouchPianoKeyboard(
                 )
                 ChamferedControlButton(
                     label = "Oct +",
+                    feedback = UiCommandFeedback.INCREASE,
                     onClick = {
                         releaseAllPitches()
                         onOctaveUp()
@@ -401,6 +405,16 @@ fun MultitouchPianoKeyboard(
                     selected = entryMode == PianoEntryMode.NATURAL,
                 )
                 ChamferedControlButton(
+                    label = "Hold",
+                    onClick = {
+                        if (entryMode != PianoEntryMode.HOLD) {
+                            releaseAllPitches()
+                            onEntryModeChanged(PianoEntryMode.HOLD)
+                        }
+                    },
+                    selected = entryMode == PianoEntryMode.HOLD,
+                )
+                ChamferedControlButton(
                     label = when {
                         entryMode == PianoEntryMode.LIVE && liveRecordingActive -> "Stop Live"
                         entryMode == PianoEntryMode.LIVE -> "Live Armed"
@@ -417,14 +431,24 @@ fun MultitouchPianoKeyboard(
                     selected = entryMode == PianoEntryMode.LIVE,
                 )
 
-                ChamferedControlButton(
-                    label = durationControlLabel(selectedDuration, selectedDotted),
-                    onClick = {
-                        releaseAllPitches()
-                        articulationPaletteOpen = false
-                        durationPaletteOpen = true
-                    },
-                )
+                if (entryMode == PianoEntryMode.HOLD) {
+                    Text(
+                        text = holdPreviewDuration?.let {
+                            "Now: ${durationControlLabel(it, holdPreviewDotted)}"
+                        } ?: "Hold: press a key",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = Color.White,
+                    )
+                } else {
+                    ChamferedControlButton(
+                        label = durationControlLabel(selectedDuration, selectedDotted),
+                        onClick = {
+                            releaseAllPitches()
+                            articulationPaletteOpen = false
+                            durationPaletteOpen = true
+                        },
+                    )
+                }
 
                 ChamferedControlButton(
                     label = articulationControlLabel(selectedArticulation, includePrefix = true),

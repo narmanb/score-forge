@@ -49,6 +49,7 @@ fun TimeSignatureControls(
 
         CompactCommandButton(
             label = "Num −",
+            feedback = UiCommandFeedback.DECREASE,
             onClick = {
                 onSetSignature(measureStart, (active.numerator - 1).coerceAtLeast(1), active.denominator)
             },
@@ -57,6 +58,7 @@ fun TimeSignatureControls(
 
         CompactCommandButton(
             label = "Num +",
+            feedback = UiCommandFeedback.INCREASE,
             onClick = {
                 onSetSignature(measureStart, (active.numerator + 1).coerceAtMost(32), active.denominator)
             },
@@ -65,6 +67,7 @@ fun TimeSignatureControls(
 
         CompactCommandButton(
             label = "Denom −",
+            feedback = UiCommandFeedback.DECREASE,
             onClick = {
                 val nextIndex = (denominatorIndex - 1).coerceAtLeast(0)
                 onSetSignature(measureStart, active.numerator, denominators[nextIndex])
@@ -74,6 +77,7 @@ fun TimeSignatureControls(
 
         CompactCommandButton(
             label = "Denom +",
+            feedback = UiCommandFeedback.INCREASE,
             onClick = {
                 val nextIndex = (denominatorIndex + 1).coerceAtMost(denominators.lastIndex)
                 onSetSignature(measureStart, active.numerator, denominators[nextIndex])
