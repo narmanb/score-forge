@@ -66,6 +66,16 @@ import kotlinx.coroutines.withContext
 private data class NaturalHeldInput(
     val startedAtMs: Long,
     val bpmAtPress: Int,
+    val eventIndex: Int,
+    val groupOnsetMs: Long,
+)
+
+private data class NaturalOnsetGroup(
+    val onsetMs: Long,
+    val startBeat: Float,
+    val bpm: Int,
+    val eventIndices: List<Int>,
+    val maxReleasedHoldMs: Long = 0L,
 )
 
 private data class LiveHeldInput(
@@ -101,8 +111,7 @@ fun ScoreForgeComposerScreen() {
     var isPlaying by remember { mutableStateOf(false) }
     var chordMode by rememberSaveable { mutableStateOf(StepChordMode.OFF) }
     var pianoEntryMode by rememberSaveable { mutableStateOf(PianoEntryMode.STEP) }
-    var naturalGroupStartBeat by remember { mutableStateOf<Float?>(null) }
-    var naturalGroupMaxBeats by remember { mutableStateOf(0f) }
+    var naturalCurrentGroup by remember { mutableStateOf<NaturalOnsetGroup?>(null) }
     var liveRecordingStartedAtMs by remember { mutableStateOf<Long?>(null) }
     var liveRecordingStartBeat by remember { mutableFloatStateOf(0f) }
     var liveRecordingBpm by remember { mutableIntStateOf(120) }
@@ -143,8 +152,7 @@ fun ScoreForgeComposerScreen() {
 
     fun cancelNaturalEntryGroup() {
         naturalHeldInputs.clear()
-        naturalGroupStartBeat = null
-        naturalGroupMaxBeats = 0f
+        naturalCurrentGroup = null
     }
 
     fun replaceTrack(index: Int, updated: ScoreTrack) {
@@ -585,6 +593,7 @@ fun ScoreForgeComposerScreen() {
     }
 
     fun insertRest() {
+        cancelNaturalEntryGroup()
         recordBeforeScoreEdit()
         LiveInstrumentBus.allNotesOff()
         val track = currentTrack()
@@ -601,48 +610,126 @@ fun ScoreForgeComposerScreen() {
         selectedEventIndex = newEventIndex
     }
 
+    fun applyNaturalGroupDuration(
+        group: NaturalOnsetGroup,
+        written: NaturalEntryTiming.WrittenDuration,
+        cursorBeat: Float,
+    ) {
+        val track = currentTrack()
+        val updatedEvents = track.events.toMutableList()
+        group.eventIndices.forEach { index ->
+            val note = updatedEvents.getOrNull(index) as? ScoreNote ?: return@forEach
+            updatedEvents[index] = note.copy(
+                duration = written.duration,
+                dotted = written.dotted,
+            )
+        }
+        replaceActiveTrack { it.copy(events = updatedEvents, cursorBeat = cursorBeat) }
+    }
+
+    fun finalizeNaturalGroupForNextAttack(group: NaturalOnsetGroup, nextOnsetMs: Long): Float {
+        val intervalMs = (nextOnsetMs - group.onsetMs).coerceAtLeast(0L)
+        val onsetWritten = NaturalEntryTiming.writtenForOnsetIntervalMs(intervalMs, group.bpm)
+        val regularRhythm = NaturalEntryTiming.shouldUseOnsetAsWrittenDuration(intervalMs, group.bpm)
+        val written = if (regularRhythm) {
+            onsetWritten
+        } else {
+            val fallbackMs = group.maxReleasedHoldMs.takeIf { it > 0L } ?: intervalMs
+            NaturalEntryTiming.writtenForHoldMs(fallbackMs, group.bpm)
+        }
+        val stepBeats = if (regularRhythm) {
+            onsetWritten.beats
+        } else {
+            NaturalEntryTiming.quantizedOnsetSpacingBeats(intervalMs, group.bpm)
+        }
+        val nextStartBeat = group.startBeat + stepBeats
+        applyNaturalGroupDuration(group, written, nextStartBeat)
+        return nextStartBeat
+    }
+
     fun beginNaturalPitch(pitch: Int) {
         if (naturalHeldInputs.containsKey(pitch)) return
-        if (naturalHeldInputs.isEmpty()) {
-            naturalGroupStartBeat = currentTrack().cursorBeat
-            naturalGroupMaxBeats = 0f
-            recordBeforeScoreEdit()
+        val now = SystemClock.elapsedRealtime()
+        val previousGroup = naturalCurrentGroup
+        val joinsCurrentChord = previousGroup != null &&
+            NaturalEntryTiming.isSameOnsetGroup(previousGroup.onsetMs, now, previousGroup.bpm)
+
+        val groupStartBeat = when {
+            joinsCurrentChord -> previousGroup!!.startBeat
+            previousGroup != null -> finalizeNaturalGroupForNextAttack(previousGroup, now)
+            else -> currentTrack().cursorBeat
         }
+
+        if (!joinsCurrentChord) recordBeforeScoreEdit()
+
+        val provisional = if (joinsCurrentChord) {
+            val firstIndex = previousGroup!!.eventIndices.firstOrNull()
+            val firstNote = firstIndex?.let { currentTrack().events.getOrNull(it) as? ScoreNote }
+            if (firstNote != null) {
+                NaturalEntryTiming.WrittenDuration(firstNote.duration, firstNote.dotted)
+            } else {
+                NaturalEntryTiming.WrittenDuration(NoteDuration.QUARTER, false)
+            }
+        } else {
+            NaturalEntryTiming.WrittenDuration(NoteDuration.QUARTER, false)
+        }
+
+        val newEventIndex = currentTrack().events.size
+        replaceActiveTrack {
+            it.copy(
+                events = it.events + ScoreNote(
+                    midiPitch = pitch,
+                    duration = provisional.duration,
+                    startBeat = groupStartBeat,
+                    dotted = provisional.dotted,
+                    articulation = selectedArticulation,
+                ),
+                cursorBeat = groupStartBeat + provisional.beats,
+            )
+        }
+
+        val group = if (joinsCurrentChord) {
+            previousGroup!!.copy(eventIndices = previousGroup.eventIndices + newEventIndex)
+        } else {
+            NaturalOnsetGroup(
+                onsetMs = now,
+                startBeat = groupStartBeat,
+                bpm = bpm,
+                eventIndices = listOf(newEventIndex),
+            )
+        }
+        naturalCurrentGroup = group
         naturalHeldInputs[pitch] = NaturalHeldInput(
-            startedAtMs = SystemClock.elapsedRealtime(),
+            startedAtMs = now,
             bpmAtPress = bpm,
+            eventIndex = newEventIndex,
+            groupOnsetMs = group.onsetMs,
         )
+        selectedEventIndex = newEventIndex
         if (!LiveInstrumentBus.noteOn(pitch, velocity = 96)) playback.previewPitch(pitch)
     }
 
     fun finishNaturalPitch(pitch: Int) {
         LiveInstrumentBus.noteOff(pitch)
         val held = naturalHeldInputs.remove(pitch) ?: return
-        val groupStart = naturalGroupStartBeat ?: currentTrack().cursorBeat
-        val duration = NaturalEntryTiming.durationForHoldMs(
-            holdMs = SystemClock.elapsedRealtime() - held.startedAtMs,
-            bpm = held.bpmAtPress,
+        val group = naturalCurrentGroup ?: return
+        if (group.onsetMs != held.groupOnsetMs) return
+
+        val holdMs = (SystemClock.elapsedRealtime() - held.startedAtMs).coerceAtLeast(0L)
+        val updatedGroup = group.copy(
+            maxReleasedHoldMs = maxOf(group.maxReleasedHoldMs, holdMs),
         )
-        naturalGroupMaxBeats = maxOf(naturalGroupMaxBeats, duration.beats)
-        val newEventIndex = currentTrack().events.size
-        val finalizingGroup = naturalHeldInputs.isEmpty()
-        val finalCursor = groupStart + naturalGroupMaxBeats
-        replaceActiveTrack {
-            it.copy(
-                events = it.events + ScoreNote(
-                    midiPitch = pitch,
-                    duration = duration,
-                    startBeat = groupStart,
-                    dotted = false,
-                    articulation = selectedArticulation,
-                ),
-                cursorBeat = if (finalizingGroup) finalCursor else groupStart,
-            )
-        }
-        selectedEventIndex = newEventIndex
-        if (finalizingGroup) {
-            naturalGroupStartBeat = null
-            naturalGroupMaxBeats = 0f
+        naturalCurrentGroup = updatedGroup
+        val fallback = NaturalEntryTiming.writtenForHoldMs(
+            updatedGroup.maxReleasedHoldMs,
+            held.bpmAtPress,
+        )
+        applyNaturalGroupDuration(
+            updatedGroup,
+            fallback,
+            updatedGroup.startBeat + fallback.beats,
+        )
+        if (naturalHeldInputs.values.none { it.groupOnsetMs == updatedGroup.onsetMs }) {
             syncHistoryButtons()
         }
     }
@@ -1013,6 +1100,7 @@ fun ScoreForgeComposerScreen() {
                         onBeginMove = { recordBeforeScoreEdit() },
                         onMoveNote = ::moveActiveNote,
                         onDeleteEvent = ::deleteEvent,
+                        onVerticalPan = { dragY -> pageScrollState.dispatchRawDelta(-dragY) },
                         modifier = Modifier.fillMaxWidth().height(300.dp),
                     )
                 }

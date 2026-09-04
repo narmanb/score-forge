@@ -12,10 +12,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.requiredHeight
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,6 +40,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.Arrangement
 import com.scoreforge.app.audio.ScoreTransportBus
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
@@ -66,9 +69,11 @@ fun PianoRollEditor(
     onBeginMove: (eventIndex: Int) -> Unit,
     onMoveNote: (eventIndex: Int, pitch: Int, startBeat: Float) -> Unit,
     onDeleteEvent: (eventIndex: Int) -> Unit,
+    onVerticalPan: (dragY: Float) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var draggingEventIndex by remember { mutableIntStateOf(-1) }
+    var dragStartX by remember { mutableFloatStateOf(-1f) }
     var horizontalOffsetPx by rememberSaveable { mutableFloatStateOf(0f) }
     var verticalOffsetPx by rememberSaveable { mutableFloatStateOf(0f) }
     val transport by ScoreTransportBus.state.collectAsState()
@@ -225,6 +230,7 @@ fun PianoRollEditor(
                     ) {
                         detectDragGestures(
                             onDragStart = { position ->
+                                dragStartX = position.x
                                 draggingEventIndex = noteIndexAtPoint(
                                     events,
                                     position,
@@ -239,17 +245,36 @@ fun PianoRollEditor(
                                     onBeginMove(draggingEventIndex)
                                 }
                             },
-                            onDragEnd = { draggingEventIndex = -1 },
-                            onDragCancel = { draggingEventIndex = -1 },
+                            onDragEnd = {
+                                draggingEventIndex = -1
+                                dragStartX = -1f
+                            },
+                            onDragCancel = {
+                                draggingEventIndex = -1
+                                dragStartX = -1f
+                            },
                         ) { change, dragAmount ->
                             val note = events.getOrNull(draggingEventIndex) as? ScoreNote
                             if (note == null) {
-                                horizontalOffsetPx =
-                                    (horizontalOffsetPx - dragAmount.x)
-                                        .coerceIn(0f, maxHorizontalOffset)
-                                verticalOffsetPx =
-                                    (verticalOffsetPx - dragAmount.y)
-                                        .coerceIn(0f, maxVerticalOffset)
+                                when (
+                                    PianoRollMapping.emptyDragTarget(
+                                        dragStartX,
+                                        dragAmount.x,
+                                        dragAmount.y,
+                                    )
+                                ) {
+                                    PianoRollEmptyDragTarget.TIMELINE -> {
+                                        horizontalOffsetPx =
+                                            (horizontalOffsetPx - dragAmount.x)
+                                                .coerceIn(0f, maxHorizontalOffset)
+                                    }
+                                    PianoRollEmptyDragTarget.PITCH -> {
+                                        verticalOffsetPx =
+                                            (verticalOffsetPx - dragAmount.y)
+                                                .coerceIn(0f, maxVerticalOffset)
+                                    }
+                                    PianoRollEmptyDragTarget.PAGE -> onVerticalPan(dragAmount.y)
+                                }
                                 change.consume()
                                 return@detectDragGestures
                             }
@@ -471,9 +496,29 @@ fun PianoRollEditor(
                 }
             }
 
+            Row(
+                modifier = Modifier.align(Alignment.TopStart).padding(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                OutlinedButton(
+                    onClick = {
+                        verticalOffsetPx =
+                            (verticalOffsetPx - rowHeightPx * 12f).coerceIn(0f, maxVerticalOffset)
+                    },
+                    enabled = verticalOffsetPx > 0f,
+                ) { Text("Pitch ↑") }
+                OutlinedButton(
+                    onClick = {
+                        verticalOffsetPx =
+                            (verticalOffsetPx + rowHeightPx * 12f).coerceIn(0f, maxVerticalOffset)
+                    },
+                    enabled = verticalOffsetPx < maxVerticalOffset,
+                ) { Text("Pitch ↓") }
+            }
+
             if (visibleNotes.isEmpty()) {
                 Text(
-                    "Tap to place ${selectedDuration.displayName.lowercase()} notes • drag empty grid to pan",
+                    "Tap to place ${selectedDuration.displayName.lowercase()} notes • drag ↔ for timeline",
                     modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp),
                     color = Color(0xFF555555),
                     style = MaterialTheme.typography.bodySmall,
@@ -481,7 +526,7 @@ fun PianoRollEditor(
             }
 
             Text(
-                "Drag empty grid ↔ ↕ • purple = playhead",
+                "Grid ↔ timeline • ↑↓ page • Pitch buttons move range • purple = playhead",
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                 color = Color(0xFF555555),
                 style = MaterialTheme.typography.labelSmall,
