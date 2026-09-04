@@ -79,6 +79,19 @@ private data class NaturalOnsetGroup(
     val maxReleasedHoldMs: Long = 0L,
 )
 
+private data class HoldHeldInput(
+    val eventIndex: Int,
+    val groupOnsetMs: Long,
+)
+
+private data class HoldOnsetGroup(
+    val onsetMs: Long,
+    val startBeat: Float,
+    val bpm: Int,
+    val eventIndices: List<Int>,
+    val currentWritten: NaturalEntryTiming.WrittenDuration,
+)
+
 private data class LiveHeldInput(
     val eventIndex: Int,
     val startedAtMs: Long,
@@ -94,6 +107,7 @@ fun ScoreForgeComposerScreen() {
     val soundFontEngine = remember { SoundFontEngine.createOrNull() }
     val editHistory = remember { ScoreEditHistory() }
     val naturalHeldInputs = remember { mutableMapOf<Int, NaturalHeldInput>() }
+    val holdHeldInputs = remember { mutableMapOf<Int, HoldHeldInput>() }
     val liveHeldInputs = remember { mutableMapOf<Int, LiveHeldInput>() }
 
     var activeTrackIndex by remember { mutableIntStateOf(0) }
@@ -114,6 +128,8 @@ fun ScoreForgeComposerScreen() {
     var pianoEntryMode by rememberSaveable { mutableStateOf(PianoEntryMode.STEP) }
     var naturalCurrentGroup by remember { mutableStateOf<NaturalOnsetGroup?>(null) }
     var naturalRecentIntervalsMs by remember { mutableStateOf(emptyList<Long>()) }
+    var holdCurrentGroup by remember { mutableStateOf<HoldOnsetGroup?>(null) }
+    var holdPreviewWritten by remember { mutableStateOf<NaturalEntryTiming.WrittenDuration?>(null) }
     var liveRecordingStartedAtMs by remember { mutableStateOf<Long?>(null) }
     var liveRecordingStartBeat by remember { mutableFloatStateOf(0f) }
     var liveRecordingBpm by remember { mutableIntStateOf(120) }
@@ -156,6 +172,9 @@ fun ScoreForgeComposerScreen() {
         naturalHeldInputs.clear()
         naturalCurrentGroup = null
         naturalRecentIntervalsMs = emptyList()
+        holdHeldInputs.clear()
+        holdCurrentGroup = null
+        holdPreviewWritten = null
     }
 
     fun replaceTrack(index: Int, updated: ScoreTrack) {
@@ -311,6 +330,99 @@ fun ScoreForgeComposerScreen() {
         if (!LiveInstrumentBus.noteOn(pitch, velocity = 96)) playback.previewPitch(pitch)
     }
 
+
+
+    fun applyHoldGroupDuration(
+        group: HoldOnsetGroup,
+        written: NaturalEntryTiming.WrittenDuration,
+    ) {
+        val track = currentTrack()
+        val updatedEvents = track.events.toMutableList()
+        group.eventIndices.forEach { index ->
+            val note = updatedEvents.getOrNull(index) as? ScoreNote ?: return@forEach
+            updatedEvents[index] = note.copy(duration = written.duration, dotted = written.dotted)
+        }
+        replaceActiveTrack {
+            it.copy(events = updatedEvents, cursorBeat = group.startBeat + written.beats)
+        }
+    }
+
+    fun updateHoldGroupAt(nowMs: Long): NaturalEntryTiming.WrittenDuration? {
+        val group = holdCurrentGroup ?: return null
+        val elapsedMs = (nowMs - group.onsetMs).coerceAtLeast(0L)
+        val candidate = NaturalEntryTiming.writtenForHoldMs(elapsedMs, group.bpm)
+        val written = if (candidate.beats >= group.currentWritten.beats) candidate else group.currentWritten
+        val updatedGroup = if (written != group.currentWritten) group.copy(currentWritten = written) else group
+        holdCurrentGroup = updatedGroup
+        holdPreviewWritten = written
+        applyHoldGroupDuration(updatedGroup, written)
+        return written
+    }
+
+    fun beginHoldPitch(pitch: Int) {
+        repairUnexpectedTransportForEntry()
+        if (holdHeldInputs.containsKey(pitch)) return
+        val now = SystemClock.elapsedRealtime()
+        val previousGroup = holdCurrentGroup
+        val joinsCurrentChord = previousGroup != null && holdHeldInputs.isNotEmpty()
+        val startBeat = if (joinsCurrentChord) previousGroup!!.startBeat else currentTrack().cursorBeat
+        val initialWritten = if (joinsCurrentChord) previousGroup!!.currentWritten
+        else NaturalEntryTiming.writtenForHoldMs(0L, bpm)
+
+        if (!joinsCurrentChord) recordBeforeScoreEdit()
+
+        val eventIndex = currentTrack().events.size
+        replaceActiveTrack {
+            it.copy(
+                events = it.events + ScoreNote(
+                    midiPitch = pitch,
+                    duration = initialWritten.duration,
+                    startBeat = startBeat,
+                    dotted = initialWritten.dotted,
+                    articulation = selectedArticulation,
+                ),
+                cursorBeat = startBeat + initialWritten.beats,
+            )
+        }
+
+        val group = if (joinsCurrentChord) {
+            previousGroup!!.copy(eventIndices = previousGroup.eventIndices + eventIndex)
+        } else {
+            HoldOnsetGroup(
+                onsetMs = now,
+                startBeat = startBeat,
+                bpm = bpm,
+                eventIndices = listOf(eventIndex),
+                currentWritten = initialWritten,
+            )
+        }
+        holdCurrentGroup = group
+        holdHeldInputs[pitch] = HoldHeldInput(eventIndex = eventIndex, groupOnsetMs = group.onsetMs)
+        holdPreviewWritten = initialWritten
+        selectedEventIndex = eventIndex
+        if (!LiveInstrumentBus.noteOn(pitch, velocity = 96)) playback.previewPitch(pitch)
+    }
+
+    fun finishHoldPitch(pitch: Int) {
+        LiveInstrumentBus.noteOff(pitch)
+        val held = holdHeldInputs.remove(pitch) ?: return
+        val group = holdCurrentGroup
+        if (group != null && group.onsetMs == held.groupOnsetMs) {
+            updateHoldGroupAt(SystemClock.elapsedRealtime())
+        }
+        if (holdHeldInputs.values.none { it.groupOnsetMs == held.groupOnsetMs }) {
+            holdCurrentGroup = null
+            syncHistoryButtons()
+        }
+    }
+
+    fun finishHoldGroupForUiBreak() {
+        if (holdCurrentGroup != null) updateHoldGroupAt(SystemClock.elapsedRealtime())
+        if (holdHeldInputs.isNotEmpty()) LiveInstrumentBus.allNotesOff()
+        holdHeldInputs.clear()
+        holdCurrentGroup = null
+    }
+
     fun restoreEditState(state: ScoreEditState) {
         val restoredTracks = state.tracks.ifEmpty { listOf(ScoreTracks.defaultTrack()) }
             .take(ScoreTracks.MAX_TRACKS)
@@ -422,6 +534,19 @@ fun ScoreForgeComposerScreen() {
                     }
                 }
             }
+            delay(33L)
+        }
+    }
+
+    LaunchedEffect(pianoEntryMode, holdCurrentGroup?.onsetMs) {
+        val onset = holdCurrentGroup?.onsetMs ?: return@LaunchedEffect
+        if (pianoEntryMode != PianoEntryMode.HOLD) return@LaunchedEffect
+        while (
+            pianoEntryMode == PianoEntryMode.HOLD &&
+            holdCurrentGroup?.onsetMs == onset &&
+            holdHeldInputs.values.any { it.groupOnsetMs == onset }
+        ) {
+            updateHoldGroupAt(SystemClock.elapsedRealtime())
             delay(33L)
         }
     }
@@ -678,6 +803,8 @@ fun ScoreForgeComposerScreen() {
         if (pianoEntryMode == PianoEntryMode.NATURAL) {
             finishNaturalPhraseForStaffBrowse()
             LiveInstrumentBus.allNotesOff()
+        } else if (pianoEntryMode == PianoEntryMode.HOLD) {
+            finishHoldGroupForUiBreak()
         } else if (pianoEntryMode == PianoEntryMode.LIVE && liveRecordingActive) {
             stopLiveRecording()
         }
@@ -1153,8 +1280,10 @@ fun ScoreForgeComposerScreen() {
                         onDeleteEvent = ::deleteEvent,
                         onVerticalPan = { dragY -> pageScrollState.dispatchRawDelta(-dragY) },
                         onManualBrowse = {
-                            if (pianoEntryMode == PianoEntryMode.NATURAL) {
-                                finishNaturalPhraseForStaffBrowse()
+                            when (pianoEntryMode) {
+                                PianoEntryMode.NATURAL -> finishNaturalPhraseForStaffBrowse()
+                                PianoEntryMode.HOLD -> finishHoldGroupForUiBreak()
+                                else -> Unit
                             }
                         },
                         onMoveEntryCursor = ::moveEntryCursor,
@@ -1186,6 +1315,8 @@ fun ScoreForgeComposerScreen() {
                         octaveShift = pianoOctaveShift,
                         entryMode = pianoEntryMode,
                         liveRecordingActive = liveRecordingActive,
+                        holdPreviewDuration = holdPreviewWritten?.duration,
+                        holdPreviewDotted = holdPreviewWritten?.dotted ?: false,
                         selectedDuration = selectedDuration,
                         selectedDotted = selectedDotted,
                         selectedArticulation = selectedArticulation,
@@ -1251,6 +1382,7 @@ fun ScoreForgeComposerScreen() {
                                         }
                                     }
                                     PianoEntryMode.NATURAL -> beginNaturalPitch(pitch)
+                                    PianoEntryMode.HOLD -> beginHoldPitch(pitch)
                                     PianoEntryMode.LIVE -> beginLivePitch(pitch)
                                 }
                             }
@@ -1259,6 +1391,7 @@ fun ScoreForgeComposerScreen() {
                             when (pianoEntryMode) {
                                 PianoEntryMode.STEP -> LiveInstrumentBus.noteOff(pitch)
                                 PianoEntryMode.NATURAL -> finishNaturalPitch(pitch)
+                                PianoEntryMode.HOLD -> finishHoldPitch(pitch)
                                 PianoEntryMode.LIVE -> finishLivePitch(pitch)
                             }
                         },
@@ -1314,6 +1447,7 @@ private fun HeaderBar(
 
         ChamferedControlButton(
             label = "−5",
+            feedback = UiCommandFeedback.DECREASE,
             onClick = onTempoDown,
             enabled = bpm > 30,
             compact = false,
@@ -1334,6 +1468,7 @@ private fun HeaderBar(
 
         ChamferedControlButton(
             label = "+5",
+            feedback = UiCommandFeedback.INCREASE,
             onClick = onTempoUp,
             enabled = bpm < 300,
             compact = false,

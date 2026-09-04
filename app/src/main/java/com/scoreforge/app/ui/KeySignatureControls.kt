@@ -50,6 +50,7 @@ fun KeySignatureControls(
 
         CompactCommandButton(
             label = "Flatter ♭",
+            feedback = UiCommandFeedback.DECREASE,
             onClick = {
                 onSetSignature(measureStart, (active.fifths - 1).coerceAtLeast(-7), active.minor)
             },
@@ -58,6 +59,7 @@ fun KeySignatureControls(
 
         CompactCommandButton(
             label = "Sharper ♯",
+            feedback = UiCommandFeedback.INCREASE,
             onClick = {
                 onSetSignature(measureStart, (active.fifths + 1).coerceAtMost(7), active.minor)
             },

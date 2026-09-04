@@ -1,5 +1,6 @@
 package com.scoreforge.app.ui
 
+import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -14,7 +15,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
@@ -46,6 +51,13 @@ internal val CompactCommandShape = GenericShape { size, _ ->
     close()
 }
 
+enum class UiCommandFeedback {
+    NONE,
+    NEUTRAL,
+    INCREASE,
+    DECREASE,
+}
+
 internal val ComposerControlStripColor = Color(0xFF4A4752)
 private val ComposerControlButtonColor = Color(0xFF5D5966)
 private val ComposerControlPressedColor = Color(0xFF302D37)
@@ -61,26 +73,56 @@ internal fun ChamferedControlButton(
     selected: Boolean = false,
     enabled: Boolean = true,
     compact: Boolean = true,
+    feedback: UiCommandFeedback = UiCommandFeedback.NONE,
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val physicallyPressed by interactionSource.collectIsPressedAsState()
+    val latchedPressed = remember { androidx.compose.runtime.mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val view = LocalView.current
+    val visuallyPressed = physicallyPressed || latchedPressed.value
+
     Button(
-        onClick = onClick,
+        onClick = {
+            if (feedback != UiCommandFeedback.NONE) {
+                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                ScoreForgeUiFeedback.play(feedback)
+                latchedPressed.value = true
+                scope.launch {
+                    delay(110L)
+                    latchedPressed.value = false
+                }
+            }
+            onClick()
+        },
         enabled = enabled,
+        interactionSource = interactionSource,
         modifier = modifier
             .height(if (compact) 28.dp else 42.dp)
-            .offset(y = if (selected) 1.dp else 0.dp),
+            .offset(
+                y = when {
+                    visuallyPressed -> 2.dp
+                    selected -> 1.dp
+                    else -> 0.dp
+                }
+            ),
         shape = ChamferedControlShape,
         border = BorderStroke(
-            if (selected) 2.dp else 1.dp,
+            if (selected && !visuallyPressed) 2.dp else 1.dp,
             if (enabled) ComposerControlOutlineColor else ComposerControlDisabledOutline,
         ),
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (selected) ComposerControlPressedColor else ComposerControlButtonColor,
+            containerColor = when {
+                visuallyPressed -> ComposerControlPressedColor
+                selected -> ComposerControlPressedColor
+                else -> ComposerControlButtonColor
+            },
             contentColor = Color.White,
             disabledContainerColor = ComposerControlDisabledColor,
             disabledContentColor = Color(0xFFAAA5B0),
         ),
         elevation = ButtonDefaults.buttonElevation(
-            defaultElevation = if (selected) 0.dp else 3.dp,
+            defaultElevation = if (selected || visuallyPressed) 0.dp else 3.dp,
             pressedElevation = 0.dp,
             disabledElevation = 0.dp,
         ),
@@ -99,26 +141,44 @@ internal fun CompactCommandButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    feedback: UiCommandFeedback = UiCommandFeedback.NEUTRAL,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
+    val physicallyPressed by interactionSource.collectIsPressedAsState()
+    val latchedPressed = remember { androidx.compose.runtime.mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val view = LocalView.current
     val colors = MaterialTheme.colorScheme
+    val visuallyPressed = physicallyPressed || latchedPressed.value
 
     Button(
-        onClick = onClick,
+        onClick = {
+            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            ScoreForgeUiFeedback.play(feedback)
+            latchedPressed.value = true
+            scope.launch {
+                delay(110L)
+                latchedPressed.value = false
+            }
+            onClick()
+        },
         enabled = enabled,
         interactionSource = interactionSource,
         modifier = modifier
             .height(30.dp)
-            .offset(y = if (pressed) 1.dp else 0.dp),
+            .offset(y = if (visuallyPressed) 2.dp else 0.dp),
         shape = CompactCommandShape,
         border = BorderStroke(
             1.dp,
-            if (enabled) colors.outline else colors.outline.copy(alpha = 0.40f),
+            when {
+                !enabled -> colors.outline.copy(alpha = 0.40f)
+                visuallyPressed -> colors.outline.copy(alpha = 0.55f)
+                else -> colors.outline
+            },
         ),
         colors = ButtonDefaults.buttonColors(
-            containerColor = if (pressed) {
-                colors.onSurface.copy(alpha = 0.10f)
+            containerColor = if (visuallyPressed) {
+                colors.onSurface.copy(alpha = 0.18f)
             } else {
                 Color.Transparent
             },
@@ -127,7 +187,7 @@ internal fun CompactCommandButton(
             disabledContentColor = colors.onSurface.copy(alpha = 0.38f),
         ),
         elevation = ButtonDefaults.buttonElevation(
-            defaultElevation = 2.dp,
+            defaultElevation = if (visuallyPressed) 0.dp else 3.dp,
             pressedElevation = 0.dp,
             disabledElevation = 0.dp,
         ),
@@ -140,5 +200,6 @@ internal fun CompactCommandButton(
 enum class PianoEntryMode(val displayName: String) {
     STEP("Step"),
     NATURAL("Natural"),
+    HOLD("Hold"),
     LIVE("Live"),
 }
