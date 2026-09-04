@@ -1,6 +1,8 @@
 package com.scoreforge.app.ui
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -10,6 +12,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
@@ -24,6 +28,21 @@ internal val ChamferedControlShape = GenericShape { size, _ ->
     lineTo(cut, size.height)
     lineTo(0f, size.height - cut)
     lineTo(0f, cut)
+    close()
+}
+
+/**
+ * A low-profile elongated hexagon for one-shot commands.
+ * Unlike mode/selection controls, command buttons never stay highlighted after being pressed.
+ */
+internal val CompactCommandShape = GenericShape { size, _ ->
+    val cut = minOf(size.width * 0.12f, size.height * 0.42f)
+    moveTo(cut, 0f)
+    lineTo(size.width - cut, 0f)
+    lineTo(size.width, size.height / 2f)
+    lineTo(size.width - cut, size.height)
+    lineTo(cut, size.height)
+    lineTo(0f, size.height / 2f)
     close()
 }
 
@@ -69,6 +88,50 @@ internal fun ChamferedControlButton(
             horizontal = if (compact) 11.dp else 16.dp,
             vertical = 0.dp,
         ),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+@Composable
+internal fun CompactCommandButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val colors = MaterialTheme.colorScheme
+
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        interactionSource = interactionSource,
+        modifier = modifier
+            .height(30.dp)
+            .offset(y = if (pressed) 1.dp else 0.dp),
+        shape = CompactCommandShape,
+        border = BorderStroke(
+            1.dp,
+            if (enabled) colors.outline else colors.outline.copy(alpha = 0.40f),
+        ),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (pressed) {
+                colors.onSurface.copy(alpha = 0.10f)
+            } else {
+                Color.Transparent
+            },
+            contentColor = colors.onSurface,
+            disabledContainerColor = Color.Transparent,
+            disabledContentColor = colors.onSurface.copy(alpha = 0.38f),
+        ),
+        elevation = ButtonDefaults.buttonElevation(
+            defaultElevation = 2.dp,
+            pressedElevation = 0.dp,
+            disabledElevation = 0.dp,
+        ),
+        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
     ) {
         Text(label, style = MaterialTheme.typography.labelMedium)
     }
