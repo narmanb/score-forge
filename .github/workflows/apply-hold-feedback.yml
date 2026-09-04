@@ -19,7 +19,9 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Apply generated source update
-        run: python tools/apply_hold_feedback.py
+        run: |
+          python tools/apply_hold_feedback.py || true
+          python tools/apply_hold_feedback_v2.py
 
       - name: Commit generated source
         run: |
