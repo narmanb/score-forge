@@ -69,7 +69,6 @@ fun PianoRollEditor(
     onBeginMove: (eventIndex: Int) -> Unit,
     onMoveNote: (eventIndex: Int, pitch: Int, startBeat: Float) -> Unit,
     onDeleteEvent: (eventIndex: Int) -> Unit,
-    onVerticalPan: (dragY: Float) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var draggingEventIndex by remember { mutableIntStateOf(-1) }
@@ -77,9 +76,10 @@ fun PianoRollEditor(
     var horizontalOffsetPx by rememberSaveable { mutableFloatStateOf(0f) }
     var verticalOffsetPx by rememberSaveable { mutableFloatStateOf(0f) }
     val transport by ScoreTransportBus.state.collectAsState()
-    val lowPitch = PianoRollMapping.lowPitch(octaveShift)
-    val highPitch = PianoRollMapping.highPitch(octaveShift)
+    val lowPitch = PianoRollMapping.FULL_LOW_PITCH
+    val highPitch = PianoRollMapping.FULL_HIGH_PITCH
     val visibleNotes = events.filterIsInstance<ScoreNote>()
+    val focusPitch = PianoRollMapping.focusPitch(visibleNotes.map { it.midiPitch }, octaveShift)
     val furthestBeat = maxOf(cursorBeat, transport.beat, ScoreTimeline.endBeat(events))
     val activeMeter = ScoreTimeSignatures.atBeat(timeSignatures, furthestBeat)
     val contentBeats = maxOf(
@@ -119,12 +119,10 @@ fun PianoRollEditor(
                 verticalOffsetPx = verticalOffsetPx.coerceIn(0f, maxVerticalOffset)
             }
 
-            LaunchedEffect(octaveShift, maxVerticalOffset, viewportHeightPx, contentHeightPx) {
+            LaunchedEffect(focusPitch, maxVerticalOffset, viewportHeightPx, contentHeightPx) {
                 if (maxVerticalOffset <= 0f) return@LaunchedEffect
-                val keyboardCenterPitch = (65 + octaveShift.coerceIn(-4, 3) * 12)
-                    .coerceIn(lowPitch, highPitch)
                 val centerY = PianoRollMapping.yCenterForPitch(
-                    keyboardCenterPitch,
+                    focusPitch,
                     lowPitch,
                     highPitch,
                     contentHeightPx,
@@ -256,25 +254,12 @@ fun PianoRollEditor(
                         ) { change, dragAmount ->
                             val note = events.getOrNull(draggingEventIndex) as? ScoreNote
                             if (note == null) {
-                                when (
-                                    PianoRollMapping.emptyDragTarget(
-                                        dragStartX,
-                                        dragAmount.x,
-                                        dragAmount.y,
-                                    )
-                                ) {
-                                    PianoRollEmptyDragTarget.TIMELINE -> {
-                                        horizontalOffsetPx =
-                                            (horizontalOffsetPx - dragAmount.x)
-                                                .coerceIn(0f, maxHorizontalOffset)
-                                    }
-                                    PianoRollEmptyDragTarget.PITCH -> {
-                                        verticalOffsetPx =
-                                            (verticalOffsetPx - dragAmount.y)
-                                                .coerceIn(0f, maxVerticalOffset)
-                                    }
-                                    PianoRollEmptyDragTarget.PAGE -> onVerticalPan(dragAmount.y)
-                                }
+                                horizontalOffsetPx =
+                                    (horizontalOffsetPx - dragAmount.x)
+                                        .coerceIn(0f, maxHorizontalOffset)
+                                verticalOffsetPx =
+                                    (verticalOffsetPx - dragAmount.y)
+                                        .coerceIn(0f, maxVerticalOffset)
                                 change.consume()
                                 return@detectDragGestures
                             }
@@ -496,29 +481,24 @@ fun PianoRollEditor(
                 }
             }
 
-            Row(
+            OutlinedButton(
+                onClick = {
+                    val centerY = PianoRollMapping.yCenterForPitch(
+                        focusPitch,
+                        lowPitch,
+                        highPitch,
+                        contentHeightPx,
+                    )
+                    verticalOffsetPx =
+                        (centerY - viewportHeightPx * 0.52f).coerceIn(0f, maxVerticalOffset)
+                },
                 modifier = Modifier.align(Alignment.TopStart).padding(6.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        verticalOffsetPx =
-                            (verticalOffsetPx - rowHeightPx * 12f).coerceIn(0f, maxVerticalOffset)
-                    },
-                    enabled = verticalOffsetPx > 0f,
-                ) { Text("Pitch ↑") }
-                OutlinedButton(
-                    onClick = {
-                        verticalOffsetPx =
-                            (verticalOffsetPx + rowHeightPx * 12f).coerceIn(0f, maxVerticalOffset)
-                    },
-                    enabled = verticalOffsetPx < maxVerticalOffset,
-                ) { Text("Pitch ↓") }
-            }
+            ) { Text("Center Notes") }
+
 
             if (visibleNotes.isEmpty()) {
                 Text(
-                    "Tap to place ${selectedDuration.displayName.lowercase()} notes • drag ↔ for timeline",
+                    "Tap to place ${selectedDuration.displayName.lowercase()} notes • drag the grid to pan",
                     modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp),
                     color = Color(0xFF555555),
                     style = MaterialTheme.typography.bodySmall,
@@ -526,7 +506,7 @@ fun PianoRollEditor(
             }
 
             Text(
-                "Grid ↔ timeline • ↑↓ page • Pitch buttons move range • purple = playhead",
+                "Drag grid ↔/↕ • Center Notes returns to the score • purple = playhead",
                 modifier = Modifier.align(Alignment.TopEnd).padding(8.dp),
                 color = Color(0xFF555555),
                 style = MaterialTheme.typography.labelSmall,
