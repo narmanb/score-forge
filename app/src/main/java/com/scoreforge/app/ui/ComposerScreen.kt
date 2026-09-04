@@ -38,8 +38,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.scoreforge.app.audio.LiveInstrumentBus
 import com.scoreforge.app.audio.ScorePlaybackEngine
 import com.scoreforge.app.audio.ScoreTransportBus
@@ -122,7 +120,6 @@ fun ScoreForgeComposerScreen() {
     var pianoOctaveShift by rememberSaveable { mutableIntStateOf(0) }
     var staffSharpInput by rememberSaveable { mutableStateOf(false) }
     var editorMode by rememberSaveable { mutableStateOf(ScoreEditorMode.STAFF) }
-    var pianoRollDialogOpen by rememberSaveable { mutableStateOf(false) }
     var showPianoKeyboard by rememberSaveable { mutableStateOf(true) }
     var draftLoaded by remember { mutableStateOf(false) }
     var canUndo by remember { mutableStateOf(false) }
@@ -633,6 +630,21 @@ fun ScoreForgeComposerScreen() {
         replaceActiveTrack { it.copy(events = updatedEvents, cursorBeat = cursorBeat) }
     }
 
+    fun finishNaturalPhraseForStaffBrowse() {
+        val group = naturalCurrentGroup ?: return
+        val written = NaturalEntryTiming.writtenForUiBreak(
+            recentIntervalsMs = naturalRecentIntervalsMs,
+            bpm = group.bpm,
+            holdFallbackMs = group.maxReleasedHoldMs,
+        )
+        applyNaturalGroupDuration(
+            group = group,
+            written = written,
+            cursorBeat = group.startBeat + written.beats,
+        )
+        cancelNaturalEntryGroup()
+    }
+
     fun finalizeNaturalGroupForNextAttack(group: NaturalOnsetGroup, nextOnsetMs: Long): Float {
         val intervalMs = (nextOnsetMs - group.onsetMs).coerceAtLeast(0L)
         val nextBarline = ScoreTimeSignatures.measureBoundaries(
@@ -1059,10 +1071,7 @@ fun ScoreForgeComposerScreen() {
                 EditorModeControls(
                     mode = editorMode,
                     showPianoKeyboard = showPianoKeyboard,
-                    onModeChanged = { mode ->
-                        editorMode = mode
-                        if (mode == ScoreEditorMode.PIANO_ROLL) pianoRollDialogOpen = true
-                    },
+                    onModeChanged = { editorMode = it },
                     onTogglePianoKeyboard = {
                         stopLiveRecording()
                         cancelNaturalEntryGroup()
@@ -1101,61 +1110,31 @@ fun ScoreForgeComposerScreen() {
                         onMoveRest = ::moveActiveRest,
                         onDeleteEvent = ::deleteEvent,
                         onVerticalPan = { dragY -> pageScrollState.dispatchRawDelta(-dragY) },
+                        onManualBrowse = {
+                            if (pianoEntryMode == PianoEntryMode.NATURAL) {
+                                finishNaturalPhraseForStaffBrowse()
+                            }
+                        },
                         modifier = Modifier.fillMaxWidth().height(300.dp),
                     )
 
-                    ScoreEditorMode.PIANO_ROLL -> Column(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
-                    ) {
-                        Text(
-                            "Piano Roll opens in its own large editor so its scrolling does not fight the main page.",
-                            style = MaterialTheme.typography.bodySmall,
-                        )
-                        OutlinedButton(onClick = { pianoRollDialogOpen = true }) {
-                            Text("Open Piano Roll")
-                        }
-                    }
-                }
-
-                if (pianoRollDialogOpen) {
-                    Dialog(
-                        onDismissRequest = { pianoRollDialogOpen = false },
-                        properties = DialogProperties(usePlatformDefaultWidth = false),
-                    ) {
-                        Surface(
-                            modifier = Modifier.fillMaxSize().padding(10.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                        ) {
-                            Box(modifier = Modifier.fillMaxSize()) {
-                                PianoRollEditor(
-                                    events = activeEvents,
-                                    selectedDuration = selectedDuration,
-                                    cursorBeat = activeCursorBeat,
-                                    timeSignatures = timeSignatures,
-                                    octaveShift = pianoOctaveShift,
-                                    selectedEventIndex = selectedEventIndex,
-                                    onAddPitch = { pitch, tappedBeat ->
-                                        insertNoteAt(pitch, tappedBeat, preview = true, advanceCursor = false)
-                                    },
-                                    onSelectEvent = ::selectEvent,
-                                    onBeginMove = { recordBeforeScoreEdit() },
-                                    onMoveNote = ::moveActiveNote,
-                                    onDeleteEvent = ::deleteEvent,
-                                    modifier = Modifier.fillMaxSize().padding(top = 48.dp),
-                                )
-                                Row(
-                                    modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().padding(6.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text("Piano Roll", style = MaterialTheme.typography.titleMedium)
-                                    OutlinedButton(onClick = { pianoRollDialogOpen = false }) {
-                                        Text("Close")
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    ScoreEditorMode.PIANO_ROLL -> PianoRollEditor(
+                        events = activeEvents,
+                        selectedDuration = selectedDuration,
+                        cursorBeat = activeCursorBeat,
+                        timeSignatures = timeSignatures,
+                        octaveShift = pianoOctaveShift,
+                        selectedEventIndex = selectedEventIndex,
+                        onAddPitch = { pitch, tappedBeat ->
+                            insertNoteAt(pitch, tappedBeat, preview = true, advanceCursor = false)
+                        },
+                        onSelectEvent = ::selectEvent,
+                        onBeginMove = { recordBeforeScoreEdit() },
+                        onMoveNote = ::moveActiveNote,
+                        onDeleteEvent = ::deleteEvent,
+                        onVerticalPan = { dragY -> pageScrollState.dispatchRawDelta(-dragY) },
+                        modifier = Modifier.fillMaxWidth().height(300.dp),
+                    )
                 }
 
                 if (showPianoKeyboard) {

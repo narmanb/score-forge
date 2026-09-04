@@ -97,9 +97,11 @@ fun ScoreStaffEditor(
     onMoveRest: (eventIndex: Int, startBeat: Float) -> Unit,
     onDeleteEvent: (eventIndex: Int) -> Unit,
     onVerticalPan: (dragY: Float) -> Unit = {},
+    onManualBrowse: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var draggingEventIndex by remember { mutableIntStateOf(-1) }
+    var manualBrowseNotified by remember { mutableStateOf(false) }
     var zoom by rememberSaveable { mutableFloatStateOf(1f) }
     var staffInputEnabled by rememberSaveable { mutableStateOf(true) }
     val scrollState = rememberScrollState()
@@ -276,6 +278,7 @@ fun ScoreStaffEditor(
                         .pointerInput(events, contentBeats, beatWidthPx, timelineLeftPx, notationGaps) {
                             detectDragGestures(
                                 onDragStart = { position ->
+                                    manualBrowseNotified = false
                                     val geometry = staffGeometry(events, keySignatures, size.height.toFloat())
                                     draggingEventIndex = nearestEditableEventIndex(
                                         events,
@@ -291,12 +294,22 @@ fun ScoreStaffEditor(
                                         onBeginMove(draggingEventIndex)
                                     }
                                 },
-                                onDragEnd = { draggingEventIndex = -1 },
-                                onDragCancel = { draggingEventIndex = -1 },
+                                onDragEnd = {
+                                    draggingEventIndex = -1
+                                    manualBrowseNotified = false
+                                },
+                                onDragCancel = {
+                                    draggingEventIndex = -1
+                                    manualBrowseNotified = false
+                                },
                             ) { change, dragAmount ->
                                 val event = events.getOrNull(draggingEventIndex)
                                 if (event == null) {
                                     if (abs(dragAmount.x) >= abs(dragAmount.y)) {
+                                        if (!manualBrowseNotified && abs(dragAmount.x) >= 1f) {
+                                            manualBrowseNotified = true
+                                            onManualBrowse()
+                                        }
                                         scrollState.dispatchRawDelta(-dragAmount.x)
                                     } else {
                                         onVerticalPan(dragAmount.y)
