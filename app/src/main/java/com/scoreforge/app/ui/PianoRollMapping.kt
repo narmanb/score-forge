@@ -1,6 +1,13 @@
 package com.scoreforge.app.ui
 
+import kotlin.math.abs
 import kotlin.math.floor
+
+enum class PianoRollEmptyDragTarget {
+    TIMELINE,
+    PITCH,
+    PAGE,
+}
 
 /** Pure coordinate mapping used by the piano-roll canvas and unit tests. */
 object PianoRollMapping {
@@ -40,5 +47,19 @@ object PianoRollMapping {
         val rowHeight = rowHeight(height, lowPitch, highPitch)
         val row = floor((y.coerceIn(0f, height.coerceAtLeast(1f) - 0.001f)) / rowHeight).toInt()
         return (highPitch - row).coerceIn(lowPitch, highPitch)
+    }
+
+    /**
+     * Empty-grid gestures are deliberately split so the editor does not steal the app's normal
+     * vertical page scroll. The pitch-label gutter owns vertical pitch browsing; the main grid
+     * owns horizontal timeline panning; vertical drags on the main grid are delegated to the page.
+     */
+    fun emptyDragTarget(startX: Float, dragX: Float, dragY: Float): PianoRollEmptyDragTarget {
+        if (startX < LEFT_GUTTER_PX) return PianoRollEmptyDragTarget.PITCH
+        return if (abs(dragX) >= abs(dragY)) {
+            PianoRollEmptyDragTarget.TIMELINE
+        } else {
+            PianoRollEmptyDragTarget.PAGE
+        }
     }
 }
