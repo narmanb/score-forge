@@ -125,8 +125,10 @@ fun ScoreStaffEditor(
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
             val viewportWidth = maxWidth
+            val responsiveMinimumBeatWidth =
+                StaffResponsiveLayout.minimumBeatWidthDp(viewportWidth.value).dp
             val baseBeatWidth = maxOf(
-                18.dp,
+                responsiveMinimumBeatWidth,
                 (viewportWidth - NOTATION_HEADER_WIDTH - TIMELINE_RIGHT_PADDING) /
                     StaffTimelineLayout.DEFAULT_VISIBLE_BEATS,
             )
