@@ -1,0 +1,32 @@
+name: Apply Staff Notation Spacing
+
+on:
+  push:
+    branches: [fix/key-signature-spacing]
+    paths:
+      - tools/apply_staff_notation_spacing.py
+      - .github/workflows/apply-staff-notation-spacing.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/key-signature-spacing
+      - name: Apply staff notation spacing source changes
+        run: python tools/apply_staff_notation_spacing.py
+      - name: Commit generated source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app
+          if git diff --cached --quiet; then
+            echo "No generated changes to commit."
+            exit 0
+          fi
+          git commit -m "Reserve staff space for notation changes"
+          git push origin HEAD:fix/key-signature-spacing
