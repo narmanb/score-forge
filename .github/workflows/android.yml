@@ -2,79 +2,16 @@ name: Android CI
 
 on:
   push:
-    branches: [main, feature/android-open-with]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  branch-patch:
-    if: github.ref == 'refs/heads/feature/android-open-with' && github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out feature branch
-        uses: actions/checkout@v4
-        with:
-          ref: feature/android-open-with
-          fetch-depth: 0
-
-      - name: Wire external open requests into composer
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt')
-          s = p.read_text()
-
-          anchor = 'import com.scoreforge.app.audio.LiveInstrumentBus\n'
-          if 'import com.scoreforge.app.ExternalOpenRequest\n' not in s:
-              if anchor not in s:
-                  raise SystemExit('Composer import anchor not found')
-              s = s.replace(anchor, 'import com.scoreforge.app.ExternalOpenRequest\n' + anchor, 1)
-
-          old = '@Composable\nfun ScoreForgeComposerScreen() {'
-          new = '''@Composable
-          fun ScoreForgeComposerScreen(
-              externalOpenRequest: ExternalOpenRequest? = null,
-              onExternalOpenConsumed: (ExternalOpenRequest) -> Unit = {},
-          ) {'''.replace('          ', '')
-          if old not in s:
-              raise SystemExit('Composer signature anchor not found')
-          s = s.replace(old, new, 1)
-
-          old = '''    MaterialTheme(colorScheme = darkColorScheme()) {
-              Surface(modifier = Modifier.fillMaxSize()) {'''.replace('          ', '')
-          new = '''    MaterialTheme(colorScheme = darkColorScheme()) {
-              ExternalOpenHandler(
-                  request = externalOpenRequest.takeIf { draftLoaded },
-                  onOpenProject = ::openProject,
-                  onConsumed = onExternalOpenConsumed,
-              )
-
-              Surface(modifier = Modifier.fillMaxSize()) {'''.replace('          ', '')
-          if old not in s:
-              raise SystemExit('Composer MaterialTheme anchor not found')
-          s = s.replace(old, new, 1)
-          p.write_text(s)
-          PY
-
-      - name: Restore normal workflow and remove temporary updater
-        run: |
-          git show origin/main:.github/workflows/android.yml > .github/workflows/android.yml
-          rm -f .github/workflows/apply-open-with-composer-patch.yml
-
-      - name: Commit patch
-        run: |
-          git config user.name "score-forge-ci"
-          git config user.email "actions@users.noreply.github.com"
-          git add app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt .github/workflows/android.yml .github/workflows/apply-open-with-composer-patch.yml
-          git commit -m "Wire external open requests into composer"
-          git push origin HEAD:feature/android-open-with
-
   build:
-    if: github.ref != 'refs/heads/feature/android-open-with' || github.event_name != 'push'
     runs-on: ubuntu-latest
 
     steps:
