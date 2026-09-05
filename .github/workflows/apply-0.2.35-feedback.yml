@@ -1,0 +1,107 @@
+name: Apply 0.2.35 phone feedback
+
+on:
+  push:
+    branches: [fix/sfp-open-with-note-menu]
+    paths:
+      - .github/workflows/apply-0.2.35-feedback.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/sfp-open-with-note-menu
+          fetch-depth: 0
+
+      - name: Apply phone feedback fixes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path('app/src/main/AndroidManifest.xml')
+          s = manifest.read_text()
+          old = '''            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/x-scoreforge-project" />
+            </intent-filter>'''
+          new = '''            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:mimeType="application/x-scoreforge-project" />
+                <!-- Most Android file managers do not know the custom .sfp MIME type and
+                     expose unknown extensions as application/octet-stream. The app still
+                     validates the display name/content before opening, so unrelated binary
+                     files are rejected rather than parsed as projects. -->
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>'''
+          if old not in s:
+              raise SystemExit('SFP intent filter anchor not found')
+          manifest.write_text(s.replace(old, new, 1))
+
+          keyboard = Path('app/src/main/java/com/scoreforge/app/ui/MultitouchPianoKeyboard.kt')
+          s = keyboard.read_text()
+          old = '''                ChamferedControlButton(
+                    label = "← Back",
+                    onClick = {
+                        releaseAllPitches()
+                        durationPaletteOpen = false
+                    },
+                )
+
+                NoteDuration.entries.forEach { duration ->'''
+          new = '''                ChamferedControlButton(
+                    label = "← Back",
+                    onClick = {
+                        releaseAllPitches()
+                        durationPaletteOpen = false
+                    },
+                )
+                ChamferedControlButton(
+                    label = "↶",
+                    onClick = {
+                        releaseAllPitches()
+                        onUndo()
+                    },
+                    enabled = canUndo,
+                )
+                ChamferedControlButton(
+                    label = "↷",
+                    onClick = {
+                        releaseAllPitches()
+                        onRedo()
+                    },
+                    enabled = canRedo,
+                )
+
+                NoteDuration.entries.forEach { duration ->'''
+          if old not in s:
+              raise SystemExit('Duration palette anchor not found')
+          keyboard.write_text(s.replace(old, new, 1))
+
+          gradle = Path('app/build.gradle.kts')
+          s = gradle.read_text()
+          old = '''        versionCode = 37
+        versionName = "0.2.34"'''
+          new = '''        versionCode = 38
+        versionName = "0.2.35"'''
+          if old not in s:
+              raise SystemExit('Version anchor not found')
+          gradle.write_text(s.replace(old, new, 1))
+          PY
+
+      - name: Remove temporary updater and commit
+        run: |
+          rm .github/workflows/apply-0.2.35-feedback.yml
+          git config user.name "score-forge-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git add app/src/main/AndroidManifest.xml app/src/main/java/com/scoreforge/app/ui/MultitouchPianoKeyboard.kt app/build.gradle.kts .github/workflows/apply-0.2.35-feedback.yml
+          git commit -m "Fix SFP open-with and add note-menu undo redo"
+          git push origin HEAD:fix/sfp-open-with-note-menu
