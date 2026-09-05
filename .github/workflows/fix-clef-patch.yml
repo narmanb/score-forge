@@ -1,0 +1,34 @@
+name: Fix clef patch
+
+on:
+  push:
+    branches:
+      - feature/clefs-and-staff-gesture-fixes
+    paths:
+      - tools/fix_clef_patch.py
+      - .github/workflows/fix-clef-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/clefs-and-staff-gesture-fixes
+          fetch-depth: 0
+      - name: Apply follow-up
+        run: python tools/fix_clef_patch.py
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/scoreforge/app/ui/ScoreStaffEditor.kt
+          if git diff --cached --quiet; then
+            echo "No changes"
+          else
+            git commit -m "Finish clef-aware staff routing"
+            git push origin HEAD:feature/clefs-and-staff-gesture-fixes
+          fi
