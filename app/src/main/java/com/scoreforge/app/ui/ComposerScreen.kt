@@ -186,13 +186,19 @@ fun ScoreForgeComposerScreen(
     fun tempoBpmAt(beat: Float): Int = ScoreTempos.atBeat(tempoChanges, beat).bpm
 
     fun setTempoChange(startBeat: Float, newBpm: Int) {
-        if (isPlaying) stopPlayback()
+        if (isPlaying) {
+            playback.stop()
+            isPlaying = false
+        }
         tempoChanges = ScoreTempos.withChange(tempoChanges, startBeat, newBpm)
         bpm = tempoChanges.first().bpm
     }
 
     fun removeTempoChange(startBeat: Float) {
-        if (isPlaying) stopPlayback()
+        if (isPlaying) {
+            playback.stop()
+            isPlaying = false
+        }
         tempoChanges = ScoreTempos.withoutChange(tempoChanges, startBeat)
         bpm = tempoChanges.first().bpm
     }

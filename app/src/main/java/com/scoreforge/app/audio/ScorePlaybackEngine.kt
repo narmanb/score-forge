@@ -381,8 +381,10 @@ class ScorePlaybackEngine {
                         SystemClock.elapsedRealtime() < drainDeadline
                     ) {
                         val playedFrames = track.playbackHeadPosition.toLong().coerceAtLeast(0L)
-                        val beat = startBeat +
-                            (playedFrames.toDouble() / sampleRate.toDouble() / secondsPerBeat.toDouble()).toFloat()
+                        val beat = ScoreTempos.beatAtSeconds(
+                            safeTempos,
+                            startSeconds + playedFrames.toDouble() / sampleRate.toDouble(),
+                        )
                         ScoreTransportBus.progress(beat.coerceAtMost(throughBeat))
                         Thread.sleep(16L)
                     }
