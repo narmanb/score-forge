@@ -42,11 +42,12 @@ object MidiExporter {
 
         var noteCount = 0
         tracks.forEachIndexed { index, track ->
-            noteCount += track.notes.count { note ->
-                val noteIndex = track.notes.indexOf(note)
-                !ScoreTies.isContinuation(track.notes, noteIndex)
+            val normalized = track.normalized()
+            val notes = normalized.notes
+            noteCount += notes.indices.count { noteIndex ->
+                !ScoreTies.isContinuation(notes, noteIndex)
             }
-            chunks += encodeMusicTrack(track.normalized(), channels[index])
+            chunks += encodeMusicTrack(normalized, channels[index])
         }
 
         val output = ByteArrayOutputStream()
@@ -139,8 +140,8 @@ object MidiExporter {
                     byteArrayOf(
                         signature.numerator.coerceIn(1, 255).toByte(),
                         denominatorPower.coerceIn(0, 7).toByte(),
-                        24,
-                        8,
+                        24.toByte(),
+                        8.toByte(),
                     ),
                 ),
             )
@@ -154,7 +155,7 @@ object MidiExporter {
                     0x59,
                     byteArrayOf(
                         signature.fifths.coerceIn(-7, 7).toByte(),
-                        if (signature.minor) 1 else 0,
+                        (if (signature.minor) 1 else 0).toByte(),
                     ),
                 ),
             )
@@ -260,7 +261,7 @@ object MidiExporter {
         }
         while (true) {
             bytes += (buffer and 0xFF).toByte()
-            if (buffer and 0x80 != 0L) {
+            if ((buffer and 0x80) != 0L) {
                 buffer = buffer ushr 8
             } else {
                 break
