@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.scoreforge.app.ExternalFileTypes
+import com.scoreforge.app.music.MidiExporter
 import com.scoreforge.app.music.MidiImporter
 import com.scoreforge.app.music.ScoreProjectCodec
 import com.scoreforge.app.music.ScoreProjectSnapshot
@@ -52,6 +53,7 @@ fun ProjectFileControls(
     var renameText by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("Autosave on") }
     var midiImportWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
+    var midiExportWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(ExternalFileTypes.SCORE_FORGE_PROJECT_MIME),
@@ -149,6 +151,41 @@ fun ProjectFileControls(
         }
     }
 
+    val midiExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("audio/midi"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val snapshot = snapshotProvider()
+        scope.launch {
+            status = "Exporting MIDI…"
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val exported = MidiExporter.export(snapshot)
+                    context.contentResolver.openOutputStream(uri, "w").use { output ->
+                        requireNotNull(output) { "Could not open the selected MIDI file for writing." }
+                        output.write(exported.bytes)
+                        output.flush()
+                    }
+                    exported
+                }
+            }
+
+            result.onSuccess { exported ->
+                status = buildString {
+                    append("Exported ")
+                    append(exported.exportedTrackCount)
+                    append(if (exported.exportedTrackCount == 1) " track" else " tracks")
+                    append(" • ")
+                    append(exported.exportedNoteCount)
+                    append(if (exported.exportedNoteCount == 1) " note" else " notes")
+                }
+                midiExportWarnings = exported.warnings
+            }.onFailure { error ->
+                status = error.message ?: "MIDI export failed"
+            }
+        }
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -215,6 +252,18 @@ fun ProjectFileControls(
             },
         ) {
             Text("Import MIDI")
+        }
+
+        OutlinedButton(
+            onClick = {
+                midiExportWarnings = emptyList()
+                val safeName = ScoreProjectSnapshot.sanitizeProjectName(projectName)
+                    .replace(Regex("[\\/:*?\"<>|]"), "_")
+                    .ifBlank { "Untitled" }
+                midiExportLauncher.launch("$safeName.mid")
+            },
+        ) {
+            Text("Export MIDI")
         }
 
         Text(
@@ -290,6 +339,21 @@ fun ProjectFileControls(
             },
             confirmButton = {
                 TextButton(onClick = { midiImportWarnings = emptyList() }) {
+                    Text("OK")
+                }
+            },
+        )
+    }
+
+    if (midiExportWarnings.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { midiExportWarnings = emptyList() },
+            title = { Text("MIDI export notes") },
+            text = {
+                Text(midiExportWarnings.joinToString(separator = "\n\n") { "• $it" })
+            },
+            confirmButton = {
+                TextButton(onClick = { midiExportWarnings = emptyList() }) {
                     Text("OK")
                 }
             },
