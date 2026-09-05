@@ -6,10 +6,22 @@ internal enum class StaffCursorZone {
     ENTRY,
 }
 
+internal enum class StaffCursorDragIntent {
+    CURSOR,
+    VERTICAL_SCROLL,
+}
+
 /** Keeps transport seeking and note-entry positioning in separate touch gutters. */
 internal object StaffCursorInteraction {
     private const val PLAYBACK_GUTTER_SPACING = 0.85f
     private const val ENTRY_GUTTER_SPACING = 0.55f
+
+    fun dragIntent(deltaX: Float, deltaY: Float): StaffCursorDragIntent =
+        if (kotlin.math.abs(deltaY) > kotlin.math.abs(deltaX)) {
+            StaffCursorDragIntent.VERTICAL_SCROLL
+        } else {
+            StaffCursorDragIntent.CURSOR
+        }
 
     fun zoneForY(
         y: Float,

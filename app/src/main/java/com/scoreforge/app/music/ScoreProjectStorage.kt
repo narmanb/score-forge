@@ -119,7 +119,8 @@ object ScoreProjectCodec {
                 .append(safeTrack.presetProgram ?: NO_PRESET).append('\t')
                 .append(if (safeTrack.solo) 1 else 0).append('\t')
                 .append(safeTrack.volume).append('\t')
-                .append(safeTrack.pan).append('\n')
+                .append(safeTrack.pan).append('\t')
+                .append(safeTrack.clefMode.name).append('\n')
 
             appendEvents(safeTrack.events)
             append("END_TRACK\n")
@@ -291,7 +292,10 @@ object ScoreProjectCodec {
         val solo = parts.getOrNull(7) == "1"
         val volume = parts.getOrNull(8)?.toIntOrNull() ?: ScoreTrack.DEFAULT_VOLUME
         val pan = parts.getOrNull(9)?.toIntOrNull() ?: ScoreTrack.CENTER_PAN
-        return TrackBuilder(id, name, cursorBeat, bank, program, muted, solo, volume, pan)
+        val clefMode = parts.getOrNull(10)?.let { stored ->
+            ScoreClefMode.entries.firstOrNull { it.name == stored }
+        } ?: ScoreClefMode.AUTO
+        return TrackBuilder(id, name, cursorBeat, bank, program, muted, solo, volume, pan, clefMode)
     }
 
     private fun decodeTimeSignature(parts: List<String>): ScoreTimeSignature? {
@@ -355,6 +359,7 @@ object ScoreProjectCodec {
         val solo: Boolean,
         val volume: Int,
         val pan: Int,
+        val clefMode: ScoreClefMode,
         val events: MutableList<ScoreEvent> = mutableListOf(),
     ) {
         fun build(): ScoreTrack = ScoreTrack(
@@ -368,6 +373,7 @@ object ScoreProjectCodec {
             solo = solo,
             volume = volume,
             pan = pan,
+            clefMode = clefMode,
         )
     }
 }
