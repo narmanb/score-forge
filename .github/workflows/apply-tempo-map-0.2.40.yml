@@ -1,0 +1,489 @@
+name: Apply tempo map 0.2.40
+
+on:
+  push:
+    branches: [feature/tempo-map-0.2.40]
+    paths:
+      - .github/workflows/apply-tempo-map-0.2.40.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/tempo-map-0.2.40
+          fetch-depth: 0
+
+      - name: Apply tempo-map feature
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              s = p.read_text()
+              if old not in s:
+                  raise SystemExit(f'{label} anchor not found in {path}')
+              p.write_text(s.replace(old, new, 1))
+
+          # Remove the temporary external-open diagnostic popup now that 0.2.39 passed phone testing.
+          p = Path('app/src/main/java/com/scoreforge/app/MainActivity.kt')
+          s = p.read_text()
+          for line in [
+              'import android.app.ActivityManager\n',
+              'import android.app.AlertDialog\n',
+              'import android.content.ClipData\n',
+              'import android.content.ClipboardManager\n',
+              'import android.content.Context\n',
+              'import android.widget.Toast\n',
+          ]:
+              s = s.replace(line, '')
+          s = re.sub(r'\n\s*if \(savedInstanceState == null\) \{\n\s*maybeShowExternalOpenDiagnostics\(intent, entryPoint = "onCreate"\)\n\s*\}\n', '\n', s, count=1)
+          s = s.replace('        maybeShowExternalOpenDiagnostics(intent, entryPoint = "onNewIntent")\n', '')
+          s, count = re.subn(
+              r'\n    private fun maybeShowExternalOpenDiagnostics\(.*?\n    private fun requestImmersiveMode\(\)',
+              '\n    private fun requestImmersiveMode()',
+              s,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit('MainActivity diagnostic block anchor not found')
+          p.write_text(s)
+
+          # Persist an optional project-wide tempo map while keeping BPM as the legacy/start-tempo field.
+          path = 'app/src/main/java/com/scoreforge/app/music/ScoreProjectStorage.kt'
+          replace_once(path,
+              '    val bpm: Int = 120,\n    val cursorBeat: Float = ScoreTimeline.endBeat(events),',
+              '    val bpm: Int = 120,\n    val tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempoChange(0f, bpm)),\n    val cursorBeat: Float = ScoreTimeline.endBeat(events),',
+              'snapshot tempo field')
+          replace_once(path,
+              '    fun effectiveTimeSignatures(): List<ScoreTimeSignature> =\n        ScoreTimeSignatures.normalize(timeSignatures)\n',
+              '    fun effectiveTempoChanges(): List<ScoreTempoChange> =\n        ScoreTempos.normalize(tempoChanges.ifEmpty { listOf(ScoreTempoChange(0f, bpm)) })\n\n    fun effectiveTimeSignatures(): List<ScoreTimeSignature> =\n        ScoreTimeSignatures.normalize(timeSignatures)\n',
+              'effective tempo helper')
+          replace_once(path,
+              '        append("BPM\\t").append(snapshot.bpm.coerceIn(30, 300)).append(\'\\n\')\n        append("METRONOME\\t")',
+              '        append("BPM\\t").append(snapshot.effectiveTempoChanges().first().bpm).append(\'\\n\')\n        snapshot.effectiveTempoChanges().forEach { tempo ->\n            append("TEMPO_CHANGE\\t")\n                .append(tempo.startBeat).append(\'\\t\')\n                .append(tempo.bpm).append(\'\\n\')\n        }\n        append("METRONOME\\t")',
+              'encode tempo map')
+          replace_once(path,
+              '        var bpm = 120\n        var metronomeEnabled = false',
+              '        var bpm = 120\n        val tempoChanges = mutableListOf<ScoreTempoChange>()\n        var metronomeEnabled = false',
+              'decode tempo list')
+          replace_once(path,
+              '                "BPM" -> parts.getOrNull(1)?.toIntOrNull()?.let { bpm = it.coerceIn(30, 300) }\n                "METRONOME"',
+              '                "BPM" -> parts.getOrNull(1)?.toIntOrNull()?.let { bpm = it.coerceIn(30, 300) }\n                "TEMPO_CHANGE" -> decodeTempoChange(parts)?.let(tempoChanges::add)\n                "METRONOME"',
+              'decode tempo rows')
+          replace_once(path,
+              '            events = active.events,\n            bpm = bpm,\n            cursorBeat = active.cursorBeat,',
+              '            events = active.events,\n            bpm = ScoreTempos.normalize(tempoChanges.ifEmpty { listOf(ScoreTempoChange(0f, bpm)) }).first().bpm,\n            tempoChanges = ScoreTempos.normalize(tempoChanges.ifEmpty { listOf(ScoreTempoChange(0f, bpm)) }),\n            cursorBeat = active.cursorBeat,',
+              'decoded snapshot tempo map')
+          replace_once(path,
+              '    private fun decodeTimeSignature(parts: List<String>): ScoreTimeSignature? {',
+              '    private fun decodeTempoChange(parts: List<String>): ScoreTempoChange? {\n        if (parts.size < 3) return null\n        val startBeat = parts[1].toFloatOrNull()?.takeIf { it >= 0f } ?: return null\n        val bpm = parts[2].toIntOrNull()?.takeIf { it in ScoreTempos.MIN_BPM..ScoreTempos.MAX_BPM } ?: return null\n        return ScoreTempoChange(startBeat, bpm).normalized()\n    }\n\n    private fun decodeTimeSignature(parts: List<String>): ScoreTimeSignature? {',
+              'tempo decoder helper')
+
+          # Import all MIDI tempo events into the new map instead of warning and discarding all but the first.
+          path = 'app/src/main/java/com/scoreforge/app/music/MidiImport.kt'
+          replace_once(path,
+              '        val warnings = parsed.warnings.toMutableList()\n        val bpm = resolveBpm(parsed.tempoEvents, warnings)\n        val timeSignatures = resolveTimeSignatures(',
+              '        val warnings = parsed.warnings.toMutableList()\n        val tempoChanges = resolveTempos(\n            events = parsed.tempoEvents,\n            ticksPerQuarter = parsed.ticksPerQuarter,\n            warnings = warnings,\n        )\n        val bpm = tempoChanges.first().bpm\n        val timeSignatures = resolveTimeSignatures(',
+              'import resolve tempos')
+          replace_once(path,
+              '            events = first.events,\n            bpm = bpm,\n            cursorBeat = first.cursorBeat,',
+              '            events = first.events,\n            bpm = bpm,\n            tempoChanges = tempoChanges,\n            cursorBeat = first.cursorBeat,',
+              'import snapshot tempo map')
+          p = Path(path)
+          s = p.read_text()
+          old_fn = '''    private fun resolveBpm(tempoEvents: List<TempoEvent>, warnings: MutableList<String>): Int {
+        if (tempoEvents.isEmpty()) return DEFAULT_BPM
+        val ordered = tempoEvents.sortedBy { it.tick }
+        val first = ordered.first().microsecondsPerQuarter.coerceAtLeast(1)
+        val bpm = (60_000_000.0 / first.toDouble()).roundToInt().coerceIn(30, 300)
+        if (ordered.map { it.microsecondsPerQuarter }.distinct().size > 1) {
+            warnings += "Tempo changes are not editable yet; the first MIDI tempo ($bpm BPM) was used for the project."
+        }
+        return bpm
+    }
+'''
+          new_fn = '''    private fun resolveTempos(
+        events: List<TempoEvent>,
+        ticksPerQuarter: Int,
+        warnings: MutableList<String>,
+    ): List<ScoreTempoChange> {
+        if (events.isEmpty()) return listOf(ScoreTempoChange(0f, DEFAULT_BPM))
+
+        val resolved = mutableListOf<ScoreTempoChange>()
+        events.sortedBy { it.tick }
+            .groupBy { it.tick }
+            .forEach { (tick, atTick) ->
+                val distinct = atTick.map { it.microsecondsPerQuarter }.distinct()
+                val chosen = atTick.last().microsecondsPerQuarter.coerceAtLeast(1)
+                val bpm = (60_000_000.0 / chosen.toDouble())
+                    .roundToInt()
+                    .coerceIn(ScoreTempos.MIN_BPM, ScoreTempos.MAX_BPM)
+                if (distinct.size > 1) {
+                    val beat = tick.toFloat() / ticksPerQuarter.toFloat()
+                    warnings += "Conflicting MIDI tempos at beat ${formatBeat(beat)}; $bpm BPM was used."
+                }
+                resolved += ScoreTempoChange(
+                    startBeat = tick.toFloat() / ticksPerQuarter.toFloat(),
+                    bpm = bpm,
+                )
+            }
+        return ScoreTempos.normalize(resolved)
+    }
+'''
+          if old_fn not in s:
+              raise SystemExit('resolveBpm block not found')
+          p.write_text(s.replace(old_fn, new_fn, 1))
+
+          # Wire tempo-map state and controls into the composer. Natural/Hold use tempo at the onset;
+          # Live mode deliberately locks the tempo that is active when recording begins.
+          path = 'app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt'
+          p = Path(path)
+          s = p.read_text()
+          s = s.replace('import com.scoreforge.app.music.ScoreRest\n', 'import com.scoreforge.app.music.ScoreRest\nimport com.scoreforge.app.music.ScoreTempoChange\nimport com.scoreforge.app.music.ScoreTempos\n', 1)
+          s = s.replace(
+              '    var bpm by rememberSaveable { mutableIntStateOf(120) }\n    var comfortTempoCapturing',
+              '    var bpm by rememberSaveable { mutableIntStateOf(120) }\n    var tempoChanges by remember { mutableStateOf(listOf(ScoreTempos.DEFAULT)) }\n    var comfortTempoCapturing',
+              1,
+          )
+          s = s.replace(
+              '    val liveRecordingActive = liveRecordingStartedAtMs != null\n\n    fun syncHistoryButtons()',
+              '    val liveRecordingActive = liveRecordingStartedAtMs != null\n    val activeTempoBpm = ScoreTempos.atBeat(tempoChanges, activeCursorBeat).bpm\n\n    fun syncHistoryButtons()',
+              1,
+          )
+          s = s.replace(
+              '    fun selectedInputBeats(): Float = selectedDuration.effectiveBeats(selectedDotted)\n',
+              '    fun selectedInputBeats(): Float = selectedDuration.effectiveBeats(selectedDotted)\n    fun tempoBpmAt(beat: Float): Int = ScoreTempos.atBeat(tempoChanges, beat).bpm\n\n    fun setTempoChange(startBeat: Float, newBpm: Int) {\n        if (isPlaying) stopPlayback()\n        tempoChanges = ScoreTempos.withChange(tempoChanges, startBeat, newBpm)\n        bpm = tempoChanges.first().bpm\n    }\n\n    fun removeTempoChange(startBeat: Float) {\n        if (isPlaying) stopPlayback()\n        tempoChanges = ScoreTempos.withoutChange(tempoChanges, startBeat)\n        bpm = tempoChanges.first().bpm\n    }\n',
+              1,
+          )
+          s = s.replace(
+              '            events = current.events,\n            bpm = bpm,\n            cursorBeat = current.cursorBeat,',
+              '            events = current.events,\n            bpm = tempoChanges.first().bpm,\n            tempoChanges = tempoChanges,\n            cursorBeat = current.cursorBeat,',
+              1,
+          )
+          s = s.replace(
+              '        projectName = snapshot.safeProjectName()\n        bpm = snapshot.bpm.coerceIn(30, 300)\n        selectedDuration',
+              '        projectName = snapshot.safeProjectName()\n        tempoChanges = snapshot.effectiveTempoChanges()\n        bpm = tempoChanges.first().bpm\n        selectedDuration',
+              1,
+          )
+          s = s.replace(
+              '        bpm,\n        timeSignatures,',
+              '        bpm,\n        tempoChanges,\n        timeSignatures,',
+              1,
+          )
+          s = s.replace(
+              '        bpm = estimate.coerceIn(ComfortTempo.MIN_BPM, ComfortTempo.MAX_BPM)\n        comfortTempoEstimate = null',
+              '        setTempoChange(\n            ScoreTimeline.quantizeBeat(currentTrack().cursorBeat),\n            estimate.coerceIn(ComfortTempo.MIN_BPM, ComfortTempo.MAX_BPM),\n        )\n        comfortTempoEstimate = null',
+              1,
+          )
+          s = s.replace(
+              '            liveRecordingStartBeat = ScoreTransportBus.state.value.beat.coerceAtLeast(0f)\n            liveRecordingBpm = bpm\n',
+              '            liveRecordingStartBeat = ScoreTransportBus.state.value.beat.coerceAtLeast(0f)\n            liveRecordingBpm = tempoBpmAt(liveRecordingStartBeat)\n',
+              1,
+          )
+          s = s.replace(
+              '        val initialWritten = if (joinsCurrentChord) activeGroup!!.currentWritten\n        else HoldDurationTiming.writtenForHoldMs(0L, bpm, holdDurationMode)\n',
+              '        val groupBpm = if (joinsCurrentChord) activeGroup!!.bpm else tempoBpmAt(startBeat)\n        val initialWritten = if (joinsCurrentChord) activeGroup!!.currentWritten\n        else HoldDurationTiming.writtenForHoldMs(0L, groupBpm, holdDurationMode)\n',
+              1,
+          )
+          s = s.replace(
+              '                bpm = bpm,\n                eventIndices = listOf(eventIndex),\n                currentWritten = initialWritten,',
+              '                bpm = groupBpm,\n                eventIndices = listOf(eventIndex),\n                currentWritten = initialWritten,',
+              1,
+          )
+          s = s.replace(
+              '                bpm = bpm,\n                eventIndices = listOf(newEventIndex),\n            )',
+              '                bpm = tempoBpmAt(groupStartBeat),\n                eventIndices = listOf(newEventIndex),\n            )',
+              1,
+          )
+          s = s.replace(
+              '            tracks = tracks,\n            bpm = bpm,\n            throughBeat = ScoreTracks.endBeat(tracks),',
+              '            tracks = tracks,\n            bpm = tempoChanges.first().bpm,\n            tempoChanges = tempoChanges,\n            throughBeat = ScoreTracks.endBeat(tracks),',
+              1,
+          )
+          s = s.replace(
+              '                    bpm = bpm,\n                    cursorBeat = activeCursorBeat,',
+              '                    bpm = activeTempoBpm,\n                    cursorBeat = activeCursorBeat,',
+              1,
+          )
+          s = s.replace(
+              '                    onTempoDown = { bpm = (bpm - 5).coerceAtLeast(30) },\n                    onTempoUp = { bpm = (bpm + 5).coerceAtMost(300) },',
+              '                    onTempoDown = {\n                        setTempoChange(\n                            ScoreTimeline.quantizeBeat(activeCursorBeat),\n                            (activeTempoBpm - 5).coerceAtLeast(ScoreTempos.MIN_BPM),\n                        )\n                    },\n                    onTempoUp = {\n                        setTempoChange(\n                            ScoreTimeline.quantizeBeat(activeCursorBeat),\n                            (activeTempoBpm + 5).coerceAtMost(ScoreTempos.MAX_BPM),\n                        )\n                    },',
+              1,
+          )
+          s = s.replace(
+              '                TimeSignatureControls(\n',
+              '                TempoControls(\n                    tempoChanges = tempoChanges,\n                    cursorBeat = activeCursorBeat,\n                    onSetTempo = ::setTempoChange,\n                    onRemoveTempo = ::removeTempoChange,\n                )\n\n                TimeSignatureControls(\n',
+              1,
+          )
+          p.write_text(s)
+
+          # Playback engine: map beats to real time piecewise. Multi-tempo SoundFont playback is forced
+          # through the existing streaming path so events can be scheduled against the tempo map.
+          path = 'app/src/main/java/com/scoreforge/app/audio/ScorePlaybackEngine.kt'
+          p = Path(path)
+          s = p.read_text()
+          s = s.replace('import com.scoreforge.app.music.ScoreNote\n', 'import com.scoreforge.app.music.ScoreNote\nimport com.scoreforge.app.music.ScoreTempoChange\nimport com.scoreforge.app.music.ScoreTempos\n', 1)
+          s = s.replace(
+              '        bpm: Int,\n        throughBeat: Float = ScoreTimeline.endBeat(notes),',
+              '        bpm: Int,\n        tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempoChange(0f, bpm)),\n        throughBeat: Float = ScoreTimeline.endBeat(notes),',
+              1,
+          )
+          s = s.replace(
+              '            bpm = bpm,\n            throughBeat = throughBeat,',
+              '            bpm = bpm,\n            tempoChanges = tempoChanges,\n            throughBeat = throughBeat,',
+              1,
+          )
+          # This is the playTracks signature (second occurrence after playScore was changed).
+          sig_old = '''    fun playTracks(
+        tracks: List<ScoreTrack>,
+        bpm: Int,
+        throughBeat: Float = ScoreTracks.endBeat(tracks),'''
+          sig_new = '''    fun playTracks(
+        tracks: List<ScoreTrack>,
+        bpm: Int,
+        tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempoChange(0f, bpm)),
+        throughBeat: Float = ScoreTracks.endBeat(tracks),'''
+          if sig_old not in s:
+              raise SystemExit('playTracks signature anchor not found')
+          s = s.replace(sig_old, sig_new, 1)
+          s = s.replace(
+              '        val safeBpm = bpm.coerceIn(30, 300)\n        val safeThroughBeat = maxOf(',
+              '        val safeTempos = ScoreTempos.normalize(\n            tempoChanges.ifEmpty { listOf(ScoreTempoChange(0f, bpm)) }\n        )\n        val safeBpm = safeTempos.first().bpm\n        val hasTempoChanges = safeTempos.size > 1\n        val safeThroughBeat = maxOf(',
+              1,
+          )
+          s = s.replace(
+              '            soundFontEngine?.hasSoundFont == true &&\n            PlaybackStreamingPolicy.shouldStream(',
+              '            soundFontEngine?.hasSoundFont == true &&\n            (hasTempoChanges || PlaybackStreamingPolicy.shouldStream(',
+              1,
+          )
+          s = s.replace(
+              '                noteCount = notes.size,\n            )\n        ) {',
+              '                noteCount = notes.size,\n            ))\n        ) {',
+              1,
+          )
+          s = s.replace(
+              '                bpm = safeBpm,\n                startBeat = startBeat,',
+              '                bpm = safeBpm,\n                tempoChanges = safeTempos,\n                startBeat = startBeat,',
+              1,
+          )
+          s = s.replace(
+              '            var rendered = renderBestAvailableTracks(playableTracks, safeBpm, safeThroughBeat)',
+              '            var rendered = renderBestAvailableTracks(playableTracks, safeBpm, safeThroughBeat, safeTempos)',
+              1,
+          )
+          s = s.replace(
+              '                    bpm = safeBpm,\n                    throughBeat = safeThroughBeat,\n                    timeSignatures = timeSignatures,',
+              '                    tempoChanges = safeTempos,\n                    throughBeat = safeThroughBeat,\n                    timeSignatures = timeSignatures,',
+              1,
+          )
+          s = s.replace(
+              '            val secondsPerBeat = 60.0 / safeBpm\n            val requestedStartFrame = (startBeat * secondsPerBeat * sampleRate).toInt()',
+              '            val startSeconds = ScoreTempos.secondsAtBeat(safeTempos, startBeat)\n            val requestedStartFrame = (startSeconds * sampleRate).toInt()',
+              1,
+          )
+          s = s.replace(
+              '                    val beat = startBeat + (elapsedMs / 1000.0 / secondsPerBeat).toFloat()\n                    ScoreTransportBus.progress(beat.coerceAtMost(safeThroughBeat))',
+              '                    val absoluteSeconds = startSeconds + elapsedMs / 1000.0\n                    val beat = ScoreTempos.beatAtSeconds(safeTempos, absoluteSeconds)\n                    ScoreTransportBus.progress(beat.coerceAtMost(safeThroughBeat))',
+              1,
+          )
+          s = s.replace(
+              '        tracks: List<ScoreTrack>,\n        bpm: Int,\n        throughBeat: Float,\n    ): RenderedAudio {',
+              '        tracks: List<ScoreTrack>,\n        bpm: Int,\n        throughBeat: Float,\n        tempoChanges: List<ScoreTempoChange>,\n    ): RenderedAudio {',
+              1,
+          )
+          s = s.replace(
+              '        if (soundFont != null && soundFont.hasSoundFont) {',
+              '        if (soundFont != null && soundFont.hasSoundFont && ScoreTempos.normalize(tempoChanges).size <= 1) {',
+              1,
+          )
+          s = s.replace(
+              '                bpm = bpm,\n                throughBeat = throughBeat,\n            ),',
+              '                bpm = bpm,\n                tempoChanges = tempoChanges,\n                throughBeat = throughBeat,\n            ),',
+              1,
+          )
+          s = s.replace(
+              '        playableTracks: List<ScoreTrack>,\n        bpm: Int,\n        startBeat: Float,',
+              '        playableTracks: List<ScoreTrack>,\n        bpm: Int,\n        tempoChanges: List<ScoreTempoChange>,\n        startBeat: Float,',
+              1,
+          )
+          s = s.replace('        val secondsPerBeat = 60f / bpm.coerceIn(30, 300)\n\n        thread', '        val safeTempos = ScoreTempos.normalize(tempoChanges)\n        val startSeconds = ScoreTempos.secondsAtBeat(safeTempos, startBeat)\n\n        thread', 1)
+          s = s.replace(
+              '                    throughBeat = throughBeat,\n                    secondsPerBeat = secondsPerBeat,',
+              '                    throughBeat = throughBeat,\n                    tempoChanges = safeTempos,',
+              1,
+          )
+          s = s.replace(
+              '                        throughBeat = throughBeat,\n                        secondsPerBeat = secondsPerBeat,',
+              '                        throughBeat = throughBeat,\n                        tempoChanges = safeTempos,',
+              1,
+          )
+          s = s.replace(
+              '                    ((throughBeat - startBeat).coerceAtLeast(0f) * secondsPerBeat * sampleRate)\n                    ).toInt().coerceAtLeast(1)',
+              '                    (ScoreTempos.durationSeconds(safeTempos, startBeat, throughBeat) * sampleRate)\n                    ).toInt().coerceAtLeast(1)',
+              1,
+          )
+          # Both streaming transport progress locations use this exact expression.
+          s = s.replace(
+              '                    val beat = startBeat +\n                        (playedFrames.toDouble() / sampleRate.toDouble() / secondsPerBeat.toDouble()).toFloat()\n                    ScoreTransportBus.progress(beat.coerceAtMost(throughBeat))',
+              '                    val beat = ScoreTempos.beatAtSeconds(\n                        safeTempos,\n                        startSeconds + playedFrames.toDouble() / sampleRate.toDouble(),\n                    )\n                    ScoreTransportBus.progress(beat.coerceAtMost(throughBeat))',
+              2,
+          )
+          s = s.replace(
+              '        secondsPerBeat: Float,\n    ): List<StreamingMidiEvent> = buildList {',
+              '        tempoChanges: List<ScoreTempoChange>,\n    ): List<StreamingMidiEvent> = buildList {\n        val startSeconds = ScoreTempos.secondsAtBeat(tempoChanges, startBeat)',
+              1,
+          )
+          s = s.replace(
+              '                    (onBeat - startBeat).coerceAtLeast(0f) * secondsPerBeat * sampleRate\n                    ).toInt().coerceAtLeast(0)',
+              '                    ((ScoreTempos.secondsAtBeat(tempoChanges, onBeat) - startSeconds) * sampleRate)\n                    ).toInt().coerceAtLeast(0)',
+              1,
+          )
+          s = s.replace(
+              '                    (offBeat - startBeat).coerceAtLeast(0f) * secondsPerBeat * sampleRate\n                    ).toInt().coerceAtLeast(onFrame + 1)',
+              '                    ((ScoreTempos.secondsAtBeat(tempoChanges, offBeat) - startSeconds) * sampleRate)\n                    ).toInt().coerceAtLeast(onFrame + 1)',
+              1,
+          )
+          s = s.replace(
+              '        secondsPerBeat: Float,\n    ): List<StreamingClick> = ScoreMetronome.clicks(timeSignatures, throughBeat)',
+              '        tempoChanges: List<ScoreTempoChange>,\n    ): List<StreamingClick> {\n        val startSeconds = ScoreTempos.secondsAtBeat(tempoChanges, startBeat)\n        return ScoreMetronome.clicks(timeSignatures, throughBeat)',
+              1,
+          )
+          s = s.replace(
+              '                    (click.beat - startBeat).coerceAtLeast(0f) * secondsPerBeat * sampleRate\n                    ).toInt(),',
+              '                    ((ScoreTempos.secondsAtBeat(tempoChanges, click.beat) - startSeconds) * sampleRate)\n                    ).toInt(),',
+              1,
+          )
+          s = s.replace('        .toList()\n\n    private fun mixStreamingMetronome', '        .toList()\n    }\n\n    private fun mixStreamingMetronome', 1)
+          s = s.replace(
+              '        rendered: RenderedAudio,\n        bpm: Int,\n        throughBeat: Float,',
+              '        rendered: RenderedAudio,\n        tempoChanges: List<ScoreTempoChange>,\n        throughBeat: Float,',
+              1,
+          )
+          s = s.replace('        val secondsPerBeat = 60f / bpm.coerceIn(30, 300)\n        val clickFrames', '        val safeTempos = ScoreTempos.normalize(tempoChanges)\n        val clickFrames', 1)
+          s = s.replace('            val startFrame = (click.beat * secondsPerBeat * sampleRate).toInt()', '            val startFrame = (ScoreTempos.secondsAtBeat(safeTempos, click.beat) * sampleRate).toInt()', 1)
+          s = s.replace(
+              '        tracks: List<ScoreTrack>,\n        bpm: Int,\n        tailSeconds: Float = 0.35f,',
+              '        tracks: List<ScoreTrack>,\n        bpm: Int,\n        tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempoChange(0f, bpm)),\n        tailSeconds: Float = 0.35f,',
+              1,
+          )
+          s = s.replace('        val secondsPerBeat = 60f / bpm.coerceIn(30, 300)\n        val notesEndBeat', '        val safeTempos = ScoreTempos.normalize(tempoChanges)\n        val notesEndBeat', 1)
+          s = s.replace('        val totalSeconds = endBeat * secondsPerBeat + tailSeconds', '        val totalSeconds = ScoreTempos.secondsAtBeat(safeTempos, endBeat).toFloat() + tailSeconds', 1)
+          s = s.replace(
+              '                    durationBeats = end - note.startBeat,\n                    secondsPerBeat = secondsPerBeat,',
+              '                    startSeconds = ScoreTempos.secondsAtBeat(safeTempos, note.startBeat).toFloat(),\n                    noteSeconds = ScoreTempos.durationSeconds(safeTempos, note.startBeat, end).toFloat(),',
+              1,
+          )
+          s = s.replace(
+              '        note: ScoreNote,\n        durationBeats: Float,\n        secondsPerBeat: Float,',
+              '        note: ScoreNote,\n        startSeconds: Float,\n        noteSeconds: Float,',
+              1,
+          )
+          s = s.replace('        val startSample = (note.startBeat * secondsPerBeat * sampleRate).toInt()\n        val noteSeconds = durationBeats.coerceAtLeast(0.001f) * secondsPerBeat\n        val noteSamples = (noteSeconds * sampleRate).toInt().coerceAtLeast(1)', '        val startSample = (startSeconds.coerceAtLeast(0f) * sampleRate).toInt()\n        val safeNoteSeconds = noteSeconds.coerceAtLeast(0.001f)\n        val noteSamples = (safeNoteSeconds * sampleRate).toInt().coerceAtLeast(1)', 1)
+          p.write_text(s)
+
+          # Bump build version.
+          path = 'app/build.gradle.kts'
+          replace_once(path,
+              '        versionCode = 42\n        versionName = "0.2.39"',
+              '        versionCode = 43\n        versionName = "0.2.40"',
+              'version bump')
+
+          # Persistence regression test.
+          Path('app/src/test/java/com/scoreforge/app/music/ScoreProjectTempoPersistenceTest.kt').write_text('''package com.scoreforge.app.music
+
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class ScoreProjectTempoPersistenceTest {
+    @Test
+    fun tempoMapRoundTripsWithoutChangingExistingFormatVersion() {
+        val snapshot = ScoreProjectSnapshot(
+            events = emptyList(),
+            bpm = 120,
+            tempoChanges = listOf(
+                ScoreTempoChange(0f, 120),
+                ScoreTempoChange(4f, 90),
+                ScoreTempoChange(12.5f, 160),
+            ),
+        )
+
+        val decoded = requireNotNull(ScoreProjectCodec.decode(ScoreProjectCodec.encode(snapshot)))
+        assertEquals(snapshot.tempoChanges, decoded.effectiveTempoChanges())
+        assertEquals(120, decoded.bpm)
+    }
+
+    @Test
+    fun oldV2ProjectWithoutTempoRowsUsesStoredBpm() {
+        val raw = """SCOREFORGE\t2
+PROJECT_NAME\tOld
+BPM\t135
+ACTIVE_TRACK\t0
+TRACK\t1\tTrack 1\t0.0\t0\t-1\t-1\t0\t100\t0\tAUTO
+END_TRACK
+"""
+        val decoded = requireNotNull(ScoreProjectCodec.decode(raw))
+        assertEquals(listOf(ScoreTempoChange(0f, 135)), decoded.effectiveTempoChanges())
+    }
+}
+''')
+
+          # Focused importer fixture with two tempo events at beats 0 and 2.
+          Path('app/src/test/java/com/scoreforge/app/music/MidiImporterTempoMapTest.kt').write_text('''package com.scoreforge.app.music
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Test
+import java.io.ByteArrayOutputStream
+
+class MidiImporterTempoMapTest {
+    @Test
+    fun importsAllTempoEventsAsEditableMap() {
+        val out = ByteArrayOutputStream()
+        fun bytes(vararg values: Int) = values.forEach(out::write)
+        fun ascii(value: String) = value.forEach { out.write(it.code) }
+        fun int32(value: Int) = bytes(value ushr 24, value ushr 16, value ushr 8, value)
+
+        ascii("MThd"); int32(6); bytes(0, 0, 0, 1, 1, 0) // format 0, one track, TPQ 256
+        val track = ByteArrayOutputStream()
+        fun t(vararg values: Int) = values.forEach(track::write)
+        // tick 0: 120 BPM
+        t(0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20)
+        // note C4 quarter note so importer has playable content
+        t(0x00, 0x90, 60, 100)
+        t(0x82, 0x00, 0x80, 60, 0) // delta 256
+        // delta 256 -> beat 2: 60 BPM
+        t(0x82, 0x00, 0xFF, 0x51, 0x03, 0x0F, 0x42, 0x40)
+        t(0x00, 0xFF, 0x2F, 0x00)
+        ascii("MTrk"); int32(track.size()); out.write(track.toByteArray())
+
+        val result = MidiImporter.import(out.toByteArray(), "Tempo Test")
+        val tempos = result.snapshot.effectiveTempoChanges()
+        assertEquals(2, tempos.size)
+        assertEquals(120, tempos[0].bpm)
+        assertEquals(0f, tempos[0].startBeat, 0.001f)
+        assertEquals(60, tempos[1].bpm)
+        assertEquals(2f, tempos[1].startBeat, 0.001f)
+        assertFalse(result.warnings.any { it.contains("not editable yet") })
+    }
+}
+''')
+
+          # Remove this one-shot patch workflow before committing feature changes.
+          Path('.github/workflows/apply-tempo-map-0.2.40.yml').unlink()
+          PY
+
+      - name: Commit implementation
+        run: |
+          git config user.name "score-forge-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Add editable project tempo maps"
+          git push origin HEAD:feature/tempo-map-0.2.40
