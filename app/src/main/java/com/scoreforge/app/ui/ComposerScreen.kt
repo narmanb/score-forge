@@ -1021,8 +1021,7 @@ fun ScoreForgeComposerScreen() {
 
     fun selectTrack(index: Int) {
         if (index !in tracks.indices || index == activeIndex()) return
-        stopPlayback()
-        stopLiveRecording()
+        if (liveRecordingActive) stopLiveRecording()
         cancelNaturalEntryGroup()
         LiveInstrumentBus.allNotesOff()
         mixerGestureHistoryRecorded = false
@@ -1259,6 +1258,7 @@ fun ScoreForgeComposerScreen() {
 
                 SoundFontControls(
                     engine = soundFontEngine,
+                    playbackActive = isPlaying,
                     requestedPresetBank = activeTrack.presetBank,
                     requestedPresetProgram = activeTrack.presetProgram,
                     onSoundFontLoaded = { _, preset ->
