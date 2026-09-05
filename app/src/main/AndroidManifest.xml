@@ -57,6 +57,24 @@
                 <data android:mimeType="application/octet-stream" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
+
+            <!--
+                Samsung My Files can keep the MIME type that was assigned before a newly-created
+                document is renamed to add .sfp. Match the content-URI path as a narrow fallback so
+                a real .sfp filename can still be offered to Score Forge without advertising the app
+                for every unrelated file type. MainActivity/ExternalOpenHandler still validate the
+                Score Forge file signature before loading it.
+            -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:scheme="content"
+                    android:host="*"
+                    android:pathPattern=".*\.sfp"
+                    android:mimeType="*/*" />
+            </intent-filter>
         </activity>
 
         <service
