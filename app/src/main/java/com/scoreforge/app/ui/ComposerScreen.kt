@@ -660,6 +660,7 @@ fun ScoreForgeComposerScreen() {
         cancelNaturalEntryGroup()
         LiveInstrumentBus.allNotesOff()
         applyProjectSnapshot(snapshot, clearHistory = true)
+        ScoreTransportBus.seek(0f)
         chordMode = StepChordMode.OFF
         pianoEntryMode = PianoEntryMode.STEP
     }
