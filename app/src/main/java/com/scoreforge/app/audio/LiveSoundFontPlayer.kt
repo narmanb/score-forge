@@ -97,8 +97,11 @@ class LiveSoundFontPlayer(
         engine?.setChannelMixer(desiredVolume, desiredPan)
     }
 
-    fun noteOn(midiPitch: Int, velocity: Int = 96): Boolean =
-        engine?.noteOn(midiPitch, velocity) == true
+    fun noteOn(midiPitch: Int, velocity: Int = 96): Boolean {
+        val current = engine ?: return false
+        if (!isReady || renderThread?.isAlive != true) return false
+        return current.noteOn(midiPitch, velocity)
+    }
 
     fun noteOff(midiPitch: Int): Boolean =
         engine?.noteOff(midiPitch) == true
@@ -106,6 +109,7 @@ class LiveSoundFontPlayer(
     /** Used by staff tapping until the staff gets a press/hold gesture of its own. */
     fun playOneShot(midiPitch: Int, velocity: Int = 92, durationMs: Long = 320L): Boolean {
         val current = engine ?: return false
+        if (!isReady || renderThread?.isAlive != true) return false
         if (!current.noteOn(midiPitch, velocity)) return false
 
         thread(name = "ScoreForgeSoundFontOneShot", isDaemon = true) {
@@ -156,11 +160,15 @@ class LiveSoundFontPlayer(
 
         val framesPerBlock = 256
         val worker = thread(name = "ScoreForgeLiveSoundFontAudio", isDaemon = true) {
-            while (running && engine === soundFont) {
-                val pcm = soundFont.renderStereo(framesPerBlock)
-                if (pcm.isEmpty()) break
-                val result = track.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)
-                if (result < 0) break
+            try {
+                while (running && engine === soundFont) {
+                    val pcm = soundFont.renderStereo(framesPerBlock)
+                    if (pcm.isEmpty()) break
+                    val result = track.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)
+                    if (result < 0) break
+                }
+            } finally {
+                if (engine === soundFont) running = false
             }
         }
         renderThread = worker

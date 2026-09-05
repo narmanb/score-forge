@@ -125,11 +125,12 @@ class ScorePlaybackEngine {
 
         if (
             soundFontEngine?.hasSoundFont == true &&
-            (hasTempoChanges || PlaybackStreamingPolicy.shouldStream(
+            !hasTempoChanges &&
+            PlaybackStreamingPolicy.shouldStream(
                 throughBeat = safeThroughBeat - startBeat,
                 bpm = safeBpm,
                 noteCount = notes.size,
-            ))
+            )
         ) {
             playStreamingSoundFontTracks(
                 playableTracks = playableTracks,
@@ -254,8 +255,13 @@ class ScorePlaybackEngine {
         tempoChanges: List<ScoreTempoChange>,
     ): RenderedAudio {
         val soundFont = soundFontEngine
-        if (soundFont != null && soundFont.hasSoundFont && ScoreTempos.normalize(tempoChanges).size <= 1) {
-            val pcm = soundFont.renderTracks(tracks, bpm, throughBeat = throughBeat)
+        if (soundFont != null && soundFont.hasSoundFont) {
+            val pcm = soundFont.renderTracks(
+                tracks = tracks,
+                bpm = bpm,
+                tempoChanges = tempoChanges,
+                throughBeat = throughBeat,
+            )
             if (pcm.isNotEmpty()) return RenderedAudio(pcm, channels = 2)
         }
 

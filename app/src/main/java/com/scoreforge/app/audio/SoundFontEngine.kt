@@ -2,6 +2,8 @@ package com.scoreforge.app.audio
 
 import com.scoreforge.app.music.ScoreArticulations
 import com.scoreforge.app.music.ScoreNote
+import com.scoreforge.app.music.ScoreTempoChange
+import com.scoreforge.app.music.ScoreTempos
 import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
 import com.scoreforge.app.music.ScoreTrack
@@ -220,6 +222,7 @@ class SoundFontEngine private constructor(
     fun renderTracks(
         tracks: List<ScoreTrack>,
         bpm: Int,
+        tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempoChange(0f, bpm)),
         tailSeconds: Float = 0.45f,
         throughBeat: Float = ScoreTracks.endBeat(tracks),
     ): ShortArray = synchronized(lock) {
@@ -250,6 +253,7 @@ class SoundFontEngine private constructor(
         val pcm = renderMidiEventsLocked(
             channelNotes = channelNotes,
             bpm = bpm,
+            tempoChanges = tempoChanges,
             tailSeconds = tailSeconds,
             throughBeat = maxOf(throughBeat, ScoreTracks.endBeat(tracks)),
         )
@@ -281,15 +285,19 @@ class SoundFontEngine private constructor(
     private fun renderMidiEventsLocked(
         channelNotes: List<ChannelNotes>,
         bpm: Int,
+        tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempoChange(0f, bpm)),
         tailSeconds: Float,
         throughBeat: Float,
     ): ShortArray {
-        val safeBpm = bpm.coerceIn(30, 300)
-        val secondsPerBeat = 60f / safeBpm
+        val safeBpm = bpm.coerceIn(ScoreTempos.MIN_BPM, ScoreTempos.MAX_BPM)
+        val safeTempos = ScoreTempos.normalize(
+            tempoChanges.ifEmpty { listOf(ScoreTempoChange(0f, safeBpm)) }
+        )
         val notesEndBeat = channelNotes.maxOfOrNull { ScoreTimeline.endBeat(it.notes) } ?: 0f
         val scoreEndBeat = maxOf(notesEndBeat, throughBeat.coerceAtLeast(0f))
         val totalFrames = (
-            (scoreEndBeat * secondsPerBeat + tailSeconds.coerceAtLeast(0f)) * sampleRate
+            (ScoreTempos.secondsAtBeat(safeTempos, scoreEndBeat) +
+                tailSeconds.coerceAtLeast(0f).toDouble()) * sampleRate
             ).toInt().coerceAtLeast(1)
 
         val events = buildList {
@@ -299,14 +307,16 @@ class SoundFontEngine private constructor(
                 notes.forEachIndexed { index, note ->
                     val suppressOn = ScoreTies.isContinuation(notes, index)
                     val suppressOff = ScoreTies.hasValidTie(notes, index)
-                    val onFrame = (note.startBeat * secondsPerBeat * sampleRate).toInt().coerceAtLeast(0)
+                    val onFrame = (
+                        ScoreTempos.secondsAtBeat(safeTempos, note.startBeat) * sampleRate
+                        ).toInt().coerceAtLeast(0)
                     val playbackEndBeat = if (suppressOn || suppressOff) {
                         note.startBeat + note.effectiveBeats
                     } else {
                         ScoreArticulations.playbackEndBeat(notes, index)
                     }
                     val offFrame = (
-                        playbackEndBeat * secondsPerBeat * sampleRate
+                        ScoreTempos.secondsAtBeat(safeTempos, playbackEndBeat) * sampleRate
                         ).toInt().coerceAtLeast(onFrame + 1)
                     if (!suppressOn) {
                         add(
