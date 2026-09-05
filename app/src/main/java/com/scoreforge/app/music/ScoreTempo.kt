@@ -10,7 +10,10 @@ data class ScoreTempoChange(
     fun normalized(): ScoreTempoChange = ScoreTempos.normalizeOne(this)
 }
 
-/** Project-wide tempo-map helpers, including beat/time conversion for variable-tempo playback. */
+/**
+ * Project-wide tempo-map helpers, including beat/time conversion for variable-tempo playback.
+ * Tempos are normalized to Score Forge's supported 30–300 BPM range.
+ */
 object ScoreTempos {
     private const val EPSILON = 0.001f
     const val MIN_BPM = 30
