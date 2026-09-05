@@ -602,24 +602,6 @@ fun ScoreForgeComposerScreen() {
         }
     }
 
-    fun startPlayback() {
-        if (playableNoteCount <= 0 || liveRecordingActive || isPlaying) return
-        when (pianoEntryMode) {
-            PianoEntryMode.NATURAL -> finishNaturalPhraseForStaffBrowse()
-            PianoEntryMode.HOLD -> finishHoldGroupForUiBreak()
-            else -> Unit
-        }
-        LiveInstrumentBus.allNotesOff()
-        isPlaying = true
-        playback.playTracks(
-            tracks = tracks,
-            bpm = bpm,
-            throughBeat = ScoreTracks.endBeat(tracks),
-            metronomeEnabled = metronomeEnabled,
-            timeSignatures = timeSignatures,
-        ) { isPlaying = false }
-    }
-
     fun stopPlayback() {
         playback.stop()
         isPlaying = false
@@ -822,6 +804,24 @@ fun ScoreForgeComposerScreen() {
             cursorBeat = group.startBeat + written.beats,
         )
         cancelNaturalEntryGroup()
+    }
+
+    fun startPlayback() {
+        if (playableNoteCount <= 0 || liveRecordingActive || isPlaying) return
+        when (pianoEntryMode) {
+            PianoEntryMode.NATURAL -> finishNaturalPhraseForStaffBrowse()
+            PianoEntryMode.HOLD -> finishHoldGroupForUiBreak()
+            else -> Unit
+        }
+        LiveInstrumentBus.allNotesOff()
+        isPlaying = true
+        playback.playTracks(
+            tracks = tracks,
+            bpm = bpm,
+            throughBeat = ScoreTracks.endBeat(tracks),
+            metronomeEnabled = metronomeEnabled,
+            timeSignatures = timeSignatures,
+        ) { isPlaying = false }
     }
 
     fun moveEntryCursor(beat: Float) {
