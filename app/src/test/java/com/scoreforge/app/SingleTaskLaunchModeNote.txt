@@ -1,0 +1,3 @@
+Score Forge's MainActivity is intentionally configured as singleTask in AndroidManifest.xml.
+
+Reason: ACTION_VIEW launches from file managers must route into Score Forge's own existing task instead of creating a second MainActivity instance inside the caller's task. MainActivity.onNewIntent() handles the external file request for an existing instance.
