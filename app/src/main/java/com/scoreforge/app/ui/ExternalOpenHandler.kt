@@ -18,6 +18,7 @@ import com.scoreforge.app.ExternalOpenRequest
 import com.scoreforge.app.music.MidiImporter
 import com.scoreforge.app.music.ScoreProjectCodec
 import com.scoreforge.app.music.ScoreProjectSnapshot
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -46,7 +47,9 @@ fun ExternalOpenHandler(
             onOpenProject(outcome.snapshot)
             dialogTitle = outcome.dialogTitle
             dialogMessage = outcome.dialogMessage
-        } catch (error: Throwable) {
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
             dialogTitle = "Could not open file"
             dialogMessage = error.message ?: "The selected file is not supported by Score Forge."
         } finally {
