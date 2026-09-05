@@ -30,22 +30,15 @@ internal object DocumentFileExtensions {
         val renamedUri = runCatching {
             DocumentsContract.renameDocument(resolver, uri, correctedName)
         }.getOrNull()
+        if (renamedUri != null) return renamedUri
 
-        val candidate = renamedUri ?: uri
-        if (queryDisplayName(context, candidate)?.endsWith(extension, ignoreCase = true) == true) {
-            return candidate
-        }
-
-        runCatching {
+        val updatedRows = runCatching {
             val values = ContentValues().apply {
                 put(OpenableColumns.DISPLAY_NAME, correctedName)
             }
-            resolver.update(candidate, values, null, null)
-        }
-
-        if (queryDisplayName(context, candidate)?.endsWith(extension, ignoreCase = true) == true) {
-            return candidate
-        }
+            resolver.update(uri, values, null, null)
+        }.getOrDefault(0)
+        if (updatedRows > 0) return uri
 
         throw IllegalStateException(
             "Could not preserve the required $extension filename. Save again and leave $extension at the end of the name."
