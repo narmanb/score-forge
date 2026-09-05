@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.scoreforge.app.ExternalFileTypes
 import com.scoreforge.app.music.MidiImporter
 import com.scoreforge.app.music.ScoreProjectCodec
 import com.scoreforge.app.music.ScoreProjectSnapshot
@@ -53,7 +54,7 @@ fun ProjectFileControls(
     var midiImportWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val saveLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.CreateDocument("application/octet-stream"),
+        contract = ActivityResultContracts.CreateDocument(ExternalFileTypes.SCORE_FORGE_PROJECT_MIME),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         val snapshot = snapshotProvider()
@@ -206,6 +207,7 @@ fun ProjectFileControls(
                     arrayOf(
                         "audio/midi",
                         "audio/x-midi",
+                        "audio/sp-midi",
                         "application/x-midi",
                         "application/octet-stream",
                     )
