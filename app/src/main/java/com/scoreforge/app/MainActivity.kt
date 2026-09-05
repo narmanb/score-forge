@@ -129,8 +129,9 @@ class MainActivity : ComponentActivity() {
         }
 
         return buildString {
-            appendLine("Score Forge 0.2.38")
+            appendLine("Score Forge 0.2.39")
             appendLine("entryPoint=$entryPoint")
+            appendLine("routedByFileOpenActivity=${intent.getBooleanExtra(FileOpenActivity.EXTRA_ROUTED_EXTERNAL_OPEN, false)}")
             appendLine("taskId=$taskId")
             appendLine("isTaskRoot=$isTaskRoot")
             appendLine("component=${componentName.flattenToShortString()}")
