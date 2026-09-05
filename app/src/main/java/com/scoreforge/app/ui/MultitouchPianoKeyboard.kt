@@ -294,6 +294,22 @@ fun MultitouchPianoKeyboard(
                         durationPaletteOpen = false
                     },
                 )
+                ChamferedControlButton(
+                    label = "↶",
+                    onClick = {
+                        releaseAllPitches()
+                        onUndo()
+                    },
+                    enabled = canUndo,
+                )
+                ChamferedControlButton(
+                    label = "↷",
+                    onClick = {
+                        releaseAllPitches()
+                        onRedo()
+                    },
+                    enabled = canRedo,
+                )
 
                 NoteDuration.entries.forEach { duration ->
                     ChamferedControlButton(
