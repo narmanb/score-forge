@@ -1,0 +1,31 @@
+name: Apply background playback rotation fix
+
+on:
+  push:
+    branches:
+      - feature/background-playback-0.2.43
+    paths:
+      - .github/workflows/apply-background-rotation-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/background-playback-0.2.43
+          fetch-depth: 0
+      - name: Apply rotation safety patch
+        run: python3 ci/patch_background_rotation.py
+      - name: Commit patch
+        run: |
+          rm .github/workflows/apply-background-rotation-fix.yml
+          rm ci/patch_background_rotation.py
+          git config user.name "score-forge-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A
+          git commit -m "Keep background playback alive across Activity recreation"
+          git push origin HEAD:feature/background-playback-0.2.43
