@@ -22,6 +22,7 @@ data class ScoreTrack(
     val solo: Boolean = false,
     val volume: Int = DEFAULT_VOLUME,
     val pan: Int = CENTER_PAN,
+    val clefMode: ScoreClefMode = ScoreClefMode.AUTO,
     val timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
 ) {
     val notes: List<ScoreNote>

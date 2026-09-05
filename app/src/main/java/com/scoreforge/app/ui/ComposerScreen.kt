@@ -49,6 +49,9 @@ import com.scoreforge.app.music.NaturalEntryTiming
 import com.scoreforge.app.music.NoteArticulation
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
+import com.scoreforge.app.music.ScoreClef
+import com.scoreforge.app.music.ScoreClefMode
+import com.scoreforge.app.music.ScoreClefs
 import com.scoreforge.app.music.ScoreEditHistory
 import com.scoreforge.app.music.ScoreEditState
 import com.scoreforge.app.music.ScoreKeySignatures
@@ -601,6 +604,12 @@ fun ScoreForgeComposerScreen() {
 
     fun startPlayback() {
         if (playableNoteCount <= 0 || liveRecordingActive || isPlaying) return
+        when (pianoEntryMode) {
+            PianoEntryMode.NATURAL -> finishNaturalPhraseForStaffBrowse()
+            PianoEntryMode.HOLD -> finishHoldGroupForUiBreak()
+            else -> Unit
+        }
+        LiveInstrumentBus.allNotesOff()
         isPlaying = true
         playback.playTracks(
             tracks = tracks,
@@ -1081,6 +1090,19 @@ fun ScoreForgeComposerScreen() {
         syncHistoryButtons()
     }
 
+    fun setActiveTrackClefMode(mode: ScoreClefMode) {
+        if (currentTrack().clefMode == mode) return
+        when (pianoEntryMode) {
+            PianoEntryMode.NATURAL -> finishNaturalPhraseForStaffBrowse()
+            PianoEntryMode.HOLD -> finishHoldGroupForUiBreak()
+            else -> Unit
+        }
+        recordBeforeScoreEdit()
+        replaceActiveTrack { it.copy(clefMode = mode) }
+        selectedEventIndex = -1
+        syncHistoryButtons()
+    }
+
     fun deleteActiveTrack() {
         if (tracks.size <= 1) return
         stopPlayback()
@@ -1266,6 +1288,12 @@ fun ScoreForgeComposerScreen() {
                     },
                 )
 
+                ClefControls(
+                    mode = activeTrack.clefMode,
+                    effectiveClef = ScoreClefs.effective(activeTrack.clefMode, activeEvents),
+                    onModeChanged = ::setActiveTrackClefMode,
+                )
+
                 when (editorMode) {
                     ScoreEditorMode.STAFF -> ScoreStaffEditor(
                         events = activeEvents,
@@ -1273,6 +1301,7 @@ fun ScoreForgeComposerScreen() {
                         cursorBeat = activeCursorBeat,
                         timeSignatures = timeSignatures,
                         keySignatures = keySignatures,
+                        clefMode = activeTrack.clefMode,
                         selectedEventIndex = selectedEventIndex,
                         isPlaying = isPlaying,
                         canPlay = playableNoteCount > 0 && !liveRecordingActive && !comfortTempoCapturing,
@@ -1418,6 +1447,39 @@ fun ScoreForgeComposerScreen() {
 
                 Spacer(modifier = Modifier.height(12.dp))
             }
+        }
+    }
+}
+
+
+@Composable
+private fun ClefControls(
+    mode: ScoreClefMode,
+    effectiveClef: ScoreClef,
+    onModeChanged: (ScoreClefMode) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        Text("Clef:", style = MaterialTheme.typography.titleSmall)
+        ScoreClefMode.entries.forEach { option ->
+            if (option == mode) {
+                Button(onClick = { onModeChanged(option) }) { Text(option.displayName) }
+            } else {
+                OutlinedButton(onClick = { onModeChanged(option) }) { Text(option.displayName) }
+            }
+        }
+        if (mode == ScoreClefMode.AUTO) {
+            Text(
+                "Using ${effectiveClef.displayName}",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFFD8D2DF),
+            )
         }
     }
 }

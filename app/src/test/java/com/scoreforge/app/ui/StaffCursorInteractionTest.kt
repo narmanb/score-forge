@@ -43,4 +43,20 @@ class StaffCursorInteractionTest {
             StaffCursorInteraction.zoneForY(171f, staffTop, staffBottom, spacing),
         )
     }
+
+    @Test
+    fun verticalDragInCursorGutterRoutesToPageScroll() {
+        assertEquals(
+            StaffCursorDragIntent.VERTICAL_SCROLL,
+            StaffCursorInteraction.dragIntent(deltaX = 3f, deltaY = 18f),
+        )
+    }
+
+    @Test
+    fun horizontalDragInCursorGutterRoutesToCursor() {
+        assertEquals(
+            StaffCursorDragIntent.CURSOR,
+            StaffCursorInteraction.dragIntent(deltaX = 18f, deltaY = 3f),
+        )
+    }
 }
