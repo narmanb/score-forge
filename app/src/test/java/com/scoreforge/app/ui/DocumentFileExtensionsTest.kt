@@ -1,6 +1,8 @@
 package com.scoreforge.app.ui
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DocumentFileExtensionsTest {
@@ -34,5 +36,13 @@ class DocumentFileExtensionsTest {
             "Final.mix.v2.mid",
             DocumentFileExtensions.correctedName("Final.mix.v2", ".mid"),
         )
+    }
+
+    @Test
+    fun verifiesActualRequiredExtensionCaseInsensitively() {
+        assertTrue(DocumentFileExtensions.hasRequiredExtension("Song.SFP", ".sfp"))
+        assertTrue(DocumentFileExtensions.hasRequiredExtension("Song.mid", "mid"))
+        assertFalse(DocumentFileExtensions.hasRequiredExtension("Song", ".sfp"))
+        assertFalse(DocumentFileExtensions.hasRequiredExtension("Song.sf2", ".mid"))
     }
 }
