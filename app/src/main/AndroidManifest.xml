@@ -17,7 +17,20 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+        </activity>
 
+        <!--
+            External file managers may launch VIEW targets into their own task. Keep that entry
+            point separate from MainActivity so the dispatcher can immediately forward the file
+            into Score Forge's single app task and then disappear from the caller's task/Recents.
+        -->
+        <activity
+            android:name=".FileOpenActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
