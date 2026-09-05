@@ -110,7 +110,7 @@ class MidiImporterTest {
     }
 
     @Test
-    fun reportsTempoChangesAndUsesFirstTempo() {
+    fun importsTempoChangesIntoTempoMap() {
         val midi = midiFile(
             ticksPerQuarter = 480,
             tracks = listOf(
@@ -130,7 +130,14 @@ class MidiImporterTest {
 
         val result = MidiImporter.import(midi)
         assertEquals(120, result.bpm)
-        assertTrue(result.warnings.any { it.contains("Tempo changes") })
+        assertEquals(
+            listOf(
+                ScoreTempoChange(startBeat = 0f, bpm = 120),
+                ScoreTempoChange(startBeat = 1f, bpm = 60),
+            ),
+            result.snapshot.effectiveTempoChanges(),
+        )
+        assertFalse(result.warnings.any { it.contains("Tempo changes") })
     }
 
     @Test
