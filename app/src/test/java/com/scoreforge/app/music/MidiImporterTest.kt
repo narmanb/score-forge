@@ -43,6 +43,8 @@ class MidiImporterTest {
         assertEquals(listOf(ScoreTimeSignature()), result.snapshot.timeSignatures)
         val importedTrack = result.snapshot.tracks.single()
         assertEquals("Piano", importedTrack.name)
+        assertEquals(0f, importedTrack.cursorBeat, 0.0001f)
+        assertEquals(0f, result.snapshot.cursorBeat, 0.0001f)
         assertEquals(5, importedTrack.presetProgram)
         val first = importedTrack.notes[0]
         val second = importedTrack.notes[1]
@@ -76,6 +78,35 @@ class MidiImporterTest {
         assertTrue(result.warnings.any { it.contains("quantized") })
         assertEquals(NoteDuration.EIGHTH, result.snapshot.tracks[1].notes.single().duration)
         assertTrue(result.snapshot.tracks.all { it.name.contains("Ch") })
+    }
+
+    @Test
+    fun combinesSourceGroupsSharingChannelsInsteadOfDroppingNotes() {
+        val noteTracks = (0 until 17).map { index ->
+            val channel = if (index < 16) index else 9
+            val pitch = 48 + (index % 12)
+            track(
+                bytes(
+                    0x00, 0x90 or channel, pitch, 90,
+                ) + varLen(120) + bytes(
+                    0x80 or channel, pitch, 0,
+                    0x00, 0xFF, 0x2F, 0x00,
+                )
+            )
+        }
+        val midi = midiFile(ticksPerQuarter = 480, tracks = noteTracks)
+
+        val result = MidiImporter.import(midi)
+
+        assertEquals(16, result.importedTrackCount)
+        assertEquals(17, result.importedNoteCount)
+        assertTrue(result.warnings.any { it.contains("combined so no note tracks were dropped") })
+        assertFalse(result.warnings.any { it.contains("Only the first") })
+        val percussion = result.snapshot.tracks[9]
+        assertEquals(128, percussion.presetBank)
+        assertEquals(0, percussion.presetProgram)
+        assertEquals(2, percussion.notes.size)
+        assertTrue(result.snapshot.tracks.all { it.cursorBeat == 0f })
     }
 
     @Test

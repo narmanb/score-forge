@@ -37,6 +37,7 @@ import kotlin.concurrent.thread
 @Composable
 fun SoundFontControls(
     engine: SoundFontEngine?,
+    playbackActive: Boolean = false,
     requestedPresetBank: Int? = null,
     requestedPresetProgram: Int? = null,
     onSoundFontLoaded: (ImportedSoundFont, SoundFontPreset?) -> Unit = { _, _ -> },
@@ -217,23 +218,28 @@ fun SoundFontControls(
         presets,
         requestedPresetBank,
         requestedPresetProgram,
+        playbackActive,
     ) {
         if (engine == null || presets.isEmpty()) return@LaunchedEffect
         val bank = requestedPresetBank ?: return@LaunchedEffect
         val program = requestedPresetProgram ?: return@LaunchedEffect
         val requestedIndex = presets.indexOfFirst { it.bank == bank && it.program == program }
-        if (requestedIndex < 0 || requestedIndex == presetIndex) return@LaunchedEffect
+        if (requestedIndex < 0) return@LaunchedEffect
 
-        if (engine.selectPresetAt(requestedIndex)) {
-            presetIndex = requestedIndex
-            presetMenuExpanded = false
-            val selected = presets[requestedIndex]
-            currentSoundFont?.let {
-                SoundFontRepository.saveActiveSelection(context, it, selected)
-            }
-            LiveInstrumentBus.selectPreset(selected)
-            status = "${presets.size} instruments ready"
+        // The playback engine and editor share this SoundFontEngine. During score playback,
+        // changing the selected track may update the live keyboard/preset display, but must not
+        // reprogram a channel underneath the streaming song. When playback ends this effect runs
+        // again and synchronizes the engine to the selected track.
+        if (!playbackActive && !engine.selectPresetAt(requestedIndex)) return@LaunchedEffect
+
+        presetIndex = requestedIndex
+        presetMenuExpanded = false
+        val selected = presets[requestedIndex]
+        currentSoundFont?.let {
+            SoundFontRepository.saveActiveSelection(context, it, selected)
         }
+        LiveInstrumentBus.selectPreset(selected)
+        status = "${presets.size} instruments ready"
     }
 
     val launcher = rememberLauncherForActivityResult(

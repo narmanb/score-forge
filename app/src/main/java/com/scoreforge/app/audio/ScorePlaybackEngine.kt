@@ -276,26 +276,27 @@ class ScorePlaybackEngine {
             return
         }
         val secondsPerBeat = 60f / bpm.coerceIn(30, 300)
-        val events = buildStreamingMidiEvents(
-            tracks = playableTracks,
-            startBeat = startBeat,
-            throughBeat = throughBeat,
-            secondsPerBeat = secondsPerBeat,
-        )
-        val clicks = if (metronomeEnabled) {
-            buildStreamingClicks(
-                timeSignatures = timeSignatures,
-                startBeat = startBeat,
-                throughBeat = throughBeat,
-                secondsPerBeat = secondsPerBeat,
-            )
-        } else {
-            emptyList()
-        }
 
         thread(name = "ScoreForgePlaybackStream", isDaemon = true) {
             var streamTrack: AudioTrack? = null
             try {
+                if (myGeneration != generation) return@thread
+                val events = buildStreamingMidiEvents(
+                    tracks = playableTracks,
+                    startBeat = startBeat,
+                    throughBeat = throughBeat,
+                    secondsPerBeat = secondsPerBeat,
+                )
+                val clicks = if (metronomeEnabled) {
+                    buildStreamingClicks(
+                        timeSignatures = timeSignatures,
+                        startBeat = startBeat,
+                        throughBeat = throughBeat,
+                        secondsPerBeat = secondsPerBeat,
+                    )
+                } else {
+                    emptyList()
+                }
                 if (myGeneration != generation) return@thread
                 if (!soundFont.prepareStreamingTracks(playableTracks)) {
                     if (myGeneration == generation) {

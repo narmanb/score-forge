@@ -84,6 +84,12 @@ object MidiImporter {
         val warnings: MutableList<String>,
     )
 
+    private data class ImportGroup(
+        val sourceTracks: List<Int>,
+        val channel: Int,
+        val notes: List<RawNote>,
+    )
+
     fun import(bytes: ByteArray, projectName: String = "Imported MIDI"): MidiImportResult {
         require(bytes.isNotEmpty()) { "The selected MIDI file is empty." }
         require(bytes.size <= MAX_BYTES) { "This MIDI file is larger than the current 16 MB import limit." }
@@ -102,20 +108,77 @@ object MidiImporter {
             ticksPerQuarter = parsed.ticksPerQuarter,
             warnings = warnings,
         )
-        val grouped = parsed.notes.groupBy { it.sourceTrack to it.channel }
+        val sourceGroups = parsed.notes
+            .groupBy { it.sourceTrack to it.channel }
             .entries
             .sortedWith(compareBy({ it.key.first }, { it.key.second }))
+            .map { (key, rawNotes) ->
+                ImportGroup(
+                    sourceTracks = listOf(key.first),
+                    channel = key.second,
+                    notes = rawNotes,
+                )
+            }
 
-        if (grouped.size > ScoreTracks.MAX_TRACKS) {
-            warnings += "Only the first ${ScoreTracks.MAX_TRACKS} MIDI track/channel groups were imported."
+        val grouped = if (sourceGroups.size <= ScoreTracks.MAX_TRACKS) {
+            sourceGroups
+        } else {
+            val byChannel = parsed.notes
+                .groupBy { it.channel }
+                .entries
+                .sortedBy { it.key }
+                .map { (channel, rawNotes) ->
+                    ImportGroup(
+                        sourceTracks = rawNotes.map { it.sourceTrack }.distinct().sorted(),
+                        channel = channel,
+                        notes = rawNotes,
+                    )
+                }
+            warnings +=
+                "${sourceGroups.size} MIDI track/channel groups shared ${byChannel.size} MIDI channels; " +
+                    "groups on the same channel were combined so no note tracks were dropped."
+            byChannel
+        }
+
+        val sourceTrackGroupCounts = sourceGroups
+            .flatMap { it.sourceTracks }
+            .groupingBy { it }
+            .eachCount()
+
+        fun stateFor(group: ImportGroup): TrackChannelState {
+            val candidates = group.sourceTracks
+                .mapNotNull { parsed.states[it to group.channel] }
+            if (candidates.isEmpty()) return TrackChannelState()
+
+            val programs = candidates.mapNotNull { it.program }.distinct()
+            val banks = candidates.map { it.bankMsb to it.bankLsb }.distinct()
+            if (programs.size > 1) {
+                warnings +=
+                    "MIDI channel ${group.channel + 1} used multiple programs across source tracks; " +
+                        "program ${programs.first() + 1} was used."
+            }
+            if (banks.size > 1) {
+                warnings +=
+                    "MIDI channel ${group.channel + 1} used multiple bank selections across source tracks; " +
+                        "the first bank was used."
+            }
+
+            val bank = banks.firstOrNull() ?: (0 to 0)
+            return TrackChannelState(
+                bankMsb = bank.first,
+                bankLsb = bank.second,
+                program = programs.firstOrNull(),
+                volume = candidates.mapNotNull { it.volume }.firstOrNull(),
+                pan = candidates.mapNotNull { it.pan }.firstOrNull(),
+            )
         }
 
         var quantizedCount = 0
-        val tracks = grouped.take(ScoreTracks.MAX_TRACKS).mapIndexedNotNull { index, (key, rawNotes) ->
-            val sourceTrack = key.first
-            val channel = key.second
-            val state = parsed.states[key] ?: TrackChannelState()
-            val events = rawNotes
+        val tracks = grouped.take(ScoreTracks.MAX_TRACKS).mapIndexedNotNull { index, group ->
+            val sourceTrack = group.sourceTracks.first()
+            val channel = group.channel
+            val state = stateFor(group)
+            val events = group.notes
                 .sortedWith(compareBy<RawNote> { it.startTick }.thenBy { it.pitch }.thenBy { it.endTick })
                 .map { raw ->
                     val rawStart = raw.startTick.toFloat() / parsed.ticksPerQuarter.toFloat()
@@ -136,20 +199,40 @@ object MidiImporter {
                 }
 
             if (events.isEmpty()) return@mapIndexedNotNull null
-            val sourceName = parsed.sourceTrackNames[sourceTrack].orEmpty().trim()
-            val channelSuffix = if (grouped.count { it.key.first == sourceTrack } > 1) " Ch ${channel + 1}" else ""
-            val trackName = (sourceName.ifBlank { "MIDI Track ${sourceTrack + 1}" } + channelSuffix)
+            val sourceNames = group.sourceTracks
+                .mapNotNull { parsed.sourceTrackNames[it]?.trim()?.takeIf(String::isNotBlank) }
+                .distinct()
+            val baseName = when {
+                channel == 9 && group.sourceTracks.size > 1 -> "Drums"
+                sourceNames.size == 1 -> sourceNames.single()
+                sourceNames.size in 2..3 -> sourceNames.joinToString(" + ")
+                sourceNames.isNotEmpty() -> "MIDI Ch ${channel + 1} (${sourceNames.size} tracks)"
+                group.sourceTracks.size == 1 -> "MIDI Track ${sourceTrack + 1}"
+                else -> "MIDI Ch ${channel + 1}"
+            }
+            val channelSuffix = if (
+                group.sourceTracks.size == 1 &&
+                (sourceTrackGroupCounts[sourceTrack] ?: 0) > 1
+            ) {
+                " Ch ${channel + 1}"
+            } else {
+                ""
+            }
+            val trackName = (baseName + channelSuffix)
                 .replace('\t', ' ')
                 .replace('\n', ' ')
                 .take(80)
-            val bank = ((state.bankMsb and 0x7F) shl 7) or (state.bankLsb and 0x7F)
+
+            val explicitBank = ((state.bankMsb and 0x7F) shl 7) or (state.bankLsb and 0x7F)
+            val bank = if (channel == 9 && explicitBank == 0) 128 else explicitBank
+            val program = state.program ?: if (channel == 9) 0 else null
             ScoreTrack(
                 id = index + 1,
                 name = trackName,
                 events = events,
-                cursorBeat = ScoreTimeline.endBeat(events),
-                presetBank = if (state.program != null || bank != 0) bank else null,
-                presetProgram = state.program,
+                cursorBeat = 0f,
+                presetBank = if (program != null || bank != 0) bank else null,
+                presetProgram = program,
                 volume = state.volume ?: ScoreTrack.DEFAULT_VOLUME,
                 pan = state.pan?.let { (it - 64).coerceIn(ScoreTrack.MIN_PAN, ScoreTrack.MAX_PAN) }
                     ?: ScoreTrack.CENTER_PAN,
