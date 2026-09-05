@@ -303,7 +303,9 @@ fun ScoreForgeComposerScreen(
         val startedAt = liveRecordingStartedAtMs ?: run {
             liveHeldInputs.clear()
             LiveInstrumentBus.allNotesOff()
-            ScoreTransportBus.stop()
+            // A normal score may now legitimately own the shared transport in the background.
+            // Only repair/stop it here when score playback is not the owner.
+            if (!isPlaying) ScoreTransportBus.stop()
             return
         }
         val now = SystemClock.elapsedRealtime()
@@ -506,7 +508,14 @@ fun ScoreForgeComposerScreen(
 
     fun applyProjectSnapshot(snapshot: ScoreProjectSnapshot, clearHistory: Boolean) {
         cancelNaturalEntryGroup()
-        cancelLiveRecording()
+        // Draft restoration also runs after Activity recreation. Do not stop a legitimate score
+        // that is owned by the foreground playback service merely because local Live state is empty.
+        if (liveRecordingStartedAtMs != null) {
+            cancelLiveRecording()
+        } else {
+            liveHeldInputs.clear()
+            LiveInstrumentBus.allNotesOff()
+        }
         val restoredTracks = snapshot.effectiveTracks()
         tracks.clear()
         tracks.addAll(restoredTracks)

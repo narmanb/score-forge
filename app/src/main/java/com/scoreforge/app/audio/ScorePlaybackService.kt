@@ -58,8 +58,7 @@ class ScorePlaybackService : Service() {
                 }
             }
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK,
-            -> {
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
                 if (ScoreTransportBus.state.value.isPlaying) {
                     resumeAfterTransientFocusLoss = true
                     pausePlayback(abandonFocus = false)
