@@ -62,6 +62,8 @@ import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreProjectRepository
 import com.scoreforge.app.music.ScoreProjectSnapshot
 import com.scoreforge.app.music.ScoreRest
+import com.scoreforge.app.music.ScoreTempoChange
+import com.scoreforge.app.music.ScoreTempos
 import com.scoreforge.app.music.ScoreTimeSignatures
 import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
@@ -127,6 +129,7 @@ fun ScoreForgeComposerScreen(
     var selectedDotted by rememberSaveable { mutableStateOf(false) }
     var selectedArticulation by rememberSaveable { mutableStateOf(NoteArticulation.NORMAL) }
     var bpm by rememberSaveable { mutableIntStateOf(120) }
+    var tempoChanges by remember { mutableStateOf(listOf(ScoreTempos.DEFAULT)) }
     var comfortTempoCapturing by rememberSaveable { mutableStateOf(false) }
     var comfortTempoAttackTimes by remember { mutableStateOf(emptyList<Long>()) }
     var comfortTempoEstimate by rememberSaveable { mutableStateOf<Int?>(null) }
@@ -170,6 +173,7 @@ fun ScoreForgeComposerScreen(
             ScoreTies.hasValidTie(activeEvents, selectedEventIndex)
     val canTieSelected = ScoreTies.canToggle(activeEvents, selectedEventIndex)
     val liveRecordingActive = liveRecordingStartedAtMs != null
+    val activeTempoBpm = ScoreTempos.atBeat(tempoChanges, activeCursorBeat).bpm
 
     fun syncHistoryButtons() {
         canUndo = editHistory.canUndo
@@ -179,6 +183,19 @@ fun ScoreForgeComposerScreen(
     fun activeIndex(): Int = activeTrackIndex.coerceIn(0, tracks.lastIndex)
     fun currentTrack(): ScoreTrack = tracks[activeIndex()]
     fun selectedInputBeats(): Float = selectedDuration.effectiveBeats(selectedDotted)
+    fun tempoBpmAt(beat: Float): Int = ScoreTempos.atBeat(tempoChanges, beat).bpm
+
+    fun setTempoChange(startBeat: Float, newBpm: Int) {
+        if (isPlaying) stopPlayback()
+        tempoChanges = ScoreTempos.withChange(tempoChanges, startBeat, newBpm)
+        bpm = tempoChanges.first().bpm
+    }
+
+    fun removeTempoChange(startBeat: Float) {
+        if (isPlaying) stopPlayback()
+        tempoChanges = ScoreTempos.withoutChange(tempoChanges, startBeat)
+        bpm = tempoChanges.first().bpm
+    }
 
     fun cancelNaturalEntryGroup() {
         naturalHeldInputs.clear()
@@ -205,7 +222,8 @@ fun ScoreForgeComposerScreen(
         val current = frozenTracks[index]
         return ScoreProjectSnapshot(
             events = current.events,
-            bpm = bpm,
+            bpm = tempoChanges.first().bpm,
+            tempoChanges = tempoChanges,
             cursorBeat = current.cursorBeat,
             selectedDuration = selectedDuration,
             selectedDotted = selectedDotted,
@@ -311,7 +329,7 @@ fun ScoreForgeComposerScreen(
         if (liveRecordingStartedAtMs == null) {
             recordBeforeScoreEdit()
             liveRecordingStartBeat = ScoreTransportBus.state.value.beat.coerceAtLeast(0f)
-            liveRecordingBpm = bpm
+            liveRecordingBpm = tempoBpmAt(liveRecordingStartBeat)
             liveRecordingStartedAtMs = now
             ScoreTransportBus.begin(liveRecordingStartBeat, Float.MAX_VALUE)
         }
@@ -393,8 +411,9 @@ fun ScoreForgeComposerScreen(
             )
             else -> currentTrack().cursorBeat
         }
+        val groupBpm = if (joinsCurrentChord) activeGroup!!.bpm else tempoBpmAt(startBeat)
         val initialWritten = if (joinsCurrentChord) activeGroup!!.currentWritten
-        else HoldDurationTiming.writtenForHoldMs(0L, bpm, holdDurationMode)
+        else HoldDurationTiming.writtenForHoldMs(0L, groupBpm, holdDurationMode)
 
         if (!joinsCurrentChord) recordBeforeScoreEdit()
 
@@ -418,7 +437,7 @@ fun ScoreForgeComposerScreen(
             HoldOnsetGroup(
                 onsetMs = now,
                 startBeat = startBeat,
-                bpm = bpm,
+                bpm = groupBpm,
                 eventIndices = listOf(eventIndex),
                 currentWritten = initialWritten,
             )
@@ -474,7 +493,8 @@ fun ScoreForgeComposerScreen(
         activeTrackIndex = snapshot.effectiveActiveTrackIndex()
         selectedEventIndex = -1
         projectName = snapshot.safeProjectName()
-        bpm = snapshot.bpm.coerceIn(30, 300)
+        tempoChanges = snapshot.effectiveTempoChanges()
+        bpm = tempoChanges.first().bpm
         selectedDuration = snapshot.selectedDuration
         selectedDotted = snapshot.selectedDotted
         selectedArticulation = snapshot.selectedArticulation
@@ -508,6 +528,7 @@ fun ScoreForgeComposerScreen(
         activeTrackIndex,
         projectName,
         bpm,
+        tempoChanges,
         timeSignatures,
         keySignatures,
         metronomeEnabled,
@@ -653,7 +674,10 @@ fun ScoreForgeComposerScreen(
 
     fun applyComfortTempoEstimate() {
         val estimate = comfortTempoEstimate ?: return
-        bpm = estimate.coerceIn(ComfortTempo.MIN_BPM, ComfortTempo.MAX_BPM)
+        setTempoChange(
+            ScoreTimeline.quantizeBeat(currentTrack().cursorBeat),
+            estimate.coerceIn(ComfortTempo.MIN_BPM, ComfortTempo.MAX_BPM),
+        )
         comfortTempoEstimate = null
         comfortTempoAttackTimes = emptyList()
     }
@@ -829,7 +853,8 @@ fun ScoreForgeComposerScreen(
         isPlaying = true
         playback.playTracks(
             tracks = tracks,
-            bpm = bpm,
+            bpm = tempoChanges.first().bpm,
+            tempoChanges = tempoChanges,
             throughBeat = ScoreTracks.endBeat(tracks),
             metronomeEnabled = metronomeEnabled,
             timeSignatures = timeSignatures,
@@ -928,7 +953,7 @@ fun ScoreForgeComposerScreen(
             NaturalOnsetGroup(
                 onsetMs = now,
                 startBeat = groupStartBeat,
-                bpm = bpm,
+                bpm = tempoBpmAt(groupStartBeat),
                 eventIndices = listOf(newEventIndex),
             )
         }
@@ -1182,7 +1207,7 @@ fun ScoreForgeComposerScreen(
                         keySignatures,
                         activeCursorBeat,
                     ).displayName,
-                    bpm = bpm,
+                    bpm = activeTempoBpm,
                     cursorBeat = activeCursorBeat,
                     isPlaying = isPlaying,
                     canPlay = playableNoteCount > 0 && !liveRecordingActive && !comfortTempoCapturing,
@@ -1191,8 +1216,18 @@ fun ScoreForgeComposerScreen(
                         if (isPlaying) stopPlayback()
                         metronomeEnabled = !metronomeEnabled
                     },
-                    onTempoDown = { bpm = (bpm - 5).coerceAtLeast(30) },
-                    onTempoUp = { bpm = (bpm + 5).coerceAtMost(300) },
+                    onTempoDown = {
+                        setTempoChange(
+                            ScoreTimeline.quantizeBeat(activeCursorBeat),
+                            (activeTempoBpm - 5).coerceAtLeast(ScoreTempos.MIN_BPM),
+                        )
+                    },
+                    onTempoUp = {
+                        setTempoChange(
+                            ScoreTimeline.quantizeBeat(activeCursorBeat),
+                            (activeTempoBpm + 5).coerceAtMost(ScoreTempos.MAX_BPM),
+                        )
+                    },
                     onPlay = ::startPlayback,
                     onStop = ::stopPlayback,
                 )
@@ -1216,6 +1251,13 @@ fun ScoreForgeComposerScreen(
                     onClearTrack = ::clearActiveTrack,
                     onRenameProject = ::renameProject,
                     onOpenProject = ::openProject,
+                )
+
+                TempoControls(
+                    tempoChanges = tempoChanges,
+                    cursorBeat = activeCursorBeat,
+                    onSetTempo = ::setTempoChange,
+                    onRemoveTempo = ::removeTempoChange,
                 )
 
                 TimeSignatureControls(
