@@ -14,6 +14,7 @@ import java.io.File
 data class ScoreProjectSnapshot(
     val events: List<ScoreEvent>,
     val bpm: Int = 120,
+    val tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempoChange(0f, bpm)),
     val cursorBeat: Float = ScoreTimeline.endBeat(events),
     val selectedDuration: NoteDuration = NoteDuration.QUARTER,
     val selectedDotted: Boolean = false,
@@ -54,6 +55,9 @@ data class ScoreProjectSnapshot(
     fun effectiveActiveTrackIndex(): Int =
         activeTrackIndex.coerceIn(0, effectiveTracks().lastIndex)
 
+    fun effectiveTempoChanges(): List<ScoreTempoChange> =
+        ScoreTempos.normalize(tempoChanges.ifEmpty { listOf(ScoreTempoChange(0f, bpm)) })
+
     fun effectiveTimeSignatures(): List<ScoreTimeSignature> =
         ScoreTimeSignatures.normalize(timeSignatures)
 
@@ -87,7 +91,12 @@ object ScoreProjectCodec {
 
         append(MAGIC).append('\t').append(VERSION).append('\n')
         append("PROJECT_NAME\t").append(snapshot.safeProjectName()).append('\n')
-        append("BPM\t").append(snapshot.bpm.coerceIn(30, 300)).append('\n')
+        append("BPM\t").append(snapshot.effectiveTempoChanges().first().bpm).append('\n')
+        snapshot.effectiveTempoChanges().forEach { tempo ->
+            append("TEMPO_CHANGE\t")
+                .append(tempo.startBeat).append('\t')
+                .append(tempo.bpm).append('\n')
+        }
         append("METRONOME\t").append(if (snapshot.metronomeEnabled) 1 else 0).append('\n')
         snapshot.effectiveTimeSignatures().forEach { signature ->
             append("TIME_SIGNATURE\t")
@@ -162,6 +171,7 @@ object ScoreProjectCodec {
     private fun decodeV2(lines: List<String>): ScoreProjectSnapshot {
         var projectName = "Untitled"
         var bpm = 120
+        val tempoChanges = mutableListOf<ScoreTempoChange>()
         var metronomeEnabled = false
         var selectedDuration = NoteDuration.QUARTER
         var selectedDotted = false
@@ -185,6 +195,7 @@ object ScoreProjectCodec {
             when (parts.firstOrNull()) {
                 "PROJECT_NAME" -> projectName = cleanProjectName(parts.getOrNull(1).orEmpty())
                 "BPM" -> parts.getOrNull(1)?.toIntOrNull()?.let { bpm = it.coerceIn(30, 300) }
+                "TEMPO_CHANGE" -> decodeTempoChange(parts)?.let(tempoChanges::add)
                 "METRONOME" -> metronomeEnabled = parts.getOrNull(1) == "1"
                 "TIME_SIGNATURE" -> decodeTimeSignature(parts)?.let(timeSignatures::add)
                 "KEY_SIGNATURE" -> decodeKeySignature(parts)?.let(keySignatures::add)
@@ -217,7 +228,8 @@ object ScoreProjectCodec {
 
         return ScoreProjectSnapshot(
             events = active.events,
-            bpm = bpm,
+            bpm = ScoreTempos.normalize(tempoChanges.ifEmpty { listOf(ScoreTempoChange(0f, bpm)) }).first().bpm,
+            tempoChanges = ScoreTempos.normalize(tempoChanges.ifEmpty { listOf(ScoreTempoChange(0f, bpm)) }),
             cursorBeat = active.cursorBeat,
             selectedDuration = selectedDuration,
             selectedDotted = selectedDotted,
@@ -296,6 +308,13 @@ object ScoreProjectCodec {
             ScoreClefMode.entries.firstOrNull { it.name == stored }
         } ?: ScoreClefMode.AUTO
         return TrackBuilder(id, name, cursorBeat, bank, program, muted, solo, volume, pan, clefMode)
+    }
+
+    private fun decodeTempoChange(parts: List<String>): ScoreTempoChange? {
+        if (parts.size < 3) return null
+        val startBeat = parts[1].toFloatOrNull()?.takeIf { it >= 0f } ?: return null
+        val bpm = parts[2].toIntOrNull()?.takeIf { it in ScoreTempos.MIN_BPM..ScoreTempos.MAX_BPM } ?: return null
+        return ScoreTempoChange(startBeat, bpm).normalized()
     }
 
     private fun decodeTimeSignature(parts: List<String>): ScoreTimeSignature? {

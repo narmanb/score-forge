@@ -13,6 +13,8 @@ import com.scoreforge.app.music.ScoreTimeSignature
 import com.scoreforge.app.music.ScoreTimeSignatures
 import com.scoreforge.app.music.ScoreArticulations
 import com.scoreforge.app.music.ScoreNote
+import com.scoreforge.app.music.ScoreTempoChange
+import com.scoreforge.app.music.ScoreTempos
 import com.scoreforge.app.music.ScoreTies
 import com.scoreforge.app.music.ScoreTimeline
 import com.scoreforge.app.music.ScoreTrack
@@ -68,6 +70,7 @@ class ScorePlaybackEngine {
     fun playScore(
         notes: List<ScoreNote>,
         bpm: Int,
+        tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempoChange(0f, bpm)),
         throughBeat: Float = ScoreTimeline.endBeat(notes),
         metronomeEnabled: Boolean = false,
         timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
@@ -82,6 +85,7 @@ class ScorePlaybackEngine {
         playTracks(
             tracks = listOf(compatibilityTrack),
             bpm = bpm,
+            tempoChanges = tempoChanges,
             throughBeat = throughBeat,
             metronomeEnabled = metronomeEnabled,
             timeSignatures = timeSignatures,
@@ -92,6 +96,7 @@ class ScorePlaybackEngine {
     fun playTracks(
         tracks: List<ScoreTrack>,
         bpm: Int,
+        tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempoChange(0f, bpm)),
         throughBeat: Float = ScoreTracks.endBeat(tracks),
         metronomeEnabled: Boolean = false,
         timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
@@ -108,7 +113,9 @@ class ScorePlaybackEngine {
 
         stop()
         val myGeneration = ++generation
-        val safeBpm = bpm.coerceIn(30, 300)
+        val safeTempos = ScoreTempos.normalize(tempoChanges.ifEmpty { listOf(ScoreTempoChange(0f, bpm)) })
+        val safeBpm = safeTempos.first().bpm
+        val hasTempoChanges = safeTempos.size > 1
         val safeThroughBeat = maxOf(
             playableTracks.maxOfOrNull { ScoreTimeline.endBeat(it.events) } ?: 0f,
             throughBeat.coerceAtLeast(0f),
@@ -118,15 +125,16 @@ class ScorePlaybackEngine {
 
         if (
             soundFontEngine?.hasSoundFont == true &&
-            PlaybackStreamingPolicy.shouldStream(
+            (hasTempoChanges || PlaybackStreamingPolicy.shouldStream(
                 throughBeat = safeThroughBeat - startBeat,
                 bpm = safeBpm,
                 noteCount = notes.size,
-            )
+            ))
         ) {
             playStreamingSoundFontTracks(
                 playableTracks = playableTracks,
                 bpm = safeBpm,
+                tempoChanges = safeTempos,
                 startBeat = startBeat,
                 throughBeat = safeThroughBeat,
                 metronomeEnabled = metronomeEnabled,
@@ -138,11 +146,11 @@ class ScorePlaybackEngine {
         }
 
         thread(name = "ScoreForgePlayback", isDaemon = true) {
-            var rendered = renderBestAvailableTracks(playableTracks, safeBpm, safeThroughBeat)
+            var rendered = renderBestAvailableTracks(playableTracks, safeBpm, safeThroughBeat, safeTempos)
             if (metronomeEnabled && rendered.pcm.isNotEmpty()) {
                 rendered = mixMetronome(
                     rendered = rendered,
-                    bpm = safeBpm,
+                    tempoChanges = safeTempos,
                     throughBeat = safeThroughBeat,
                     timeSignatures = timeSignatures,
                 )
@@ -162,8 +170,8 @@ class ScorePlaybackEngine {
             track.write(rendered.pcm, 0, rendered.pcm.size)
 
             val totalFrames = rendered.pcm.size / rendered.channels.coerceAtLeast(1)
-            val secondsPerBeat = 60.0 / safeBpm
-            val requestedStartFrame = (startBeat * secondsPerBeat * sampleRate).toInt()
+            val startSeconds = ScoreTempos.secondsAtBeat(safeTempos, startBeat)
+            val requestedStartFrame = (startSeconds * sampleRate).toInt()
             val startFrame = requestedStartFrame.coerceIn(0, (totalFrames - 1).coerceAtLeast(0))
             if (startFrame > 0) {
                 try {
@@ -183,7 +191,8 @@ class ScorePlaybackEngine {
                 while (myGeneration == generation) {
                     val elapsedMs = SystemClock.elapsedRealtime() - startedAt
                     if (elapsedMs >= durationMs) break
-                    val beat = startBeat + (elapsedMs / 1000.0 / secondsPerBeat).toFloat()
+                    val absoluteSeconds = startSeconds + elapsedMs / 1000.0
+                    val beat = ScoreTempos.beatAtSeconds(safeTempos, absoluteSeconds)
                     ScoreTransportBus.progress(beat.coerceAtMost(safeThroughBeat))
                     Thread.sleep(16L)
                 }
@@ -242,9 +251,10 @@ class ScorePlaybackEngine {
         tracks: List<ScoreTrack>,
         bpm: Int,
         throughBeat: Float,
+        tempoChanges: List<ScoreTempoChange>,
     ): RenderedAudio {
         val soundFont = soundFontEngine
-        if (soundFont != null && soundFont.hasSoundFont) {
+        if (soundFont != null && soundFont.hasSoundFont && ScoreTempos.normalize(tempoChanges).size <= 1) {
             val pcm = soundFont.renderTracks(tracks, bpm, throughBeat = throughBeat)
             if (pcm.isNotEmpty()) return RenderedAudio(pcm, channels = 2)
         }
@@ -253,6 +263,7 @@ class ScorePlaybackEngine {
             pcm = renderFallbackTracks(
                 tracks = tracks,
                 bpm = bpm,
+                tempoChanges = tempoChanges,
                 throughBeat = throughBeat,
             ),
             channels = 2,
@@ -263,6 +274,7 @@ class ScorePlaybackEngine {
     private fun playStreamingSoundFontTracks(
         playableTracks: List<ScoreTrack>,
         bpm: Int,
+        tempoChanges: List<ScoreTempoChange>,
         startBeat: Float,
         throughBeat: Float,
         metronomeEnabled: Boolean,
@@ -275,7 +287,8 @@ class ScorePlaybackEngine {
             mainHandler.post(onFinished)
             return
         }
-        val secondsPerBeat = 60f / bpm.coerceIn(30, 300)
+        val safeTempos = ScoreTempos.normalize(tempoChanges)
+        val startSeconds = ScoreTempos.secondsAtBeat(safeTempos, startBeat)
 
         thread(name = "ScoreForgePlaybackStream", isDaemon = true) {
             var streamTrack: AudioTrack? = null
@@ -285,14 +298,14 @@ class ScorePlaybackEngine {
                     tracks = playableTracks,
                     startBeat = startBeat,
                     throughBeat = throughBeat,
-                    secondsPerBeat = secondsPerBeat,
+                    tempoChanges = safeTempos,
                 )
                 val clicks = if (metronomeEnabled) {
                     buildStreamingClicks(
                         timeSignatures = timeSignatures,
                         startBeat = startBeat,
                         throughBeat = throughBeat,
-                        secondsPerBeat = secondsPerBeat,
+                        tempoChanges = safeTempos,
                     )
                 } else {
                     emptyList()
@@ -313,7 +326,7 @@ class ScorePlaybackEngine {
                 track.play()
 
                 val scoreFrames = (
-                    ((throughBeat - startBeat).coerceAtLeast(0f) * secondsPerBeat * sampleRate)
+                    (ScoreTempos.durationSeconds(safeTempos, startBeat, throughBeat) * sampleRate)
                     ).toInt().coerceAtLeast(1)
                 val tailFrames = (sampleRate * STREAMING_TAIL_SECONDS).toInt().coerceAtLeast(1)
                 val totalFrames = scoreFrames + tailFrames
@@ -353,8 +366,10 @@ class ScorePlaybackEngine {
                     frameCursor += frames
 
                     val playedFrames = track.playbackHeadPosition.toLong().coerceAtLeast(0L)
-                    val beat = startBeat +
-                        (playedFrames.toDouble() / sampleRate.toDouble() / secondsPerBeat.toDouble()).toFloat()
+                    val beat = ScoreTempos.beatAtSeconds(
+                        safeTempos,
+                        startSeconds + playedFrames.toDouble() / sampleRate.toDouble(),
+                    )
                     ScoreTransportBus.progress(beat.coerceAtMost(throughBeat))
                 }
 
@@ -366,8 +381,10 @@ class ScorePlaybackEngine {
                         SystemClock.elapsedRealtime() < drainDeadline
                     ) {
                         val playedFrames = track.playbackHeadPosition.toLong().coerceAtLeast(0L)
-                        val beat = startBeat +
-                            (playedFrames.toDouble() / sampleRate.toDouble() / secondsPerBeat.toDouble()).toFloat()
+                        val beat = ScoreTempos.beatAtSeconds(
+                            safeTempos,
+                            startSeconds + playedFrames.toDouble() / sampleRate.toDouble(),
+                        )
                         ScoreTransportBus.progress(beat.coerceAtMost(throughBeat))
                         Thread.sleep(16L)
                     }
@@ -398,8 +415,9 @@ class ScorePlaybackEngine {
         tracks: List<ScoreTrack>,
         startBeat: Float,
         throughBeat: Float,
-        secondsPerBeat: Float,
+        tempoChanges: List<ScoreTempoChange>,
     ): List<StreamingMidiEvent> = buildList {
+        val startSeconds = ScoreTempos.secondsAtBeat(tempoChanges, startBeat)
         tracks.forEachIndexed trackLoop@{ channel, track ->
             val notes = track.notes
             notes.forEachIndexed noteLoop@{ index, note ->
@@ -414,10 +432,10 @@ class ScorePlaybackEngine {
                 val onBeat = maxOf(note.startBeat, startBeat)
                 val offBeat = minOf(playbackEndBeat, throughBeat)
                 val onFrame = (
-                    (onBeat - startBeat).coerceAtLeast(0f) * secondsPerBeat * sampleRate
+                    ((ScoreTempos.secondsAtBeat(tempoChanges, onBeat) - startSeconds) * sampleRate)
                     ).toInt().coerceAtLeast(0)
                 val offFrame = (
-                    (offBeat - startBeat).coerceAtLeast(0f) * secondsPerBeat * sampleRate
+                    ((ScoreTempos.secondsAtBeat(tempoChanges, offBeat) - startSeconds) * sampleRate)
                     ).toInt().coerceAtLeast(onFrame + 1)
                 add(
                     StreamingMidiEvent(
@@ -450,8 +468,10 @@ class ScorePlaybackEngine {
         timeSignatures: List<ScoreTimeSignature>,
         startBeat: Float,
         throughBeat: Float,
-        secondsPerBeat: Float,
-    ): List<StreamingClick> = ScoreMetronome.clicks(timeSignatures, throughBeat)
+        tempoChanges: List<ScoreTempoChange>,
+    ): List<StreamingClick> {
+        val startSeconds = ScoreTempos.secondsAtBeat(tempoChanges, startBeat)
+        return ScoreMetronome.clicks(timeSignatures, throughBeat)
         .asSequence()
         .filter { it.beat + 0.001f >= startBeat }
         .map { click ->
@@ -462,13 +482,14 @@ class ScorePlaybackEngine {
             }
             StreamingClick(
                 frame = (
-                    (click.beat - startBeat).coerceAtLeast(0f) * secondsPerBeat * sampleRate
+                    ((ScoreTempos.secondsAtBeat(tempoChanges, click.beat) - startSeconds) * sampleRate)
                     ).toInt(),
                 frequency = frequency,
                 gain = gain,
             )
         }
         .toList()
+    }
 
     private fun mixStreamingMetronome(
         pcm: ShortArray,
@@ -548,7 +569,7 @@ class ScorePlaybackEngine {
 
     private fun mixMetronome(
         rendered: RenderedAudio,
-        bpm: Int,
+        tempoChanges: List<ScoreTempoChange>,
         throughBeat: Float,
         timeSignatures: List<ScoreTimeSignature>,
     ): RenderedAudio {
@@ -557,11 +578,11 @@ class ScorePlaybackEngine {
         val mixed = rendered.pcm.copyOf()
         val channels = rendered.channels.coerceAtLeast(1)
         val totalFrames = mixed.size / channels
-        val secondsPerBeat = 60f / bpm.coerceIn(30, 300)
+        val safeTempos = ScoreTempos.normalize(tempoChanges)
         val clickFrames = (sampleRate * 0.032f).toInt().coerceAtLeast(1)
 
         ScoreMetronome.clicks(timeSignatures, throughBeat).forEach { click ->
-            val startFrame = (click.beat * secondsPerBeat * sampleRate).toInt()
+            val startFrame = (ScoreTempos.secondsAtBeat(safeTempos, click.beat) * sampleRate).toInt()
             val (frequency, gain) = when (click.accent) {
                 MetronomeAccent.DOWNBEAT -> 1_600.0 to 0.34f
                 MetronomeAccent.GROUP -> 1_250.0 to 0.26f
@@ -630,16 +651,17 @@ class ScorePlaybackEngine {
     private fun renderFallbackTracks(
         tracks: List<ScoreTrack>,
         bpm: Int,
+        tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempoChange(0f, bpm)),
         tailSeconds: Float = 0.35f,
         throughBeat: Float = ScoreTracks.endBeat(tracks),
     ): ShortArray {
         val audible = ScoreTracks.audibleTracks(tracks).filter { it.notes.isNotEmpty() }
         if (audible.isEmpty()) return ShortArray(0)
 
-        val secondsPerBeat = 60f / bpm.coerceIn(30, 300)
+        val safeTempos = ScoreTempos.normalize(tempoChanges)
         val notesEndBeat = audible.maxOfOrNull { ScoreTimeline.endBeat(it.notes) } ?: 0f
         val endBeat = maxOf(notesEndBeat, throughBeat.coerceAtLeast(0f))
-        val totalSeconds = endBeat * secondsPerBeat + tailSeconds
+        val totalSeconds = ScoreTempos.secondsAtBeat(safeTempos, endBeat).toFloat() + tailSeconds
         val totalFrames = (totalSeconds * sampleRate).toInt().coerceAtLeast(1)
         val left = FloatArray(totalFrames)
         val right = FloatArray(totalFrames)
@@ -661,8 +683,8 @@ class ScorePlaybackEngine {
                 }.takeIf { it > note.startBeat } ?: (note.startBeat + note.effectiveBeats)
                 renderFallbackNote(
                     note = note,
-                    durationBeats = end - note.startBeat,
-                    secondsPerBeat = secondsPerBeat,
+                    startSeconds = ScoreTempos.secondsAtBeat(safeTempos, note.startBeat).toFloat(),
+                    noteSeconds = ScoreTempos.durationSeconds(safeTempos, note.startBeat, end).toFloat(),
                     left = left,
                     right = right,
                     leftGain = leftGain,
@@ -685,16 +707,16 @@ class ScorePlaybackEngine {
 
     private fun renderFallbackNote(
         note: ScoreNote,
-        durationBeats: Float,
-        secondsPerBeat: Float,
+        startSeconds: Float,
+        noteSeconds: Float,
         left: FloatArray,
         right: FloatArray,
         leftGain: Float,
         rightGain: Float,
     ) {
-        val startSample = (note.startBeat * secondsPerBeat * sampleRate).toInt()
-        val noteSeconds = durationBeats.coerceAtLeast(0.001f) * secondsPerBeat
-        val noteSamples = (noteSeconds * sampleRate).toInt().coerceAtLeast(1)
+        val startSample = (startSeconds.coerceAtLeast(0f) * sampleRate).toInt()
+        val safeNoteSeconds = noteSeconds.coerceAtLeast(0.001f)
+        val noteSamples = (safeNoteSeconds * sampleRate).toInt().coerceAtLeast(1)
         val frequency = 440.0 * Math.pow(2.0, (note.midiPitch - 69) / 12.0)
         val velocityGain = ScoreArticulations.playbackVelocity(note) / 127f
 

@@ -97,7 +97,12 @@ object MidiImporter {
         require(parsed.notes.isNotEmpty()) { "No playable note events were found in this MIDI file." }
 
         val warnings = parsed.warnings.toMutableList()
-        val bpm = resolveBpm(parsed.tempoEvents, warnings)
+        val tempoChanges = resolveTempos(
+            events = parsed.tempoEvents,
+            ticksPerQuarter = parsed.ticksPerQuarter,
+            warnings = warnings,
+        )
+        val bpm = tempoChanges.first().bpm
         val timeSignatures = resolveTimeSignatures(
             events = parsed.timeSignatureEvents,
             ticksPerQuarter = parsed.ticksPerQuarter,
@@ -249,6 +254,7 @@ object MidiImporter {
         val snapshot = ScoreProjectSnapshot(
             events = first.events,
             bpm = bpm,
+            tempoChanges = tempoChanges,
             cursorBeat = first.cursorBeat,
             selectedDuration = NoteDuration.QUARTER,
             selectedDotted = false,
@@ -291,15 +297,32 @@ object MidiImporter {
         writtenDurations.minByOrNull { abs(it.beats - beats.coerceAtLeast(0.01f)) }
             ?: WrittenDuration(NoteDuration.SIXTEENTH, false, 0.25f)
 
-    private fun resolveBpm(tempoEvents: List<TempoEvent>, warnings: MutableList<String>): Int {
-        if (tempoEvents.isEmpty()) return DEFAULT_BPM
-        val ordered = tempoEvents.sortedBy { it.tick }
-        val first = ordered.first().microsecondsPerQuarter.coerceAtLeast(1)
-        val bpm = (60_000_000.0 / first.toDouble()).roundToInt().coerceIn(30, 300)
-        if (ordered.map { it.microsecondsPerQuarter }.distinct().size > 1) {
-            warnings += "Tempo changes are not editable yet; the first MIDI tempo ($bpm BPM) was used for the project."
-        }
-        return bpm
+    private fun resolveTempos(
+        events: List<TempoEvent>,
+        ticksPerQuarter: Int,
+        warnings: MutableList<String>,
+    ): List<ScoreTempoChange> {
+        if (events.isEmpty()) return listOf(ScoreTempoChange(0f, DEFAULT_BPM))
+
+        val resolved = mutableListOf<ScoreTempoChange>()
+        events.sortedBy { it.tick }
+            .groupBy { it.tick }
+            .forEach { (tick, atTick) ->
+                val distinct = atTick.map { it.microsecondsPerQuarter }.distinct()
+                val chosen = atTick.last().microsecondsPerQuarter.coerceAtLeast(1)
+                val bpm = (60_000_000.0 / chosen.toDouble())
+                    .roundToInt()
+                    .coerceIn(ScoreTempos.MIN_BPM, ScoreTempos.MAX_BPM)
+                if (distinct.size > 1) {
+                    val beat = tick.toFloat() / ticksPerQuarter.toFloat()
+                    warnings += "Conflicting MIDI tempos at beat ${formatBeat(beat)}; $bpm BPM was used."
+                }
+                resolved += ScoreTempoChange(
+                    startBeat = tick.toFloat() / ticksPerQuarter.toFloat(),
+                    bpm = bpm,
+                )
+            }
+        return ScoreTempos.normalize(resolved)
     }
 
     private fun resolveTimeSignatures(
