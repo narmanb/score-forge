@@ -8,7 +8,7 @@ import androidx.activity.result.contract.ActivityResultContract
 
 /**
  * ACTION_OPEN_DOCUMENT contract that puts the requested MIME type directly in Intent.type.
- * AndroidX OpenDocument uses */* as the base type and sends requested types through
+ * AndroidX OpenDocument uses a wildcard MIME base type and sends requested types through
  * EXTRA_MIME_TYPES; some vendor pickers treat that extra loosely and leave unrelated files
  * selectable. Using the exact base type gives those pickers a strict filter to apply.
  */
