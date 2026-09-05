@@ -89,20 +89,23 @@ fun ProjectFileControls(
             status = "Opening…"
             val result = withContext(Dispatchers.IO) {
                 runCatching {
+                    val displayName = queryDisplayNameLocal(context, uri).orEmpty()
+                    require(displayName.endsWith(".sfp", ignoreCase = true)) {
+                        "Choose a Score Forge .sfp project file."
+                    }
                     val raw = context.contentResolver.openInputStream(uri).use { input ->
                         requireNotNull(input) { "Could not open the selected file." }
                         input.bufferedReader().use { it.readText() }
                     }
                     val decoded = requireNotNull(ScoreProjectCodec.decode(raw)) {
-                        "That file is not a supported Score Forge project."
+                        "That .sfp file is not a valid Score Forge project."
                     }
                     if (decoded.projectName == "Untitled") {
-                        val displayName = queryDisplayNameLocal(context, uri)
-                            ?.removeSuffix(".sfp")
-                            ?.trim()
-                            .orEmpty()
-                        if (displayName.isNotBlank()) {
-                            decoded.copy(projectName = ScoreProjectSnapshot.sanitizeProjectName(displayName))
+                        val projectNameFromFile = displayName
+                            .removeSuffix(".sfp")
+                            .trim()
+                        if (projectNameFromFile.isNotBlank()) {
+                            decoded.copy(projectName = ScoreProjectSnapshot.sanitizeProjectName(projectNameFromFile))
                         } else {
                             decoded
                         }
@@ -130,6 +133,12 @@ fun ProjectFileControls(
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val displayName = queryDisplayNameLocal(context, uri).orEmpty()
+                    require(
+                        displayName.endsWith(".mid", ignoreCase = true) ||
+                            displayName.endsWith(".midi", ignoreCase = true)
+                    ) {
+                        "Choose a MIDI .mid or .midi file."
+                    }
                     val projectNameFromFile = displayName
                         .replace(Regex("(?i)\\.(mid|midi)$"), "")
                         .trim()
@@ -244,14 +253,11 @@ fun ProjectFileControls(
         OutlinedButton(
             onClick = {
                 midiImportWarnings = emptyList()
-                midiImportLauncher.launch(
-                    arrayOf(
-                        "audio/midi",
-                        "audio/x-midi",
-                        "audio/sp-midi",
-                        "application/x-midi",
-                    )
-                )
+                // Passing multiple MIME types makes the stock OpenDocument contract use */* as
+                // its base type. Some Android/Samsung pickers ignore EXTRA_MIME_TYPES and then
+                // leave unrelated audio files (for example .sf2) selectable. Use the standard
+                // MIDI type as the exact picker filter and validate .mid/.midi again after pick.
+                midiImportLauncher.launch(arrayOf("audio/midi"))
             },
         ) {
             Text("Import MIDI")
