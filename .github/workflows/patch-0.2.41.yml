@@ -1,0 +1,155 @@
+name: Apply 0.2.41 hotfix patch
+
+on:
+  push:
+    branches:
+      - fix/audio-tempo-markers-0.2.41
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/audio-tempo-markers-0.2.41
+          fetch-depth: 0
+
+      - name: Apply audio and tempo-marker fixes
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"Expected snippet not found in {path}:\n{old[:240]}")
+              p.write_text(text.replace(old, new, 1))
+
+          # Version bump.
+          replace_once(
+              "app/build.gradle.kts",
+              '        versionCode = 43\n        versionName = "0.2.40"',
+              '        versionCode = 44\n        versionName = "0.2.41"',
+          )
+
+          # SoundFont offline renderer: make event timing follow the full tempo map.
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/audio/SoundFontEngine.kt",
+              'import com.scoreforge.app.music.ScoreNote\n',
+              'import com.scoreforge.app.music.ScoreNote\nimport com.scoreforge.app.music.ScoreTempoChange\nimport com.scoreforge.app.music.ScoreTempos\n',
+          )
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/audio/SoundFontEngine.kt",
+              '''    fun renderTracks(\n        tracks: List<ScoreTrack>,\n        bpm: Int,\n        tailSeconds: Float = 0.45f,\n        throughBeat: Float = ScoreTracks.endBeat(tracks),\n    ): ShortArray = synchronized(lock) {''',
+              '''    fun renderTracks(\n        tracks: List<ScoreTrack>,\n        bpm: Int,\n        tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempoChange(0f, bpm)),\n        tailSeconds: Float = 0.45f,\n        throughBeat: Float = ScoreTracks.endBeat(tracks),\n    ): ShortArray = synchronized(lock) {''',
+          )
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/audio/SoundFontEngine.kt",
+              '''        val pcm = renderMidiEventsLocked(\n            channelNotes = channelNotes,\n            bpm = bpm,\n            tailSeconds = tailSeconds,\n            throughBeat = maxOf(throughBeat, ScoreTracks.endBeat(tracks)),\n        )''',
+              '''        val pcm = renderMidiEventsLocked(\n            channelNotes = channelNotes,\n            bpm = bpm,\n            tempoChanges = tempoChanges,\n            tailSeconds = tailSeconds,\n            throughBeat = maxOf(throughBeat, ScoreTracks.endBeat(tracks)),\n        )''',
+          )
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/audio/SoundFontEngine.kt",
+              '''    private fun renderMidiEventsLocked(\n        channelNotes: List<ChannelNotes>,\n        bpm: Int,\n        tailSeconds: Float,\n        throughBeat: Float,\n    ): ShortArray {\n        val safeBpm = bpm.coerceIn(30, 300)\n        val secondsPerBeat = 60f / safeBpm\n        val notesEndBeat = channelNotes.maxOfOrNull { ScoreTimeline.endBeat(it.notes) } ?: 0f\n        val scoreEndBeat = maxOf(notesEndBeat, throughBeat.coerceAtLeast(0f))\n        val totalFrames = (\n            (scoreEndBeat * secondsPerBeat + tailSeconds.coerceAtLeast(0f)) * sampleRate\n            ).toInt().coerceAtLeast(1)''',
+              '''    private fun renderMidiEventsLocked(\n        channelNotes: List<ChannelNotes>,\n        bpm: Int,\n        tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempoChange(0f, bpm)),\n        tailSeconds: Float,\n        throughBeat: Float,\n    ): ShortArray {\n        val safeBpm = bpm.coerceIn(ScoreTempos.MIN_BPM, ScoreTempos.MAX_BPM)\n        val safeTempos = ScoreTempos.normalize(\n            tempoChanges.ifEmpty { listOf(ScoreTempoChange(0f, safeBpm)) }\n        )\n        val notesEndBeat = channelNotes.maxOfOrNull { ScoreTimeline.endBeat(it.notes) } ?: 0f\n        val scoreEndBeat = maxOf(notesEndBeat, throughBeat.coerceAtLeast(0f))\n        val totalFrames = (\n            (ScoreTempos.secondsAtBeat(safeTempos, scoreEndBeat) +\n                tailSeconds.coerceAtLeast(0f).toDouble()) * sampleRate\n            ).toInt().coerceAtLeast(1)''',
+          )
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/audio/SoundFontEngine.kt",
+              '''                    val onFrame = (note.startBeat * secondsPerBeat * sampleRate).toInt().coerceAtLeast(0)''',
+              '''                    val onFrame = (\n                        ScoreTempos.secondsAtBeat(safeTempos, note.startBeat) * sampleRate\n                        ).toInt().coerceAtLeast(0)''',
+          )
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/audio/SoundFontEngine.kt",
+              '''                    val offFrame = (\n                        playbackEndBeat * secondsPerBeat * sampleRate\n                        ).toInt().coerceAtLeast(onFrame + 1)''',
+              '''                    val offFrame = (\n                        ScoreTempos.secondsAtBeat(safeTempos, playbackEndBeat) * sampleRate\n                        ).toInt().coerceAtLeast(onFrame + 1)''',
+          )
+
+          # Playback: variable-tempo scores use the proven offline FluidSynth renderer instead of
+          # the currently unreliable incremental streaming path. Constant-tempo long scores keep
+          # the existing bounded-memory streaming path.
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/audio/ScorePlaybackEngine.kt",
+              '''        if (\n            soundFontEngine?.hasSoundFont == true &&\n            (hasTempoChanges || PlaybackStreamingPolicy.shouldStream(\n                throughBeat = safeThroughBeat - startBeat,\n                bpm = safeBpm,\n                noteCount = notes.size,\n            ))\n        ) {''',
+              '''        if (\n            soundFontEngine?.hasSoundFont == true &&\n            !hasTempoChanges &&\n            PlaybackStreamingPolicy.shouldStream(\n                throughBeat = safeThroughBeat - startBeat,\n                bpm = safeBpm,\n                noteCount = notes.size,\n            )\n        ) {''',
+          )
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/audio/ScorePlaybackEngine.kt",
+              '''        if (soundFont != null && soundFont.hasSoundFont && ScoreTempos.normalize(tempoChanges).size <= 1) {\n            val pcm = soundFont.renderTracks(tracks, bpm, throughBeat = throughBeat)''',
+              '''        if (soundFont != null && soundFont.hasSoundFont) {\n            val pcm = soundFont.renderTracks(\n                tracks = tracks,\n                bpm = bpm,\n                tempoChanges = tempoChanges,\n                throughBeat = throughBeat,\n            )''',
+          )
+
+          # Live preview resilience: if the live AudioTrack worker dies, do not continue claiming
+          # that notes were successfully previewed; callers can fall back to the built-in preview.
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/audio/LiveSoundFontPlayer.kt",
+              '''    fun noteOn(midiPitch: Int, velocity: Int = 96): Boolean =\n        engine?.noteOn(midiPitch, velocity) == true\n\n    fun noteOff(midiPitch: Int): Boolean =\n        engine?.noteOff(midiPitch) == true''',
+              '''    fun noteOn(midiPitch: Int, velocity: Int = 96): Boolean {\n        val current = engine ?: return false\n        if (!isReady || renderThread?.isAlive != true) return false\n        return current.noteOn(midiPitch, velocity)\n    }\n\n    fun noteOff(midiPitch: Int): Boolean =\n        engine?.noteOff(midiPitch) == true''',
+          )
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/audio/LiveSoundFontPlayer.kt",
+              '''        val current = engine ?: return false\n        if (!current.noteOn(midiPitch, velocity)) return false''',
+              '''        val current = engine ?: return false\n        if (!isReady || renderThread?.isAlive != true) return false\n        if (!current.noteOn(midiPitch, velocity)) return false''',
+          )
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/audio/LiveSoundFontPlayer.kt",
+              '''        val worker = thread(name = "ScoreForgeLiveSoundFontAudio", isDaemon = true) {\n            while (running && engine === soundFont) {\n                val pcm = soundFont.renderStereo(framesPerBlock)\n                if (pcm.isEmpty()) break\n                val result = track.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)\n                if (result < 0) break\n            }\n        }''',
+              '''        val worker = thread(name = "ScoreForgeLiveSoundFontAudio", isDaemon = true) {\n            try {\n                while (running && engine === soundFont) {\n                    val pcm = soundFont.renderStereo(framesPerBlock)\n                    if (pcm.isEmpty()) break\n                    val result = track.write(pcm, 0, pcm.size, AudioTrack.WRITE_BLOCKING)\n                    if (result < 0) break\n                }\n            } finally {\n                if (engine === soundFont) running = false\n            }\n        }''',
+          )
+
+          # Standard tempo marks on the staff (quarter-note mark = BPM) so imported/manual tempo
+          # changes can be found again visually.
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/ui/ScoreStaffEditor.kt",
+              'import com.scoreforge.app.music.ScoreRest\n',
+              'import com.scoreforge.app.music.ScoreRest\nimport com.scoreforge.app.music.ScoreTempoChange\nimport com.scoreforge.app.music.ScoreTempos\n',
+          )
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/ui/ScoreStaffEditor.kt",
+              '''    cursorBeat: Float,\n    timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),''',
+              '''    cursorBeat: Float,\n    tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempos.DEFAULT),\n    timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),''',
+          )
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/ui/ScoreStaffEditor.kt",
+              '''                    val normalizedTimeSignatures = ScoreTimeSignatures.normalize(timeSignatures)\n                    val normalizedKeySignatures = ScoreKeySignatures.normalize(keySignatures)''',
+              '''                    val normalizedTempos = ScoreTempos.normalize(tempoChanges)\n                    val normalizedTimeSignatures = ScoreTimeSignatures.normalize(timeSignatures)\n                    val normalizedKeySignatures = ScoreKeySignatures.normalize(keySignatures)''',
+          )
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/ui/ScoreStaffEditor.kt",
+              '''                    normalizedTimeSignatures.drop(1).forEach { signature ->''',
+              '''                    normalizedTempos.forEach { tempo ->\n                        if (tempo.startBeat <= contentBeats + 0.001f) {\n                            drawTempoMark(\n                                tempo = tempo,\n                                timelineLeftPx = timelineLeftPx,\n                                pixelsPerBeat = beatWidthPx,\n                                geometry = geometry,\n                                notationGaps = notationGaps,\n                            )\n                        }\n                    }\n\n                    normalizedTimeSignatures.drop(1).forEach { signature ->''',
+          )
+          marker_helper = '''\nprivate fun DrawScope.drawTempoMark(\n    tempo: ScoreTempoChange,\n    timelineLeftPx: Float,\n    pixelsPerBeat: Float,\n    geometry: StaffGeometry,\n    notationGaps: List<StaffNotationGap>,\n) {\n    val x = StaffNotationSpacing.xAtBeat(\n        tempo.startBeat,\n        timelineLeftPx,\n        pixelsPerBeat,\n        notationGaps,\n        includeGapAtBeat = true,\n    )\n    drawIntoCanvas { canvas ->\n        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {\n            color = android.graphics.Color.rgb(56, 48, 74)\n            textAlign = Paint.Align.LEFT\n            typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)\n            textSize = geometry.lineSpacing * 0.72f\n        }\n        canvas.nativeCanvas.drawText(\n            "♩ = ${tempo.bpm}",\n            x + geometry.lineSpacing * 0.18f,\n            geometry.rulerY - geometry.lineSpacing * 0.42f,\n            paint,\n        )\n    }\n}\n\n'''
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/ui/ScoreStaffEditor.kt",
+              '\nprivate fun DrawScope.drawNotationHeader(\n',
+              marker_helper + 'private fun DrawScope.drawNotationHeader(\n',
+          )
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt",
+              '''                        cursorBeat = activeCursorBeat,\n                        timeSignatures = timeSignatures,''',
+              '''                        cursorBeat = activeCursorBeat,\n                        tempoChanges = tempoChanges,\n                        timeSignatures = timeSignatures,''',
+          )
+
+          # The tempo control row also exposes the full map in text, useful at very low zoom.
+          replace_once(
+              "app/src/main/java/com/scoreforge/app/ui/TempoControls.kt",
+              '''        Text(\n            if (active.startBeat <= 0.001f) "from start" else "from beat ${formatTempoBeat(active.startBeat)}",\n            style = MaterialTheme.typography.bodySmall,\n            color = MaterialTheme.colorScheme.onSurfaceVariant,\n        )\n\n        CompactCommandButton(''',
+              '''        Text(\n            if (active.startBeat <= 0.001f) "from start" else "from beat ${formatTempoBeat(active.startBeat)}",\n            style = MaterialTheme.typography.bodySmall,\n            color = MaterialTheme.colorScheme.onSurfaceVariant,\n        )\n        Text(\n            "Map: " + normalized.joinToString(" • ") { change ->\n                val where = if (change.startBeat <= 0.001f) "start" else "beat ${formatTempoBeat(change.startBeat)}"\n                "$where = ${change.bpm}"\n            },\n            style = MaterialTheme.typography.bodySmall,\n            color = MaterialTheme.colorScheme.onSurfaceVariant,\n        )\n\n        CompactCommandButton(''',
+          )
+          PY
+
+      - name: Commit hotfix
+        shell: bash
+        run: |
+          git config user.name "score-forge-ci"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/patch-0.2.41.yml
+          git add app/build.gradle.kts app/src/main/java/com/scoreforge/app
+          git commit -m "Fix tempo-map audio and show tempo markers"
+          git push origin HEAD:fix/audio-tempo-markers-0.2.41
