@@ -32,6 +32,10 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:mimeType="application/x-scoreforge-project" />
+                <!-- Unknown extensions such as .sfp are commonly exposed by Android file
+                     managers as application/octet-stream. Score Forge still validates the
+                     display name and project contents before opening the file. -->
+                <data android:mimeType="application/octet-stream" />
             </intent-filter>
         </activity>
     </application>
