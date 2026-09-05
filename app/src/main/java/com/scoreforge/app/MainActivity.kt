@@ -129,7 +129,7 @@ class MainActivity : ComponentActivity() {
         }
 
         return buildString {
-            appendLine("Score Forge ${BuildConfig.VERSION_NAME}")
+            appendLine("Score Forge 0.2.38")
             appendLine("entryPoint=$entryPoint")
             appendLine("taskId=$taskId")
             appendLine("isTaskRoot=$isTaskRoot")
