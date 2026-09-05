@@ -25,6 +25,12 @@ import kotlin.math.sin
 
 class ScorePlaybackEngine {
     private val sampleRate = 44_100
+
+    companion object {
+        private const val STREAMING_BLOCK_FRAMES = 2_048
+        private const val STREAMING_TAIL_SECONDS = 0.45f
+        private const val STREAMING_DRAIN_TIMEOUT_MS = 2_000L
+    }
     private val mainHandler = Handler(Looper.getMainLooper())
 
     @Volatile
@@ -39,6 +45,20 @@ class ScorePlaybackEngine {
     private data class RenderedAudio(
         val pcm: ShortArray,
         val channels: Int,
+    )
+
+    private data class StreamingMidiEvent(
+        val frame: Int,
+        val noteOn: Boolean,
+        val key: Int,
+        val velocity: Int,
+        val channel: Int,
+    )
+
+    private data class StreamingClick(
+        val frame: Int,
+        val frequency: Double,
+        val gain: Float,
     )
 
     fun setSoundFontEngine(engine: SoundFontEngine?) {
@@ -95,6 +115,27 @@ class ScorePlaybackEngine {
         )
         val startBeat = ScoreTransportBus.requestedStartBeat(safeThroughBeat)
         ScoreTransportBus.begin(startBeat, safeThroughBeat)
+
+        if (
+            soundFontEngine?.hasSoundFont == true &&
+            PlaybackStreamingPolicy.shouldStream(
+                throughBeat = safeThroughBeat - startBeat,
+                bpm = safeBpm,
+                noteCount = notes.size,
+            )
+        ) {
+            playStreamingSoundFontTracks(
+                playableTracks = playableTracks,
+                bpm = safeBpm,
+                startBeat = startBeat,
+                throughBeat = safeThroughBeat,
+                metronomeEnabled = metronomeEnabled,
+                timeSignatures = timeSignatures,
+                myGeneration = myGeneration,
+                onFinished = onFinished,
+            )
+            return
+        }
 
         thread(name = "ScoreForgePlayback", isDaemon = true) {
             var rendered = renderBestAvailableTracks(playableTracks, safeBpm, safeThroughBeat)
@@ -216,6 +257,292 @@ class ScorePlaybackEngine {
             ),
             channels = 2,
         )
+    }
+
+
+    private fun playStreamingSoundFontTracks(
+        playableTracks: List<ScoreTrack>,
+        bpm: Int,
+        startBeat: Float,
+        throughBeat: Float,
+        metronomeEnabled: Boolean,
+        timeSignatures: List<ScoreTimeSignature>,
+        myGeneration: Int,
+        onFinished: () -> Unit,
+    ) {
+        val soundFont = soundFontEngine ?: run {
+            ScoreTransportBus.stop()
+            mainHandler.post(onFinished)
+            return
+        }
+        val secondsPerBeat = 60f / bpm.coerceIn(30, 300)
+        val events = buildStreamingMidiEvents(
+            tracks = playableTracks,
+            startBeat = startBeat,
+            throughBeat = throughBeat,
+            secondsPerBeat = secondsPerBeat,
+        )
+        val clicks = if (metronomeEnabled) {
+            buildStreamingClicks(
+                timeSignatures = timeSignatures,
+                startBeat = startBeat,
+                throughBeat = throughBeat,
+                secondsPerBeat = secondsPerBeat,
+            )
+        } else {
+            emptyList()
+        }
+
+        thread(name = "ScoreForgePlaybackStream", isDaemon = true) {
+            var streamTrack: AudioTrack? = null
+            try {
+                if (myGeneration != generation) return@thread
+                if (!soundFont.prepareStreamingTracks(playableTracks)) {
+                    if (myGeneration == generation) {
+                        ScoreTransportBus.stop()
+                        mainHandler.post(onFinished)
+                    }
+                    return@thread
+                }
+
+                val track = createStreamingTrack()
+                streamTrack = track
+                if (myGeneration != generation) return@thread
+                activeTrack = track
+                track.play()
+
+                val scoreFrames = (
+                    ((throughBeat - startBeat).coerceAtLeast(0f) * secondsPerBeat * sampleRate)
+                    ).toInt().coerceAtLeast(1)
+                val tailFrames = (sampleRate * STREAMING_TAIL_SECONDS).toInt().coerceAtLeast(1)
+                val totalFrames = scoreFrames + tailFrames
+                var frameCursor = 0
+                var eventIndex = 0
+                var failed = false
+
+                while (myGeneration == generation && frameCursor < totalFrames) {
+                    while (eventIndex < events.size && events[eventIndex].frame <= frameCursor) {
+                        val event = events[eventIndex++]
+                        if (event.noteOn) {
+                            soundFont.noteOn(event.key, event.velocity, event.channel)
+                        } else {
+                            soundFont.noteOff(event.key, event.channel)
+                        }
+                    }
+
+                    val nextEventFrame = events.getOrNull(eventIndex)?.frame ?: totalFrames
+                    val untilEvent = (nextEventFrame - frameCursor).coerceAtLeast(1)
+                    val frames = minOf(
+                        STREAMING_BLOCK_FRAMES,
+                        totalFrames - frameCursor,
+                        untilEvent,
+                    )
+                    val pcm = soundFont.renderStereo(frames)
+                    if (pcm.isEmpty()) {
+                        failed = true
+                        break
+                    }
+                    if (clicks.isNotEmpty()) {
+                        mixStreamingMetronome(pcm, frameCursor, clicks)
+                    }
+                    if (!writeStreamingBlock(track, pcm)) {
+                        failed = true
+                        break
+                    }
+                    frameCursor += frames
+
+                    val playedFrames = track.playbackHeadPosition.toLong().coerceAtLeast(0L)
+                    val beat = startBeat +
+                        (playedFrames.toDouble() / sampleRate.toDouble() / secondsPerBeat.toDouble()).toFloat()
+                    ScoreTransportBus.progress(beat.coerceAtMost(throughBeat))
+                }
+
+                if (myGeneration == generation && !failed) {
+                    val drainDeadline = SystemClock.elapsedRealtime() + STREAMING_DRAIN_TIMEOUT_MS
+                    while (
+                        myGeneration == generation &&
+                        track.playbackHeadPosition < totalFrames - 128 &&
+                        SystemClock.elapsedRealtime() < drainDeadline
+                    ) {
+                        val playedFrames = track.playbackHeadPosition.toLong().coerceAtLeast(0L)
+                        val beat = startBeat +
+                            (playedFrames.toDouble() / sampleRate.toDouble() / secondsPerBeat.toDouble()).toFloat()
+                        ScoreTransportBus.progress(beat.coerceAtMost(throughBeat))
+                        Thread.sleep(16L)
+                    }
+                    if (myGeneration == generation) {
+                        ScoreTransportBus.finish(throughBeat)
+                        mainHandler.post(onFinished)
+                    }
+                } else if (myGeneration == generation) {
+                    ScoreTransportBus.stop()
+                    mainHandler.post(onFinished)
+                }
+            } catch (_: InterruptedException) {
+                // Stop/restart invalidates the generation and cleanup happens below.
+            } catch (_: IllegalStateException) {
+                if (myGeneration == generation) {
+                    ScoreTransportBus.stop()
+                    mainHandler.post(onFinished)
+                }
+            } finally {
+                soundFont.finishStreamingTracks()
+                streamTrack?.let(::releaseTrack)
+                if (activeTrack === streamTrack) activeTrack = null
+            }
+        }
+    }
+
+    private fun buildStreamingMidiEvents(
+        tracks: List<ScoreTrack>,
+        startBeat: Float,
+        throughBeat: Float,
+        secondsPerBeat: Float,
+    ): List<StreamingMidiEvent> = buildList {
+        tracks.forEachIndexed trackLoop@{ channel, track ->
+            val notes = track.notes
+            notes.forEachIndexed noteLoop@{ index, note ->
+                if (ScoreTies.isContinuation(notes, index)) return@noteLoop
+                val playbackEndBeat = if (ScoreTies.hasValidTie(notes, index)) {
+                    ScoreTies.chainEndBeat(notes, index)
+                } else {
+                    ScoreArticulations.playbackEndBeat(notes, index)
+                }.takeIf { it > note.startBeat } ?: (note.startBeat + note.effectiveBeats)
+
+                if (playbackEndBeat <= startBeat || note.startBeat >= throughBeat) return@noteLoop
+                val onBeat = maxOf(note.startBeat, startBeat)
+                val offBeat = minOf(playbackEndBeat, throughBeat)
+                val onFrame = (
+                    (onBeat - startBeat).coerceAtLeast(0f) * secondsPerBeat * sampleRate
+                    ).toInt().coerceAtLeast(0)
+                val offFrame = (
+                    (offBeat - startBeat).coerceAtLeast(0f) * secondsPerBeat * sampleRate
+                    ).toInt().coerceAtLeast(onFrame + 1)
+                add(
+                    StreamingMidiEvent(
+                        frame = onFrame,
+                        noteOn = true,
+                        key = note.midiPitch,
+                        velocity = ScoreArticulations.playbackVelocity(note),
+                        channel = channel.coerceIn(0, 15),
+                    )
+                )
+                add(
+                    StreamingMidiEvent(
+                        frame = offFrame,
+                        noteOn = false,
+                        key = note.midiPitch,
+                        velocity = 0,
+                        channel = channel.coerceIn(0, 15),
+                    )
+                )
+            }
+        }
+    }.sortedWith(
+        compareBy<StreamingMidiEvent> { it.frame }
+            .thenBy { if (it.noteOn) 1 else 0 }
+            .thenBy { it.channel }
+            .thenBy { it.key }
+    )
+
+    private fun buildStreamingClicks(
+        timeSignatures: List<ScoreTimeSignature>,
+        startBeat: Float,
+        throughBeat: Float,
+        secondsPerBeat: Float,
+    ): List<StreamingClick> = ScoreMetronome.clicks(timeSignatures, throughBeat)
+        .asSequence()
+        .filter { it.beat + 0.001f >= startBeat }
+        .map { click ->
+            val (frequency, gain) = when (click.accent) {
+                MetronomeAccent.DOWNBEAT -> 1_600.0 to 0.34f
+                MetronomeAccent.GROUP -> 1_250.0 to 0.26f
+                MetronomeAccent.BEAT -> 950.0 to 0.18f
+            }
+            StreamingClick(
+                frame = (
+                    (click.beat - startBeat).coerceAtLeast(0f) * secondsPerBeat * sampleRate
+                    ).toInt(),
+                frequency = frequency,
+                gain = gain,
+            )
+        }
+        .toList()
+
+    private fun mixStreamingMetronome(
+        pcm: ShortArray,
+        chunkStartFrame: Int,
+        clicks: List<StreamingClick>,
+    ) {
+        val chunkFrames = pcm.size / 2
+        if (chunkFrames <= 0) return
+        val chunkEndFrame = chunkStartFrame + chunkFrames
+        val clickFrames = (sampleRate * 0.032f).toInt().coerceAtLeast(1)
+        clicks.forEach { click ->
+            val clickEnd = click.frame + clickFrames
+            if (click.frame >= chunkEndFrame || clickEnd <= chunkStartFrame) return@forEach
+            val overlapStart = maxOf(chunkStartFrame, click.frame)
+            val overlapEnd = minOf(chunkEndFrame, clickEnd)
+            for (absoluteFrame in overlapStart until overlapEnd) {
+                val clickIndex = absoluteFrame - click.frame
+                val t = clickIndex.toDouble() / sampleRate
+                val progress = clickIndex.toFloat() / clickFrames
+                val envelope = (1f - progress).coerceIn(0f, 1f).let { it * it }
+                val clickSample = (
+                    sin(2.0 * PI * click.frequency * t) *
+                        envelope * click.gain * Short.MAX_VALUE
+                    ).toInt()
+                val localFrame = absoluteFrame - chunkStartFrame
+                repeat(2) { channel ->
+                    val sampleIndex = localFrame * 2 + channel
+                    pcm[sampleIndex] = (pcm[sampleIndex].toInt() + clickSample)
+                        .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+                        .toShort()
+                }
+            }
+        }
+    }
+
+    private fun createStreamingTrack(): AudioTrack {
+        val channelMask = AudioFormat.CHANNEL_OUT_STEREO
+        val minBytes = AudioTrack.getMinBufferSize(
+            sampleRate,
+            channelMask,
+            AudioFormat.ENCODING_PCM_16BIT,
+        ).coerceAtLeast(4096)
+        return AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
+            )
+            .setAudioFormat(
+                AudioFormat.Builder()
+                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(channelMask)
+                    .build()
+            )
+            .setTransferMode(AudioTrack.MODE_STREAM)
+            .setBufferSizeInBytes(minBytes * 2)
+            .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
+            .build()
+    }
+
+    private fun writeStreamingBlock(track: AudioTrack, pcm: ShortArray): Boolean {
+        var offset = 0
+        while (offset < pcm.size) {
+            val written = track.write(
+                pcm,
+                offset,
+                pcm.size - offset,
+                AudioTrack.WRITE_BLOCKING,
+            )
+            if (written <= 0) return false
+            offset += written
+        }
+        return true
     }
 
     private fun mixMetronome(

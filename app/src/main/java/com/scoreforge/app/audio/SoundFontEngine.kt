@@ -157,6 +157,43 @@ class SoundFontEngine private constructor(
         }
     }
 
+    /** Configure FluidSynth channels for incremental/streaming score playback. */
+    fun prepareStreamingTracks(tracks: List<ScoreTrack>): Boolean = synchronized(lock) {
+        if (handle == 0L || soundFontId < 0) return@synchronized false
+        val playable = ScoreTracks.audibleTracks(tracks).take(ScoreTracks.MAX_TRACKS)
+        if (playable.none { it.notes.isNotEmpty() }) return@synchronized false
+        val fallbackPreset = activePreset ?: loadedPresets.firstOrNull()
+
+        repeat(16) { NativeFluidSynth.allNotesOff(handle, it) }
+        playable.forEachIndexed { channel, track ->
+            if (track.notes.isEmpty()) return@forEachIndexed
+            val requestedPreset = if (track.presetBank != null && track.presetProgram != null) {
+                loadedPresets.firstOrNull {
+                    it.bank == track.presetBank && it.program == track.presetProgram
+                }
+            } else {
+                null
+            }
+            (requestedPreset ?: fallbackPreset)?.let {
+                selectPresetOnChannelLocked(it, channel.coerceIn(0, 15))
+            }
+            setChannelMixerLocked(channel.coerceIn(0, 15), track.volume, track.pan)
+        }
+        true
+    }
+
+    /** End streaming playback without changing the user's selected library preset. */
+    fun finishStreamingTracks() = synchronized(lock) {
+        if (handle == 0L) return@synchronized
+        repeat(16) { NativeFluidSynth.allNotesOff(handle, it) }
+        activePreset?.let { selectPresetOnChannelLocked(it, channel = 0) }
+        setChannelMixerLocked(
+            channel = 0,
+            volume = ScoreTrack.DEFAULT_VOLUME,
+            pan = ScoreTrack.CENTER_PAN,
+        )
+    }
+
     fun renderScore(
         notes: List<ScoreNote>,
         bpm: Int,
