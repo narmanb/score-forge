@@ -24,33 +24,38 @@ jobs:
           from pathlib import Path
           p = Path('app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt')
           s = p.read_text()
+
           old = 'import com.scoreforge.app.audio.LiveInstrumentBus\n'
-          new = 'import com.scoreforge.app.ExternalOpenRequest\n' + old
           if 'import com.scoreforge.app.ExternalOpenRequest\n' not in s:
               if old not in s:
                   raise SystemExit('Composer import anchor not found')
-              s = s.replace(old, new, 1)
+              s = s.replace(old, 'import com.scoreforge.app.ExternalOpenRequest\n' + old, 1)
 
           old = '@Composable\nfun ScoreForgeComposerScreen() {'
-          new = '''@Composable
-          fun ScoreForgeComposerScreen(
-              externalOpenRequest: ExternalOpenRequest? = null,
-              onExternalOpenConsumed: (ExternalOpenRequest) -> Unit = {},
-          ) {'''.replace('          ', '')
+          new = (
+              '@Composable\n'
+              'fun ScoreForgeComposerScreen(\n'
+              '    externalOpenRequest: ExternalOpenRequest? = null,\n'
+              '    onExternalOpenConsumed: (ExternalOpenRequest) -> Unit = {},\n'
+              ') {'
+          )
           if old not in s:
               raise SystemExit('Composer signature anchor not found')
           s = s.replace(old, new, 1)
 
-          old = '''    MaterialTheme(colorScheme = darkColorScheme()) {
-              Surface(modifier = Modifier.fillMaxSize()) {'''.replace('          ', '')
-          new = '''    MaterialTheme(colorScheme = darkColorScheme()) {
-              ExternalOpenHandler(
-                  request = externalOpenRequest.takeIf { draftLoaded },
-                  onOpenProject = ::openProject,
-                  onConsumed = onExternalOpenConsumed,
-              )
-
-              Surface(modifier = Modifier.fillMaxSize()) {'''.replace('          ', '')
+          old = (
+              '    MaterialTheme(colorScheme = darkColorScheme()) {\n'
+              '        Surface(modifier = Modifier.fillMaxSize()) {'
+          )
+          new = (
+              '    MaterialTheme(colorScheme = darkColorScheme()) {\n'
+              '        ExternalOpenHandler(\n'
+              '            request = externalOpenRequest.takeIf { draftLoaded },\n'
+              '            onOpenProject = ::openProject,\n'
+              '            onConsumed = onExternalOpenConsumed,\n'
+              '        )\n\n'
+              '        Surface(modifier = Modifier.fillMaxSize()) {'
+          )
           if old not in s:
               raise SystemExit('Composer MaterialTheme anchor not found')
           s = s.replace(old, new, 1)
