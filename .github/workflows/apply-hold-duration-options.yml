@@ -1,0 +1,35 @@
+name: Apply Hold duration options
+
+on:
+  push:
+    branches:
+      - feature/hold-duration-options
+    paths:
+      - tools/apply_hold_duration_options.py
+      - .github/workflows/apply-hold-duration-options.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/hold-duration-options
+          fetch-depth: 0
+      - name: Apply Hold option changes
+        run: python tools/apply_hold_duration_options.py
+      - name: Validate patch
+        run: git diff --check
+      - name: Commit changes
+        run: |
+          git config user.name "Score Forge Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add app/build.gradle.kts \
+            app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt \
+            app/src/main/java/com/scoreforge/app/ui/MultitouchPianoKeyboard.kt
+          git commit -m "Add selectable Hold duration behavior"
+          git push origin HEAD:feature/hold-duration-options
