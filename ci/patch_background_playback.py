@@ -1,0 +1,178 @@
+from pathlib import Path
+
+composer = Path('app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt')
+s = composer.read_text()
+
+old = '''package com.scoreforge.app.ui
+
+import android.os.SystemClock'''
+new = '''package com.scoreforge.app.ui
+
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.SystemClock
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts'''
+assert old in s, 'Composer import header anchor not found'
+s = s.replace(old, new, 1)
+
+old = '''import com.scoreforge.app.audio.LiveInstrumentBus
+import com.scoreforge.app.audio.ScorePlaybackEngine
+import com.scoreforge.app.audio.ScoreTransportBus
+import com.scoreforge.app.audio.SoundFontEngine'''
+new = '''import com.scoreforge.app.audio.LiveInstrumentBus
+import com.scoreforge.app.audio.ScoreForgeAudioSession
+import com.scoreforge.app.audio.ScoreTransportBus'''
+assert old in s, 'Composer audio import anchor not found'
+s = s.replace(old, new, 1)
+
+old = '''import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext'''
+new = '''import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.withContext'''
+assert old in s, 'Composer coroutine import anchor not found'
+s = s.replace(old, new, 1)
+
+old = '''    val context = LocalContext.current
+    val pageScrollState = rememberScrollState()'''
+new = '''    val context = LocalContext.current
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { /* Playback remains available even if notification permission is declined. */ }
+    val pageScrollState = rememberScrollState()'''
+assert old in s, 'Composer context anchor not found'
+s = s.replace(old, new, 1)
+
+old = '''    val playback = remember { ScorePlaybackEngine() }
+    val soundFontEngine = remember { SoundFontEngine.createOrNull() }'''
+new = '''    val playback = remember { ScoreForgeAudioSession.playbackEngine }
+    val soundFontEngine = remember { ScoreForgeAudioSession.soundFontEngine }'''
+assert old in s, 'Composer engine anchor not found'
+s = s.replace(old, new, 1)
+
+old = '''    var isPlaying by remember { mutableStateOf(false) }'''
+new = '''    var isPlaying by remember { mutableStateOf(ScoreTransportBus.state.value.isPlaying) }'''
+assert old in s, 'Composer isPlaying anchor not found'
+s = s.replace(old, new, 1)
+
+old = '''    val activeTempoBpm = ScoreTempos.atBeat(tempoChanges, activeCursorBeat).bpm
+
+    fun syncHistoryButtons()'''
+new = '''    val activeTempoBpm = ScoreTempos.atBeat(tempoChanges, activeCursorBeat).bpm
+
+    LaunchedEffect(Unit) {
+        ScoreTransportBus.state.collect { state ->
+            isPlaying = state.isPlaying
+        }
+    }
+
+    fun syncHistoryButtons()'''
+assert old in s, 'Composer transport sync anchor not found'
+s = s.replace(old, new, 1)
+
+old = '''    DisposableEffect(playback, soundFontEngine) {
+        playback.setSoundFontEngine(soundFontEngine)
+        onDispose {
+            // Configuration changes recreate the Activity. Flush the latest score immediately so
+            // a rotation can never reload a draft that is up to 250 ms behind the visible editor.
+            ScoreProjectRepository.saveDraft(context, currentProjectSnapshot())
+            cancelNaturalEntryGroup()
+            cancelLiveRecording()
+            LiveInstrumentBus.allNotesOff()
+            playback.setSoundFontEngine(null)
+            playback.release()
+            soundFontEngine?.close()
+        }
+    }'''
+new = '''    DisposableEffect(Unit) {
+        onDispose {
+            // The foreground media service owns score playback across Activity recreation. Flush
+            // editor state, but do not release the process-lifetime playback engine or SoundFont.
+            ScoreProjectRepository.saveDraft(context, currentProjectSnapshot())
+            cancelNaturalEntryGroup()
+            if (liveRecordingStartedAtMs != null) cancelLiveRecording()
+            LiveInstrumentBus.allNotesOff()
+        }
+    }'''
+assert old in s, 'Composer disposable anchor not found'
+s = s.replace(old, new, 1)
+
+s = s.replace('playback.stop()', 'ScoreForgeAudioSession.stopPlayback(context)')
+
+old = '''        LiveInstrumentBus.allNotesOff()
+        isPlaying = true
+        playback.playTracks(
+            tracks = tracks,
+            bpm = tempoChanges.first().bpm,
+            tempoChanges = tempoChanges,
+            throughBeat = ScoreTracks.endBeat(tracks),
+            metronomeEnabled = metronomeEnabled,
+            timeSignatures = timeSignatures,
+        ) { isPlaying = false }
+    }'''
+new = '''        LiveInstrumentBus.allNotesOff()
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        isPlaying = true
+        ScoreForgeAudioSession.startPlayback(
+            context = context,
+            request = ScoreForgeAudioSession.PlaybackRequest(
+                tracks = tracks.toList(),
+                bpm = tempoChanges.first().bpm,
+                tempoChanges = tempoChanges,
+                throughBeat = ScoreTracks.endBeat(tracks),
+                metronomeEnabled = metronomeEnabled,
+                timeSignatures = timeSignatures,
+                projectName = projectName,
+            ),
+        )
+    }'''
+assert old in s, 'Composer startPlayback anchor not found'
+s = s.replace(old, new, 1)
+composer.write_text(s)
+
+sf = Path('app/src/main/java/com/scoreforge/app/ui/SoundFontControls.kt')
+s = sf.read_text()
+old = '''    LaunchedEffect(engine) {
+        val activeEngine = engine ?: return@LaunchedEffect
+        isLoading = true
+        status = "Loading instruments…"
+
+        thread(name = "ScoreForgeSoundFontRestore", isDaemon = true) {'''
+new = '''    LaunchedEffect(engine) {
+        val activeEngine = engine ?: return@LaunchedEffect
+
+        // The playback SoundFont now has process lifetime. If the Activity is recreated during
+        // background playback, rebuild only the controls from saved metadata; reloading FluidSynth
+        // underneath a playing score would interrupt/corrupt the stream.
+        if (activeEngine.hasSoundFont) {
+            val saved = SoundFontRepository.loadActiveSelection(context)
+            if (saved != null) {
+                val discoveredPresets = activeEngine.presets
+                val discoveredIndex = activeEngine.selectedPresetIndex()
+                val selectedPreset = activeEngine.selectedPreset
+                publishLoadedSoundFont(
+                    soundFont = saved.soundFont,
+                    discoveredPresets = discoveredPresets,
+                    discoveredIndex = discoveredIndex,
+                    selectedPreset = selectedPreset,
+                    restored = true,
+                )
+                return@LaunchedEffect
+            }
+        }
+
+        isLoading = true
+        status = "Loading instruments…"
+
+        thread(name = "ScoreForgeSoundFontRestore", isDaemon = true) {'''
+assert old in s, 'SoundFont restore anchor not found'
+sf.write_text(s.replace(old, new, 1))
