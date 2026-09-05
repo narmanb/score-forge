@@ -82,7 +82,7 @@ fun ProjectFileControls(
     }
 
     val openLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
+        contract = ExactMimeOpenDocument(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -125,7 +125,7 @@ fun ProjectFileControls(
     }
 
     val midiImportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
+        contract = ExactMimeOpenDocument(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
@@ -244,7 +244,7 @@ fun ProjectFileControls(
 
         OutlinedButton(
             onClick = {
-                openLauncher.launch(arrayOf(ExternalFileTypes.SCORE_FORGE_PROJECT_MIME))
+                openLauncher.launch(ExternalFileTypes.SCORE_FORGE_PROJECT_MIME)
             },
         ) {
             Text("Open")
@@ -253,11 +253,7 @@ fun ProjectFileControls(
         OutlinedButton(
             onClick = {
                 midiImportWarnings = emptyList()
-                // Passing multiple MIME types makes the stock OpenDocument contract use */* as
-                // its base type. Some Android/Samsung pickers ignore EXTRA_MIME_TYPES and then
-                // leave unrelated audio files (for example .sf2) selectable. Use the standard
-                // MIDI type as the exact picker filter and validate .mid/.midi again after pick.
-                midiImportLauncher.launch(arrayOf("audio/midi"))
+                midiImportLauncher.launch("audio/midi")
             },
         ) {
             Text("Import MIDI")
