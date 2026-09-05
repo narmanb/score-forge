@@ -234,6 +234,7 @@ fun ScoreStaffEditor(
                             timelineLeftPx,
                             staffInputEnabled,
                             notationGaps,
+                            effectiveClef,
                         ) {
                             detectTapGestures(
                                 onLongPress = { position ->
@@ -307,7 +308,7 @@ fun ScoreStaffEditor(
                                 },
                             )
                         }
-                        .pointerInput(events, contentBeats, beatWidthPx, timelineLeftPx, notationGaps) {
+                        .pointerInput(events, contentBeats, beatWidthPx, timelineLeftPx, notationGaps, effectiveClef) {
                             detectDragGestures(
                                 onDragStart = { position ->
                                     manualBrowseNotified = false
@@ -643,6 +644,7 @@ fun ScoreStaffEditor(
                                 timelineLeftPx,
                                 beatWidthPx,
                                 geometry,
+                                effectiveClef,
                                 normalizedKeySignatures,
                                 notationGaps,
                             )
@@ -902,7 +904,7 @@ private val bassSharpKeyPositions = listOf(
     KeySymbolPosition(0, 3 * 7 + 0), // C3
     KeySymbolPosition(4, 3 * 7 + 4), // G3
     KeySymbolPosition(1, 3 * 7 + 1), // D3
-    KeySymbolPosition(5, 2 * 7 + 5), // A2
+    KeySymbolPosition(5, 3 * 7 + 5), // A3
     KeySymbolPosition(2, 3 * 7 + 2), // E3
     KeySymbolPosition(6, 2 * 7 + 6), // B2
 )
@@ -912,7 +914,7 @@ private val bassFlatKeyPositions = listOf(
     KeySymbolPosition(2, 3 * 7 + 2), // E3
     KeySymbolPosition(5, 2 * 7 + 5), // A2
     KeySymbolPosition(1, 3 * 7 + 1), // D3
-    KeySymbolPosition(4, 2 * 7 + 4), // G2
+    KeySymbolPosition(4, 3 * 7 + 4), // G3
     KeySymbolPosition(0, 3 * 7 + 0), // C3
     KeySymbolPosition(3, 3 * 7 + 3), // F3
 )
