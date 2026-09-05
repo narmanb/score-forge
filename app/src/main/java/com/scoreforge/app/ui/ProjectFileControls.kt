@@ -64,7 +64,8 @@ fun ProjectFileControls(
             status = "Saving…"
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    context.contentResolver.openOutputStream(uri, "w").use { output ->
+                    val safeUri = DocumentFileExtensions.ensure(context, uri, ".sfp")
+                    context.contentResolver.openOutputStream(safeUri, "w").use { output ->
                         requireNotNull(output) { "Could not open the selected file for writing." }
                         output.bufferedWriter().use { writer ->
                             writer.write(ScoreProjectCodec.encode(snapshot))
@@ -96,7 +97,7 @@ fun ProjectFileControls(
                         "That file is not a supported Score Forge project."
                     }
                     if (decoded.projectName == "Untitled") {
-                        val displayName = queryDisplayName(context, uri)
+                        val displayName = queryDisplayNameLocal(context, uri)
                             ?.removeSuffix(".sfp")
                             ?.trim()
                             .orEmpty()
@@ -128,7 +129,7 @@ fun ProjectFileControls(
             status = "Importing MIDI…"
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val displayName = queryDisplayName(context, uri).orEmpty()
+                    val displayName = queryDisplayNameLocal(context, uri).orEmpty()
                     val projectNameFromFile = displayName
                         .replace(Regex("(?i)\\.(mid|midi)$"), "")
                         .trim()
@@ -160,8 +161,9 @@ fun ProjectFileControls(
             status = "Exporting MIDI…"
             val result = withContext(Dispatchers.IO) {
                 runCatching {
+                    val safeUri = DocumentFileExtensions.ensure(context, uri, ".mid")
                     val exported = MidiExporter.export(snapshot)
-                    context.contentResolver.openOutputStream(uri, "w").use { output ->
+                    context.contentResolver.openOutputStream(safeUri, "w").use { output ->
                         requireNotNull(output) { "Could not open the selected MIDI file for writing." }
                         output.write(exported.bytes)
                         output.flush()
@@ -232,7 +234,9 @@ fun ProjectFileControls(
         }
 
         OutlinedButton(
-            onClick = { openLauncher.launch(arrayOf("*/*")) },
+            onClick = {
+                openLauncher.launch(arrayOf(ExternalFileTypes.SCORE_FORGE_PROJECT_MIME))
+            },
         ) {
             Text("Open")
         }
@@ -246,7 +250,6 @@ fun ProjectFileControls(
                         "audio/x-midi",
                         "audio/sp-midi",
                         "application/x-midi",
-                        "application/octet-stream",
                     )
                 )
             },
@@ -361,7 +364,7 @@ fun ProjectFileControls(
     }
 }
 
-private fun queryDisplayName(context: android.content.Context, uri: android.net.Uri): String? =
+private fun queryDisplayNameLocal(context: android.content.Context, uri: android.net.Uri): String? =
     context.contentResolver.query(
         uri,
         arrayOf(OpenableColumns.DISPLAY_NAME),
