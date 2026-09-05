@@ -159,6 +159,27 @@ fun SoundFontControls(
 
     LaunchedEffect(engine) {
         val activeEngine = engine ?: return@LaunchedEffect
+
+        // The playback SoundFont now has process lifetime. If the Activity is recreated during
+        // background playback, rebuild only the controls from saved metadata; reloading FluidSynth
+        // underneath a playing score would interrupt/corrupt the stream.
+        if (activeEngine.hasSoundFont) {
+            val saved = SoundFontRepository.loadActiveSelection(context)
+            if (saved != null) {
+                val discoveredPresets = activeEngine.presets
+                val discoveredIndex = activeEngine.selectedPresetIndex()
+                val selectedPreset = activeEngine.selectedPreset
+                publishLoadedSoundFont(
+                    soundFont = saved.soundFont,
+                    discoveredPresets = discoveredPresets,
+                    discoveredIndex = discoveredIndex,
+                    selectedPreset = selectedPreset,
+                    restored = true,
+                )
+                return@LaunchedEffect
+            }
+        }
+
         isLoading = true
         status = "Loading instruments…"
 

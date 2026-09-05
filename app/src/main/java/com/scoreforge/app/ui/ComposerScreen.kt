@@ -1,6 +1,11 @@
 package com.scoreforge.app.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.SystemClock
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -40,9 +45,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.scoreforge.app.ExternalOpenRequest
 import com.scoreforge.app.audio.LiveInstrumentBus
-import com.scoreforge.app.audio.ScorePlaybackEngine
+import com.scoreforge.app.audio.ScoreForgeAudioSession
 import com.scoreforge.app.audio.ScoreTransportBus
-import com.scoreforge.app.audio.SoundFontEngine
 import com.scoreforge.app.music.ComfortTempo
 import com.scoreforge.app.music.HoldDurationMode
 import com.scoreforge.app.music.HoldDurationTiming
@@ -71,6 +75,7 @@ import com.scoreforge.app.music.ScoreTrack
 import com.scoreforge.app.music.ScoreTracks
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.withContext
 
 private data class NaturalHeldInput(
@@ -113,10 +118,13 @@ fun ScoreForgeComposerScreen(
     onExternalOpenConsumed: (ExternalOpenRequest) -> Unit = {},
 ) {
     val context = LocalContext.current
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { /* Playback remains available even if notification permission is declined. */ }
     val pageScrollState = rememberScrollState()
     val tracks = remember { mutableStateListOf(ScoreTracks.defaultTrack()) }
-    val playback = remember { ScorePlaybackEngine() }
-    val soundFontEngine = remember { SoundFontEngine.createOrNull() }
+    val playback = remember { ScoreForgeAudioSession.playbackEngine }
+    val soundFontEngine = remember { ScoreForgeAudioSession.soundFontEngine }
     val editHistory = remember { ScoreEditHistory() }
     val naturalHeldInputs = remember { mutableMapOf<Int, NaturalHeldInput>() }
     val holdHeldInputs = remember { mutableMapOf<Int, HoldHeldInput>() }
@@ -136,7 +144,7 @@ fun ScoreForgeComposerScreen(
     var timeSignatures by remember { mutableStateOf(listOf(ScoreTimeSignatures.DEFAULT)) }
     var keySignatures by remember { mutableStateOf(listOf(ScoreKeySignatures.DEFAULT)) }
     var metronomeEnabled by rememberSaveable { mutableStateOf(false) }
-    var isPlaying by remember { mutableStateOf(false) }
+    var isPlaying by remember { mutableStateOf(ScoreTransportBus.state.value.isPlaying) }
     var chordMode by rememberSaveable { mutableStateOf(StepChordMode.OFF) }
     var pianoEntryMode by rememberSaveable { mutableStateOf(PianoEntryMode.STEP) }
     var holdDurationMode by rememberSaveable { mutableStateOf(HoldDurationMode.STANDARD) }
@@ -175,6 +183,12 @@ fun ScoreForgeComposerScreen(
     val liveRecordingActive = liveRecordingStartedAtMs != null
     val activeTempoBpm = ScoreTempos.atBeat(tempoChanges, activeCursorBeat).bpm
 
+    LaunchedEffect(Unit) {
+        ScoreTransportBus.state.collect { state ->
+            isPlaying = state.isPlaying
+        }
+    }
+
     fun syncHistoryButtons() {
         canUndo = editHistory.canUndo
         canRedo = editHistory.canRedo
@@ -187,7 +201,7 @@ fun ScoreForgeComposerScreen(
 
     fun setTempoChange(startBeat: Float, newBpm: Int) {
         if (isPlaying) {
-            playback.stop()
+            ScoreForgeAudioSession.stopPlayback(context)
             isPlaying = false
         }
         tempoChanges = ScoreTempos.withChange(tempoChanges, startBeat, newBpm)
@@ -196,7 +210,7 @@ fun ScoreForgeComposerScreen(
 
     fun removeTempoChange(startBeat: Float) {
         if (isPlaying) {
-            playback.stop()
+            ScoreForgeAudioSession.stopPlayback(context)
             isPlaying = false
         }
         tempoChanges = ScoreTempos.withoutChange(tempoChanges, startBeat)
@@ -326,7 +340,7 @@ fun ScoreForgeComposerScreen(
             transportPlaying = ScoreTransportBus.state.value.isPlaying,
         )
         if (decision.cancelLiveRecording) cancelLiveRecording()
-        if (decision.stopTransport) playback.stop()
+        if (decision.stopTransport) ScoreForgeAudioSession.stopPlayback(context)
     }
 
     fun beginLivePitch(pitch: Int) {
@@ -618,30 +632,26 @@ fun ScoreForgeComposerScreen(
             transportPlaying = ScoreTransportBus.state.value.isPlaying,
         )
         if (decision.cancelLiveRecording) cancelLiveRecording()
-        if (decision.stopTransport) playback.stop()
+        if (decision.stopTransport) ScoreForgeAudioSession.stopPlayback(context)
     }
 
     LaunchedEffect(activeTrack.id, activeTrack.volume, activeTrack.pan) {
         LiveInstrumentBus.setMixer(activeTrack.volume, activeTrack.pan)
     }
 
-    DisposableEffect(playback, soundFontEngine) {
-        playback.setSoundFontEngine(soundFontEngine)
+    DisposableEffect(Unit) {
         onDispose {
-            // Configuration changes recreate the Activity. Flush the latest score immediately so
-            // a rotation can never reload a draft that is up to 250 ms behind the visible editor.
+            // The foreground media service owns score playback across Activity recreation. Flush
+            // editor state, but do not release the process-lifetime playback engine or SoundFont.
             ScoreProjectRepository.saveDraft(context, currentProjectSnapshot())
             cancelNaturalEntryGroup()
-            cancelLiveRecording()
+            if (liveRecordingStartedAtMs != null) cancelLiveRecording()
             LiveInstrumentBus.allNotesOff()
-            playback.setSoundFontEngine(null)
-            playback.release()
-            soundFontEngine?.close()
         }
     }
 
     fun stopPlayback() {
-        playback.stop()
+        ScoreForgeAudioSession.stopPlayback(context)
         isPlaying = false
     }
 
@@ -856,15 +866,25 @@ fun ScoreForgeComposerScreen(
             else -> Unit
         }
         LiveInstrumentBus.allNotesOff()
+        if (
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         isPlaying = true
-        playback.playTracks(
-            tracks = tracks,
-            bpm = tempoChanges.first().bpm,
-            tempoChanges = tempoChanges,
-            throughBeat = ScoreTracks.endBeat(tracks),
-            metronomeEnabled = metronomeEnabled,
-            timeSignatures = timeSignatures,
-        ) { isPlaying = false }
+        ScoreForgeAudioSession.startPlayback(
+            context = context,
+            request = ScoreForgeAudioSession.PlaybackRequest(
+                tracks = tracks.toList(),
+                bpm = tempoChanges.first().bpm,
+                tempoChanges = tempoChanges,
+                throughBeat = ScoreTracks.endBeat(tracks),
+                metronomeEnabled = metronomeEnabled,
+                timeSignatures = timeSignatures,
+                projectName = projectName,
+            ),
+        )
     }
 
     fun moveEntryCursor(beat: Float) {
