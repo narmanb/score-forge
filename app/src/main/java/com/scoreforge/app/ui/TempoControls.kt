@@ -46,6 +46,14 @@ fun TempoControls(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        Text(
+            "Map: " + normalized.joinToString(" • ") { change ->
+                val where = if (change.startBeat <= 0.001f) "start" else "beat ${formatTempoBeat(change.startBeat)}"
+                "$where = ${change.bpm}"
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
 
         CompactCommandButton(
             label = "−5",

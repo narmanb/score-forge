@@ -62,6 +62,8 @@ import com.scoreforge.app.music.ScoreKeySignatures
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScorePitchSpelling
 import com.scoreforge.app.music.ScoreRest
+import com.scoreforge.app.music.ScoreTempoChange
+import com.scoreforge.app.music.ScoreTempos
 import com.scoreforge.app.music.ScoreTimeSignature
 import com.scoreforge.app.music.ScoreTimeSignatures
 import com.scoreforge.app.music.ScoreTies
@@ -86,6 +88,7 @@ fun ScoreStaffEditor(
     events: List<ScoreEvent>,
     selectedDuration: NoteDuration,
     cursorBeat: Float,
+    tempoChanges: List<ScoreTempoChange> = listOf(ScoreTempos.DEFAULT),
     timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
     keySignatures: List<ScoreKeySignature> = listOf(ScoreKeySignatures.DEFAULT),
     clefMode: ScoreClefMode = ScoreClefMode.AUTO,
@@ -495,6 +498,7 @@ fun ScoreStaffEditor(
                         Offset(staffLeft, geometry.staffBottom),
                         2.1f,
                     )
+                    val normalizedTempos = ScoreTempos.normalize(tempoChanges)
                     val normalizedTimeSignatures = ScoreTimeSignatures.normalize(timeSignatures)
                     val normalizedKeySignatures = ScoreKeySignatures.normalize(keySignatures)
                     val measureBoundaries = ScoreTimeSignatures.measureBoundaries(
@@ -548,6 +552,18 @@ fun ScoreStaffEditor(
                             Offset(x, geometry.staffBottom),
                             if (measureBeat == 0f) 2.1f else 1.3f,
                         )
+                    }
+
+                    normalizedTempos.forEach { tempo ->
+                        if (tempo.startBeat <= contentBeats + 0.001f) {
+                            drawTempoMark(
+                                tempo = tempo,
+                                timelineLeftPx = timelineLeftPx,
+                                pixelsPerBeat = beatWidthPx,
+                                geometry = geometry,
+                                notationGaps = notationGaps,
+                            )
+                        }
                     }
 
                     normalizedTimeSignatures.drop(1).forEach { signature ->
@@ -818,6 +834,36 @@ private fun staffGeometry(
         lineSpacing = spacing,
         staffBottom = center + spacing * 2f,
     )
+}
+
+private fun DrawScope.drawTempoMark(
+    tempo: ScoreTempoChange,
+    timelineLeftPx: Float,
+    pixelsPerBeat: Float,
+    geometry: StaffGeometry,
+    notationGaps: List<StaffNotationGap>,
+) {
+    val x = StaffNotationSpacing.xAtBeat(
+        tempo.startBeat,
+        timelineLeftPx,
+        pixelsPerBeat,
+        notationGaps,
+        includeGapAtBeat = true,
+    )
+    drawIntoCanvas { canvas ->
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.rgb(56, 48, 74)
+            textAlign = Paint.Align.LEFT
+            typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
+            textSize = geometry.lineSpacing * 0.72f
+        }
+        canvas.nativeCanvas.drawText(
+            "♩ = ${tempo.bpm}",
+            x + geometry.lineSpacing * 0.18f,
+            geometry.rulerY - geometry.lineSpacing * 0.42f,
+            paint,
+        )
+    }
 }
 
 private fun DrawScope.drawNotationHeader(

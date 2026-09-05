@@ -1365,6 +1365,7 @@ fun ScoreForgeComposerScreen(
                         events = activeEvents,
                         selectedDuration = selectedDuration,
                         cursorBeat = activeCursorBeat,
+                        tempoChanges = tempoChanges,
                         timeSignatures = timeSignatures,
                         keySignatures = keySignatures,
                         clefMode = activeTrack.clefMode,

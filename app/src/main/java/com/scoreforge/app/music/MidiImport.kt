@@ -554,8 +554,8 @@ object MidiImporter {
                             when (data1) {
                                 0 -> state(channel).bankMsb = value
                                 32 -> state(channel).bankLsb = value
-                                7 -> state(channel).volume = value
-                                10 -> state(channel).pan = value
+                                7 -> if (state(channel).volume == null) state(channel).volume = value
+                                10 -> if (state(channel).pan == null) state(channel).pan = value
                             }
                         }
                         0xC0 -> state(channel).program = data1.coerceIn(0, 127)
