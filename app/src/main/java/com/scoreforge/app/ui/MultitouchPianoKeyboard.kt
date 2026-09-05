@@ -35,6 +35,7 @@ import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import com.scoreforge.app.music.HoldDurationMode
 import com.scoreforge.app.music.NoteArticulation
 import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
@@ -72,6 +73,7 @@ fun MultitouchPianoKeyboard(
     chordMode: StepChordMode,
     octaveShift: Int,
     entryMode: PianoEntryMode,
+    holdDurationMode: HoldDurationMode,
     liveRecordingActive: Boolean,
     holdPreviewDuration: NoteDuration?,
     holdPreviewDotted: Boolean,
@@ -89,6 +91,7 @@ fun MultitouchPianoKeyboard(
     onArticulationSelected: (NoteArticulation) -> Unit,
     onToggleTie: () -> Unit,
     onEntryModeChanged: (PianoEntryMode) -> Unit,
+    onHoldDurationModeChanged: (HoldDurationMode) -> Unit,
     onStopLive: () -> Unit,
     onCycleChordMode: () -> Unit,
     onAdvanceChord: () -> Unit,
@@ -439,6 +442,19 @@ fun MultitouchPianoKeyboard(
                         style = MaterialTheme.typography.labelMedium,
                         color = Color.White,
                     )
+                    Text("Length", style = MaterialTheme.typography.labelSmall, color = Color.White)
+                    HoldDurationMode.entries.forEach { option ->
+                        ChamferedControlButton(
+                            label = option.displayName,
+                            onClick = {
+                                if (holdDurationMode != option) {
+                                    releaseAllPitches()
+                                    onHoldDurationModeChanged(option)
+                                }
+                            },
+                            selected = holdDurationMode == option,
+                        )
+                    }
                 } else {
                     ChamferedControlButton(
                         label = durationControlLabel(selectedDuration, selectedDotted),

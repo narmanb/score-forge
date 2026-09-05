@@ -43,6 +43,8 @@ import com.scoreforge.app.audio.ScorePlaybackEngine
 import com.scoreforge.app.audio.ScoreTransportBus
 import com.scoreforge.app.audio.SoundFontEngine
 import com.scoreforge.app.music.ComfortTempo
+import com.scoreforge.app.music.HoldDurationMode
+import com.scoreforge.app.music.HoldDurationTiming
 import com.scoreforge.app.music.HoldEntryTiming
 import com.scoreforge.app.music.LiveEntryTiming
 import com.scoreforge.app.music.NaturalEntryTiming
@@ -130,6 +132,7 @@ fun ScoreForgeComposerScreen() {
     var isPlaying by remember { mutableStateOf(false) }
     var chordMode by rememberSaveable { mutableStateOf(StepChordMode.OFF) }
     var pianoEntryMode by rememberSaveable { mutableStateOf(PianoEntryMode.STEP) }
+    var holdDurationMode by rememberSaveable { mutableStateOf(HoldDurationMode.STANDARD) }
     var naturalCurrentGroup by remember { mutableStateOf<NaturalOnsetGroup?>(null) }
     var naturalRecentIntervalsMs by remember { mutableStateOf(emptyList<Long>()) }
     var holdCurrentGroup by remember { mutableStateOf<HoldOnsetGroup?>(null) }
@@ -356,7 +359,11 @@ fun ScoreForgeComposerScreen() {
     fun updateHoldGroupAt(nowMs: Long): NaturalEntryTiming.WrittenDuration? {
         val group = holdCurrentGroup ?: return null
         val elapsedMs = (nowMs - group.onsetMs).coerceAtLeast(0L)
-        val candidate = NaturalEntryTiming.writtenForHoldMs(elapsedMs, group.bpm)
+        val candidate = HoldDurationTiming.writtenForHoldMs(
+            holdMs = elapsedMs,
+            bpm = group.bpm,
+            mode = holdDurationMode,
+        )
         val written = if (candidate.beats >= group.currentWritten.beats) candidate else group.currentWritten
         val updatedGroup = if (written != group.currentWritten) group.copy(currentWritten = written) else group
         holdCurrentGroup = updatedGroup
@@ -383,7 +390,7 @@ fun ScoreForgeComposerScreen() {
             else -> currentTrack().cursorBeat
         }
         val initialWritten = if (joinsCurrentChord) activeGroup!!.currentWritten
-        else NaturalEntryTiming.writtenForHoldMs(0L, bpm)
+        else HoldDurationTiming.writtenForHoldMs(0L, bpm, holdDurationMode)
 
         if (!joinsCurrentChord) recordBeforeScoreEdit()
 
@@ -1360,6 +1367,7 @@ fun ScoreForgeComposerScreen() {
                         chordMode = chordMode,
                         octaveShift = pianoOctaveShift,
                         entryMode = pianoEntryMode,
+                        holdDurationMode = holdDurationMode,
                         liveRecordingActive = liveRecordingActive,
                         holdPreviewDuration = holdPreviewWritten?.duration,
                         holdPreviewDotted = holdPreviewWritten?.dotted ?: false,
@@ -1383,6 +1391,14 @@ fun ScoreForgeComposerScreen() {
                             chordMode = StepChordMode.OFF
                             if (mode == PianoEntryMode.LIVE) stopPlayback()
                             pianoEntryMode = mode
+                        },
+                        onHoldDurationModeChanged = { mode ->
+                            if (holdDurationMode != mode) {
+                                finishHoldGroupForUiBreak()
+                                LiveInstrumentBus.allNotesOff()
+                                holdPreviewWritten = null
+                                holdDurationMode = mode
+                            }
                         },
                         onStopLive = ::stopLiveRecording,
                         onCycleChordMode = {
