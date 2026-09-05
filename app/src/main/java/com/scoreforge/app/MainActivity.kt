@@ -1,5 +1,10 @@
 package com.scoreforge.app
 
+import android.app.ActivityManager
+import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -8,6 +13,7 @@ import android.os.SystemClock
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
@@ -36,6 +42,9 @@ class MainActivity : ComponentActivity() {
             )
         }
         requestImmersiveMode()
+        if (savedInstanceState == null) {
+            maybeShowExternalOpenDiagnostics(intent, entryPoint = "onCreate")
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -43,6 +52,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         externalOpenRequest = intent.toExternalOpenRequestOrNull()
         requestImmersiveMode()
+        maybeShowExternalOpenDiagnostics(intent, entryPoint = "onNewIntent")
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -62,6 +72,79 @@ class MainActivity : ComponentActivity() {
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) requestImmersiveMode()
+    }
+
+    private fun maybeShowExternalOpenDiagnostics(intent: Intent, entryPoint: String) {
+        if (intent.action != Intent.ACTION_VIEW || intent.data == null) return
+        window.decorView.post {
+            if (!isFinishing && !isDestroyed) {
+                showExternalOpenDiagnostics(intent, entryPoint)
+            }
+        }
+    }
+
+    private fun showExternalOpenDiagnostics(intent: Intent, entryPoint: String) {
+        val report = buildExternalOpenDiagnostics(intent, entryPoint)
+        AlertDialog.Builder(this)
+            .setTitle("External-open diagnostics")
+            .setMessage(report)
+            .setPositiveButton("Copy") { _, _ ->
+                val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("Score Forge external-open diagnostics", report))
+                Toast.makeText(this, "Diagnostics copied", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Close", null)
+            .show()
+    }
+
+    private fun buildExternalOpenDiagnostics(intent: Intent, entryPoint: String): String {
+        val flagNames = listOf(
+            Intent.FLAG_ACTIVITY_NEW_TASK to "NEW_TASK",
+            Intent.FLAG_ACTIVITY_MULTIPLE_TASK to "MULTIPLE_TASK",
+            Intent.FLAG_ACTIVITY_NEW_DOCUMENT to "NEW_DOCUMENT",
+            Intent.FLAG_ACTIVITY_CLEAR_TOP to "CLEAR_TOP",
+            Intent.FLAG_ACTIVITY_SINGLE_TOP to "SINGLE_TOP",
+            Intent.FLAG_ACTIVITY_CLEAR_TASK to "CLEAR_TASK",
+            Intent.FLAG_ACTIVITY_RETAIN_IN_RECENTS to "RETAIN_IN_RECENTS",
+            Intent.FLAG_ACTIVITY_PREVIOUS_IS_TOP to "PREVIOUS_IS_TOP",
+            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT to "REORDER_TO_FRONT",
+            Intent.FLAG_ACTIVITY_NO_HISTORY to "NO_HISTORY",
+            Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS to "EXCLUDE_FROM_RECENTS",
+        ).filter { (flag, _) -> intent.flags and flag != 0 }
+            .joinToString(separator = ", ") { (_, name) -> name }
+            .ifBlank { "none of the tracked activity flags" }
+
+        val appTaskLines = runCatching {
+            val activityManager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            activityManager.appTasks.mapIndexed { index, appTask ->
+                val info = appTask.taskInfo
+                val baseFlags = info.baseIntent?.flags ?: 0
+                "  [$index] taskId=${info.taskId}, activities=${info.numActivities}, " +
+                    "base=${info.baseActivity?.flattenToShortString()}, " +
+                    "top=${info.topActivity?.flattenToShortString()}, " +
+                    "baseIntentFlags=0x${baseFlags.toUInt().toString(16)}"
+            }
+        }.getOrElse { error ->
+            listOf("  unavailable: ${error::class.java.simpleName}: ${error.message}")
+        }
+
+        return buildString {
+            appendLine("Score Forge ${BuildConfig.VERSION_NAME}")
+            appendLine("entryPoint=$entryPoint")
+            appendLine("taskId=$taskId")
+            appendLine("isTaskRoot=$isTaskRoot")
+            appendLine("component=${componentName.flattenToShortString()}")
+            appendLine("action=${intent.action}")
+            appendLine("mime=${intent.type}")
+            appendLine("uriScheme=${intent.data?.scheme}")
+            appendLine("flags=0x${intent.flags.toUInt().toString(16)}")
+            appendLine("decodedFlags=$flagNames")
+            appendLine("referrer=$referrer")
+            appendLine("callingPackage=$callingPackage")
+            appendLine("categories=${intent.categories?.joinToString() ?: "none"}")
+            appendLine("appTasks=${appTaskLines.size}")
+            appTaskLines.forEach(::appendLine)
+        }.trimEnd()
     }
 
     private fun requestImmersiveMode() {
