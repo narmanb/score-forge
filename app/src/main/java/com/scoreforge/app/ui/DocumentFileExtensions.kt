@@ -10,19 +10,27 @@ internal object DocumentFileExtensions {
     fun correctedName(displayName: String, requiredExtension: String): String {
         val extension = normalizedExtension(requiredExtension)
         val trimmed = displayName.trim().ifBlank { "Untitled" }
-        return if (trimmed.endsWith(extension, ignoreCase = true)) trimmed else trimmed + extension
+        return if (hasRequiredExtension(trimmed, extension)) trimmed else trimmed + extension
+    }
+
+    fun hasRequiredExtension(displayName: String, requiredExtension: String): Boolean {
+        val extension = normalizedExtension(requiredExtension)
+        return displayName.trim().endsWith(extension, ignoreCase = true)
     }
 
     /**
-     * Ensures a newly-created SAF document keeps the required extension even if the user deletes it
-     * in Android's Create Document filename field. Providers differ in rename support, so try the
-     * standard DocumentsContract rename first and then a display-name update. If neither works,
-     * fail before writing instead of silently creating a file that is difficult to reopen/share.
+     * Ensures a newly-created SAF document really keeps the required extension even if the user
+     * deletes it in Android's Create Document filename field. Some providers return a non-null URI
+     * from renameDocument() without actually changing DISPLAY_NAME, so every rename/update attempt
+     * is verified by querying the provider again before Score Forge writes any contents.
      */
     fun ensure(context: Context, uri: Uri, requiredExtension: String): Uri {
         val extension = normalizedExtension(requiredExtension)
-        val originalName = queryCreatedDocumentDisplayName(context, uri) ?: return uri
-        if (originalName.endsWith(extension, ignoreCase = true)) return uri
+        val originalName = queryCreatedDocumentDisplayName(context, uri)
+            ?: throw IllegalStateException(
+                "Could not verify the selected filename. Save again and leave $extension at the end of the name."
+            )
+        if (hasRequiredExtension(originalName, extension)) return uri
 
         val correctedName = correctedName(originalName, extension)
         val resolver = context.contentResolver
@@ -30,18 +38,28 @@ internal object DocumentFileExtensions {
         val renamedUri = runCatching {
             DocumentsContract.renameDocument(resolver, uri, correctedName)
         }.getOrNull()
-        if (renamedUri != null) return renamedUri
+        val candidate = renamedUri ?: uri
+        if (queryCreatedDocumentDisplayName(context, candidate)
+                ?.let { hasRequiredExtension(it, extension) } == true
+        ) {
+            return candidate
+        }
 
-        val updatedRows = runCatching {
+        runCatching {
             val values = ContentValues().apply {
                 put(OpenableColumns.DISPLAY_NAME, correctedName)
             }
-            resolver.update(uri, values, null, null)
-        }.getOrDefault(0)
-        if (updatedRows > 0) return uri
+            resolver.update(candidate, values, null, null)
+        }
+
+        if (queryCreatedDocumentDisplayName(context, candidate)
+                ?.let { hasRequiredExtension(it, extension) } == true
+        ) {
+            return candidate
+        }
 
         throw IllegalStateException(
-            "Could not preserve the required $extension filename. Save again and leave $extension at the end of the name."
+            "Android would not keep the required $extension filename. Save again and leave $extension at the end of the name."
         )
     }
 
