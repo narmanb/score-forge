@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.scoreforge.app.ExternalOpenRequest
 import com.scoreforge.app.audio.LiveInstrumentBus
 import com.scoreforge.app.audio.ScorePlaybackEngine
 import com.scoreforge.app.audio.ScoreTransportBus
@@ -105,7 +106,10 @@ private data class LiveHeldInput(
 )
 
 @Composable
-fun ScoreForgeComposerScreen() {
+fun ScoreForgeComposerScreen(
+    externalOpenRequest: ExternalOpenRequest? = null,
+    onExternalOpenConsumed: (ExternalOpenRequest) -> Unit = {},
+) {
     val context = LocalContext.current
     val pageScrollState = rememberScrollState()
     val tracks = remember { mutableStateListOf(ScoreTracks.defaultTrack()) }
@@ -1146,6 +1150,12 @@ fun ScoreForgeComposerScreen() {
     }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
+        ExternalOpenHandler(
+            request = externalOpenRequest.takeIf { draftLoaded },
+            onOpenProject = ::openProject,
+            onConsumed = onExternalOpenConsumed,
+        )
+
         Surface(modifier = Modifier.fillMaxSize()) {
             Column(
                 modifier = Modifier
