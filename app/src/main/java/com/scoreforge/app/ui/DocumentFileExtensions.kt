@@ -21,7 +21,7 @@ internal object DocumentFileExtensions {
      */
     fun ensure(context: Context, uri: Uri, requiredExtension: String): Uri {
         val extension = normalizedExtension(requiredExtension)
-        val originalName = queryDisplayName(context, uri) ?: return uri
+        val originalName = queryCreatedDocumentDisplayName(context, uri) ?: return uri
         if (originalName.endsWith(extension, ignoreCase = true)) return uri
 
         val correctedName = correctedName(originalName, extension)
@@ -49,7 +49,7 @@ internal object DocumentFileExtensions {
         value.trim().let { if (it.startsWith('.')) it else ".$it" }
 }
 
-internal fun queryDisplayName(context: Context, uri: Uri): String? =
+private fun queryCreatedDocumentDisplayName(context: Context, uri: Uri): String? =
     context.contentResolver.query(
         uri,
         arrayOf(OpenableColumns.DISPLAY_NAME),
