@@ -61,6 +61,8 @@ import com.scoreforge.app.music.ScoreClefs
 import com.scoreforge.app.music.ScoreEditHistory
 import com.scoreforge.app.music.ScoreEditState
 import com.scoreforge.app.music.ScoreKeySignatures
+import com.scoreforge.app.music.ScoreMeasureClipboard
+import com.scoreforge.app.music.ScoreMeasureEdits
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreProjectRepository
 import com.scoreforge.app.music.ScoreProjectSnapshot
@@ -169,6 +171,7 @@ fun ScoreForgeComposerScreen(
     var canUndo by remember { mutableStateOf(false) }
     var canRedo by remember { mutableStateOf(false) }
     var mixerGestureHistoryRecorded by remember { mutableStateOf(false) }
+    var measureClipboard by remember { mutableStateOf<ScoreMeasureClipboard?>(null) }
 
     val safeActiveTrackIndex = activeTrackIndex.coerceIn(0, tracks.lastIndex)
     val activeTrack = tracks[safeActiveTrackIndex]
@@ -1229,6 +1232,61 @@ fun ScoreForgeComposerScreen(
         replaceActiveTrack { it.copy(presetBank = bank, presetProgram = program) }
     }
 
+    fun copyActiveMeasure() {
+        measureClipboard = ScoreMeasureEdits.copyMeasure(
+            events = currentTrack().events,
+            timeSignatures = timeSignatures,
+            beat = currentTrack().cursorBeat,
+        )
+    }
+
+    fun pasteActiveMeasure() {
+        val clipboard = measureClipboard ?: return
+        stopPlayback()
+        stopLiveRecording()
+        cancelNaturalEntryGroup()
+        LiveInstrumentBus.allNotesOff()
+        val track = currentTrack()
+        recordBeforeScoreEdit()
+        val updatedEvents = ScoreMeasureEdits.pasteReplace(
+            events = track.events,
+            timeSignatures = timeSignatures,
+            destinationBeat = track.cursorBeat,
+            clipboard = clipboard,
+        )
+        replaceActiveTrack { it.copy(events = updatedEvents) }
+        selectedEventIndex = -1
+        syncHistoryButtons()
+    }
+
+    fun duplicateActiveMeasure(copies: Int) {
+        stopPlayback()
+        stopLiveRecording()
+        cancelNaturalEntryGroup()
+        LiveInstrumentBus.allNotesOff()
+        val track = currentTrack()
+        recordBeforeScoreEdit()
+        val updatedEvents = ScoreMeasureEdits.duplicateMeasure(
+            events = track.events,
+            timeSignatures = timeSignatures,
+            beat = track.cursorBeat,
+            copies = copies,
+        )
+        val newCursorBeat = ScoreMeasureEdits.duplicateCursorBeat(
+            timeSignatures = timeSignatures,
+            beat = track.cursorBeat,
+            copies = copies,
+        )
+        replaceActiveTrack {
+            it.copy(
+                events = updatedEvents,
+                cursorBeat = newCursorBeat,
+            )
+        }
+        selectedEventIndex = -1
+        syncHistoryButtons()
+    }
+
     fun clearActiveTrack() {
         val track = currentTrack()
         if (track.events.isEmpty()) return
@@ -1415,6 +1473,13 @@ fun ScoreForgeComposerScreen(
                         LiveInstrumentBus.allNotesOff()
                         showPianoKeyboard = !showPianoKeyboard
                     },
+                    measurePasteEnabled = measureClipboard != null,
+                    onCopyMeasure = ::copyActiveMeasure,
+                    onPasteMeasure = ::pasteActiveMeasure,
+                    onDuplicateMeasure = { duplicateActiveMeasure(1) },
+                    onDuplicateMeasure2 = { duplicateActiveMeasure(2) },
+                    onDuplicateMeasure4 = { duplicateActiveMeasure(4) },
+                    onDuplicateMeasure8 = { duplicateActiveMeasure(8) },
                 )
 
                 when (editorMode) {
