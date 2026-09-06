@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,8 +73,10 @@ import com.scoreforge.app.music.ScoreTimeline
 import com.scoreforge.app.music.ScoreTrack
 import com.scoreforge.app.music.ScoreTracks
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private data class NaturalHeldInput(
@@ -129,6 +132,8 @@ fun ScoreForgeComposerScreen(
     val naturalHeldInputs = remember { mutableMapOf<Int, NaturalHeldInput>() }
     val holdHeldInputs = remember { mutableMapOf<Int, HoldHeldInput>() }
     val liveHeldInputs = remember { mutableMapOf<Int, LiveHeldInput>() }
+    val durationAuditionScope = rememberCoroutineScope()
+    var durationAuditionJob by remember { mutableStateOf<Job?>(null) }
 
     var activeTrackIndex by remember { mutableIntStateOf(0) }
     var selectedEventIndex by remember { mutableIntStateOf(-1) }
@@ -183,10 +188,47 @@ fun ScoreForgeComposerScreen(
     val liveRecordingActive = liveRecordingStartedAtMs != null
     val activeTempoBpm = ScoreTempos.atBeat(tempoChanges, activeCursorBeat).bpm
 
+    fun stopDurationAudition() {
+        durationAuditionJob?.cancel()
+        durationAuditionJob = null
+        LiveInstrumentBus.noteOff(NoteDurationAudition.MIDI_PITCH)
+    }
+
+    fun selectDurationWithAudition(duration: NoteDuration) {
+        selectedDuration = duration
+        stopDurationAudition()
+        if (
+            !appSettings.noteDurationAuditionEnabled ||
+            isPlaying ||
+            liveRecordingActive ||
+            comfortTempoCapturing
+        ) return
+
+        val previewVelocity = NoteDurationAudition.velocity(appSettings.noteDurationAuditionVolume)
+        if (!LiveInstrumentBus.noteOn(NoteDurationAudition.MIDI_PITCH, velocity = previewVelocity)) return
+
+        val previewMs = NoteDurationAudition.durationMs(
+            duration = duration,
+            dotted = selectedDotted,
+            bpm = activeTempoBpm,
+        )
+        durationAuditionJob = durationAuditionScope.launch {
+            try {
+                delay(previewMs)
+            } finally {
+                LiveInstrumentBus.noteOff(NoteDurationAudition.MIDI_PITCH)
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         ScoreTransportBus.state.collect { state ->
             isPlaying = state.isPlaying
         }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { stopDurationAudition() }
     }
 
     fun syncHistoryButtons() {
@@ -1262,7 +1304,10 @@ fun ScoreForgeComposerScreen(
                     },
                     onPlay = ::startPlayback,
                     onStop = ::stopPlayback,
-                    onOpenSettings = { settingsOpen = true },
+                    onOpenSettings = {
+                        stopDurationAudition()
+                        settingsOpen = true
+                    },
                 )
 
                 ProjectFileControls(
@@ -1358,7 +1403,7 @@ fun ScoreForgeComposerScreen(
                         keySignatures = ScoreKeySignatures.withoutChange(keySignatures, startBeat)
                     },
                     onClefModeChanged = ::setActiveTrackClefMode,
-                    onDurationSelected = { selectedDuration = it },
+                    onDurationSelected = ::selectDurationWithAudition,
                     onToggleDotted = { selectedDotted = !selectedDotted },
                     onInsertRest = ::insertRest,
                     onToggleSharpInput = { staffSharpInput = !staffSharpInput },
@@ -1457,7 +1502,7 @@ fun ScoreForgeComposerScreen(
                         canRedo = canRedo,
                         onUndo = ::undoScore,
                         onRedo = ::redoScore,
-                        onDurationSelected = { selectedDuration = it },
+                        onDurationSelected = ::selectDurationWithAudition,
                         onToggleDotted = { selectedDotted = !selectedDotted },
                         onArticulationSelected = { selectedArticulation = it },
                         onToggleTie = ::toggleSelectedTie,
@@ -1608,11 +1653,7 @@ private fun HeaderBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        ChamferedControlButton(
-            label = "⚙",
-            onClick = onOpenSettings,
-            compact = false,
-        )
+        SettingsLaunchButton(onClick = onOpenSettings)
 
         Column {
             Text("Score Forge", style = MaterialTheme.typography.titleLarge, color = Color.White)

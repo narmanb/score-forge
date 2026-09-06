@@ -100,7 +100,7 @@ fun ScoreForgeSettingsScreen(
                 )
                 ToggleSetting(
                     label = "UI Command Sounds",
-                    description = "Small chirps on supported increase/decrease command buttons.",
+                    description = "Small command chirps, including the distinct Settings-open sound.",
                     enabled = settings.commandSoundsEnabled,
                     onChanged = { update(settings.copy(commandSoundsEnabled = it)) },
                 )
@@ -184,7 +184,7 @@ fun ScoreForgeSettingsScreen(
             SettingsSection("Audio & Feedback") {
                 ToggleSetting(
                     label = "Note Duration Audition",
-                    description = "Controls the upcoming Middle-C duration preview when choosing note lengths.",
+                    description = "Play a quiet Middle C using the selected instrument when choosing note lengths.",
                     enabled = settings.noteDurationAuditionEnabled,
                     onChanged = { update(settings.copy(noteDurationAuditionEnabled = it)) },
                 )
@@ -199,6 +199,7 @@ fun ScoreForgeSettingsScreen(
                 )
                 Slider(
                     value = settings.noteDurationAuditionVolume,
+                    enabled = settings.noteDurationAuditionEnabled,
                     onValueChange = { update(settings.copy(noteDurationAuditionVolume = it.coerceIn(0.05f, 0.70f))) },
                     valueRange = 0.05f..0.70f,
                     steps = 12,
