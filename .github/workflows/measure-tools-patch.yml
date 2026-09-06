@@ -46,8 +46,7 @@ jobs:
               'measure clipboard state',
           )
 
-          insertion_anchor = '''    fun clearActiveTrack() {
-          '''
+          insertion_anchor = '    fun clearActiveTrack() {\n'
           measure_functions = '''    fun copyActiveMeasure() {
               measureClipboard = ScoreMeasureEdits.copyMeasure(
                   events = currentTrack().events,
@@ -56,7 +55,7 @@ jobs:
               )
           }
 
-              fun pasteActiveMeasure() {
+          fun pasteActiveMeasure() {
               val clipboard = measureClipboard ?: return
               stopPlayback()
               stopLiveRecording()
@@ -75,7 +74,7 @@ jobs:
               syncHistoryButtons()
           }
 
-              fun duplicateActiveMeasure(copies: Int) {
+          fun duplicateActiveMeasure(copies: Int) {
               stopPlayback()
               stopLiveRecording()
               cancelNaturalEntryGroup()
@@ -103,24 +102,16 @@ jobs:
               syncHistoryButtons()
           }
 
-              fun clearActiveTrack() {
+          fun clearActiveTrack() {
           '''
           screen = replace_once(screen, insertion_anchor, measure_functions, 'measure functions')
 
-          toolbar_call_anchor = '''                    onTogglePianoKeyboard = {
-                      stopLiveRecording()
-                      cancelNaturalEntryGroup()
-                      LiveInstrumentBus.allNotesOff()
-                      showPianoKeyboard = !showPianoKeyboard
-                  },
-              )
+          toolbar_call_anchor = '''                        showPianoKeyboard = !showPianoKeyboard
+                      },
+                  )
           '''
-          toolbar_call_replacement = '''                    onTogglePianoKeyboard = {
-                      stopLiveRecording()
-                      cancelNaturalEntryGroup()
-                      LiveInstrumentBus.allNotesOff()
-                      showPianoKeyboard = !showPianoKeyboard
-                  },
+          toolbar_call_replacement = '''                        showPianoKeyboard = !showPianoKeyboard
+                      },
                       measurePasteEnabled = measureClipboard != null,
                       onCopyMeasure = ::copyActiveMeasure,
                       onPasteMeasure = ::pasteActiveMeasure,
@@ -128,7 +119,7 @@ jobs:
                       onDuplicateMeasure2 = { duplicateActiveMeasure(2) },
                       onDuplicateMeasure4 = { duplicateActiveMeasure(4) },
                       onDuplicateMeasure8 = { duplicateActiveMeasure(8) },
-              )
+                  )
           '''
           screen = replace_once(screen, toolbar_call_anchor, toolbar_call_replacement, 'toolbar measure callbacks')
           screen_path.write_text(screen)
@@ -183,9 +174,17 @@ jobs:
 
           gradle_path = Path('app/build.gradle.kts')
           gradle = gradle_path.read_text()
-          gradle = replace_once(gradle, '        versionCode = 52\n        versionName = "0.2.49"\n', '        versionCode = 53\n        versionName = "0.2.50"\n', 'version bump')
+          gradle = replace_once(
+              gradle,
+              '        versionCode = 52\n        versionName = "0.2.49"\n',
+              '        versionCode = 53\n        versionName = "0.2.50"\n',
+              'version bump',
+          )
           gradle_path.write_text(gradle)
           PY
+
+      - name: Check patch
+        run: git diff --check
 
       - name: Commit patch and remove temporary workflow
         shell: bash
@@ -196,5 +195,3 @@ jobs:
           git add app/build.gradle.kts app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt app/src/main/java/com/scoreforge/app/ui/ComposerTransformToolbar.kt
           git commit -m "Wire measure tools into composer"
           git push origin HEAD:feature/measure-tools
-
-# Trigger after workflow exists on the feature branch.
