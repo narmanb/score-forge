@@ -196,3 +196,5 @@ jobs:
           git add app/build.gradle.kts app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt app/src/main/java/com/scoreforge/app/ui/ComposerTransformToolbar.kt
           git commit -m "Wire measure tools into composer"
           git push origin HEAD:feature/measure-tools
+
+# Trigger after workflow exists on the feature branch.
