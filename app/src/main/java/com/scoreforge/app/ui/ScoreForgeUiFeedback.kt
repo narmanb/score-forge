@@ -3,6 +3,7 @@ package com.scoreforge.app.ui
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.content.Context
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -16,7 +17,8 @@ internal object ScoreForgeUiFeedback {
     private val decreaseTrack by lazy { buildTrack(startHz = 620.0, endHz = 420.0) }
     private val neutralTrack by lazy { buildTrack(startHz = 610.0, endHz = 660.0) }
 
-    fun play(feedback: UiCommandFeedback) {
+    fun play(feedback: UiCommandFeedback, context: Context) {
+        if (!ScoreForgeSettingsRepository.commandSoundsEnabled(context)) return
         val track = when (feedback) {
             UiCommandFeedback.NONE -> return
             UiCommandFeedback.NEUTRAL -> neutralTrack

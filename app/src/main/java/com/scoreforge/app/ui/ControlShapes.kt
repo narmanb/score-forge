@@ -86,7 +86,7 @@ internal fun ChamferedControlButton(
         onClick = {
             view.performScoreForgeHaptic(UiHapticFeedback.TICK)
             if (feedback != UiCommandFeedback.NONE) {
-                ScoreForgeUiFeedback.play(feedback)
+                ScoreForgeUiFeedback.play(feedback, view.context)
                 latchedPressed.value = true
                 scope.launch {
                     delay(110L)
@@ -237,7 +237,7 @@ internal fun ComposerSubmenuCommandButton(
     Button(
         onClick = {
             view.performScoreForgeHaptic(UiHapticFeedback.TICK)
-            ScoreForgeUiFeedback.play(feedback)
+            ScoreForgeUiFeedback.play(feedback, view.context)
             latchedPressed.value = true
             scope.launch {
                 delay(110L)
@@ -291,7 +291,7 @@ internal fun CompactCommandButton(
     Button(
         onClick = {
             view.performScoreForgeHaptic(UiHapticFeedback.TICK)
-            ScoreForgeUiFeedback.play(feedback)
+            ScoreForgeUiFeedback.play(feedback, view.context)
             latchedPressed.value = true
             scope.launch {
                 delay(110L)

@@ -93,6 +93,8 @@ fun ScoreStaffEditor(
     selectedEventIndex: Int,
     isPlaying: Boolean = false,
     canPlay: Boolean = false,
+    initialInputEnabled: Boolean = true,
+    followPlayback: Boolean = true,
     onPlay: () -> Unit = {},
     onStop: () -> Unit = {},
     onAddPitch: (pitch: Int, startBeat: Float) -> Unit,
@@ -114,7 +116,7 @@ fun ScoreStaffEditor(
     var draggingVerticalFromCursorGutter by remember { mutableStateOf(false) }
     var manualBrowseNotified by remember { mutableStateOf(false) }
     var zoom by rememberSaveable { mutableFloatStateOf(1f) }
-    var staffInputEnabled by rememberSaveable { mutableStateOf(true) }
+    var staffInputEnabled by rememberSaveable { mutableStateOf(initialInputEnabled) }
     val scrollState = rememberScrollState()
     val density = LocalDensity.current
     val transport by ScoreTransportBus.state.collectAsState()
@@ -165,7 +167,7 @@ fun ScoreStaffEditor(
             val viewportWidthPx = with(density) { viewportWidth.toPx() }
 
             LaunchedEffect(transport.beat, transport.isPlaying, safeZoom, scrollState.maxValue) {
-                if (!transport.isPlaying || scrollState.maxValue <= 0) return@LaunchedEffect
+                if (!followPlayback || !transport.isPlaying || scrollState.maxValue <= 0) return@LaunchedEffect
                 val playheadX = StaffNotationSpacing.xAtBeat(
                     transport.beat,
                     timelineLeftPx,

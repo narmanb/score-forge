@@ -63,6 +63,7 @@ fun PianoRollEditor(
     timeSignatures: List<ScoreTimeSignature> = listOf(ScoreTimeSignatures.DEFAULT),
     octaveShift: Int,
     selectedEventIndex: Int,
+    followPlayback: Boolean = true,
     onAddPitch: (pitch: Int, startBeat: Float) -> Unit,
     onSelectEvent: (eventIndex: Int) -> Unit,
     onBeginMove: (eventIndex: Int) -> Unit,
@@ -117,6 +118,7 @@ fun PianoRollEditor(
                 contentWidthPx,
             ) {
                 if (horizontalScroll.maxValue <= 0) return@LaunchedEffect
+                if (transport.isPlaying && !followPlayback) return@LaunchedEffect
                 val followBeat = if (transport.isPlaying) transport.beat else cursorBeat
                 val x = PianoRollMapping.xAtBeat(followBeat, contentBeats, contentWidthPx)
                 val viewportLeft = horizontalScroll.value.toFloat()

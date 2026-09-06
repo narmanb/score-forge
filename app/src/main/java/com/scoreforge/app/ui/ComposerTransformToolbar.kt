@@ -55,6 +55,7 @@ fun ComposerTransformToolbar(
     clefMode: ScoreClefMode,
     effectiveClef: ScoreClef,
     selectedDuration: NoteDuration,
+    durationOrder: NoteDurationOrderSetting = NoteDurationOrderSetting.LONG_TO_SHORT,
     dotted: Boolean,
     sharpInput: Boolean,
     tieEnabled: Boolean,
@@ -320,7 +321,7 @@ fun ComposerTransformToolbar(
 
             ComposerToolbarSection.NOTES -> {
                 BackButton { section = ComposerToolbarSection.ROOT }
-                NoteDuration.entries.forEach { duration ->
+                durationOrder.orderedDurations().forEach { duration ->
                     ComposerSubmenuButton(
                         label = duration.displayName,
                         onClick = { onDurationSelected(duration) },

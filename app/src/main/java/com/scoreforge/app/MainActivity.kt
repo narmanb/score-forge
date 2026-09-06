@@ -14,12 +14,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.scoreforge.app.ui.ScoreForgeComposerScreen
+import com.scoreforge.app.ui.ScoreForgeSettingsRepository
 
 class MainActivity : ComponentActivity() {
     private var externalOpenRequest by mutableStateOf<ExternalOpenRequest?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ScoreForgeSettingsRepository.applyActivityPreferences(this)
         externalOpenRequest = if (savedInstanceState == null) {
             intent.toExternalOpenRequestOrNull()
         } else {
@@ -56,6 +58,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        ScoreForgeSettingsRepository.applyActivityPreferences(this)
         requestImmersiveMode()
     }
 

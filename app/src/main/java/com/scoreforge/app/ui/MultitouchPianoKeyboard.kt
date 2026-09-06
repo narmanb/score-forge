@@ -78,6 +78,8 @@ fun MultitouchPianoKeyboard(
     holdPreviewDuration: NoteDuration?,
     holdPreviewDotted: Boolean,
     selectedDuration: NoteDuration,
+    durationOrder: NoteDurationOrderSetting = NoteDurationOrderSetting.LONG_TO_SHORT,
+    noteLabelSetting: KeyboardNoteLabelSetting = KeyboardNoteLabelSetting.C_ONLY,
     selectedDotted: Boolean,
     selectedArticulation: NoteArticulation,
     tieEnabled: Boolean,
@@ -244,12 +246,19 @@ fun MultitouchPianoKeyboard(
                             .border(0.8.dp, Color(0xFF555555)),
                         contentAlignment = Alignment.BottomCenter,
                     ) {
-                        Text(
-                            PitchNames.name(pitch),
-                            modifier = Modifier.padding(bottom = 5.dp),
-                            color = Color(0xFF222222),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
+                        val showLabel = when (noteLabelSetting) {
+                            KeyboardNoteLabelSetting.OFF -> false
+                            KeyboardNoteLabelSetting.C_ONLY -> pitch % 12 == 0
+                            KeyboardNoteLabelSetting.ALL -> true
+                        }
+                        if (showLabel) {
+                            Text(
+                                PitchNames.name(pitch),
+                                modifier = Modifier.padding(bottom = 5.dp),
+                                color = Color(0xFF222222),
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
                     }
                 }
             }
@@ -311,7 +320,7 @@ fun MultitouchPianoKeyboard(
                     enabled = canRedo,
                 )
 
-                NoteDuration.entries.forEach { duration ->
+                durationOrder.orderedDurations().forEach { duration ->
                     ChamferedControlButton(
                         label = durationControlLabel(duration, dotted = false),
                         onClick = {
