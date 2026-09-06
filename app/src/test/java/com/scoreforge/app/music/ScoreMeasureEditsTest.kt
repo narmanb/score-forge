@@ -114,6 +114,28 @@ class ScoreMeasureEditsTest {
     }
 
     @Test
+    fun pasteRejectsCopiedOnsetThatWouldStartBeyondShorterDestinationBar() {
+        val signatures = listOf(
+            ScoreTimeSignature(0f, 4, 4),
+            ScoreTimeSignature(4f, 3, 4),
+        )
+        val original = listOf(
+            note(50, 4f),
+            note(51, 6f),
+        )
+        val clipboard = ScoreMeasureClipboard(
+            sourceLengthBeats = 4f,
+            events = listOf(
+                note(70, 0f),
+                note(71, 3.5f),
+            ),
+        )
+
+        assertFalse(ScoreMeasureEdits.canPasteAt(signatures, 5f, clipboard))
+        assertEquals(original, ScoreMeasureEdits.pasteReplace(original, signatures, 5f, clipboard))
+    }
+
+    @Test
     fun duplicateInsertsCopiesAndShiftsLaterEvents() {
         val events = listOf(
             note(60, 0f),
