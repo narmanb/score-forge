@@ -590,9 +590,13 @@ object MidiImporter {
                         }
                         0x59 -> if (payload.size >= 2) {
                             val fifths = payload[0].toInt()
-                            val minor = (payload[1].toInt() and 0xFF) == 1
-                            if (fifths in -7..7) {
-                                keySignatureEvents += KeySignatureEvent(tick, fifths, minor)
+                            val mode = payload[1].toInt() and 0xFF
+                            if (fifths in -7..7 && mode in 0..1) {
+                                keySignatureEvents += KeySignatureEvent(
+                                    tick = tick,
+                                    fifths = fifths,
+                                    minor = mode == 1,
+                                )
                             }
                         }
                     }
@@ -663,7 +667,7 @@ object MidiImporter {
     ) {
         val queue = active[channel to pitch] ?: return
         val start = if (queue.isEmpty()) null else queue.removeFirst()
-        if (queue.isEmpty()) active.remove(channel to pitch
+        if (queue.isEmpty()) active.remove(channel to pitch)
         if (start != null) {
             notes += RawNote(
                 sourceTrack = sourceTrack,
