@@ -1,0 +1,198 @@
+name: Temporary Measure Tools Patcher
+
+on:
+  push:
+    branches: [feature/measure-tools]
+    paths:
+      - .github/workflows/measure-tools-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/measure-tools
+
+      - name: Patch composer measure tools
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{label}: expected exactly 1 match, found {count}")
+              return text.replace(old, new, 1)
+
+          screen_path = Path('app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt')
+          screen = screen_path.read_text()
+
+          screen = replace_once(
+              screen,
+              'import com.scoreforge.app.music.ScoreKeySignatures\n',
+              'import com.scoreforge.app.music.ScoreKeySignatures\nimport com.scoreforge.app.music.ScoreMeasureClipboard\nimport com.scoreforge.app.music.ScoreMeasureEdits\n',
+              'measure imports',
+          )
+
+          screen = replace_once(
+              screen,
+              '    var mixerGestureHistoryRecorded by remember { mutableStateOf(false) }\n',
+              '    var mixerGestureHistoryRecorded by remember { mutableStateOf(false) }\n    var measureClipboard by remember { mutableStateOf<ScoreMeasureClipboard?>(null) }\n',
+              'measure clipboard state',
+          )
+
+          insertion_anchor = '''    fun clearActiveTrack() {
+          '''
+          measure_functions = '''    fun copyActiveMeasure() {
+              measureClipboard = ScoreMeasureEdits.copyMeasure(
+                  events = currentTrack().events,
+                  timeSignatures = timeSignatures,
+                  beat = currentTrack().cursorBeat,
+              )
+          }
+
+              fun pasteActiveMeasure() {
+              val clipboard = measureClipboard ?: return
+              stopPlayback()
+              stopLiveRecording()
+              cancelNaturalEntryGroup()
+              LiveInstrumentBus.allNotesOff()
+              val track = currentTrack()
+              recordBeforeScoreEdit()
+              val updatedEvents = ScoreMeasureEdits.pasteReplace(
+                  events = track.events,
+                  timeSignatures = timeSignatures,
+                  destinationBeat = track.cursorBeat,
+                  clipboard = clipboard,
+              )
+              replaceActiveTrack { it.copy(events = updatedEvents) }
+              selectedEventIndex = -1
+              syncHistoryButtons()
+          }
+
+              fun duplicateActiveMeasure(copies: Int) {
+              stopPlayback()
+              stopLiveRecording()
+              cancelNaturalEntryGroup()
+              LiveInstrumentBus.allNotesOff()
+              val track = currentTrack()
+              recordBeforeScoreEdit()
+              val updatedEvents = ScoreMeasureEdits.duplicateMeasure(
+                  events = track.events,
+                  timeSignatures = timeSignatures,
+                  beat = track.cursorBeat,
+                  copies = copies,
+              )
+              val newCursorBeat = ScoreMeasureEdits.duplicateCursorBeat(
+                  timeSignatures = timeSignatures,
+                  beat = track.cursorBeat,
+                  copies = copies,
+              )
+              replaceActiveTrack {
+                  it.copy(
+                      events = updatedEvents,
+                      cursorBeat = newCursorBeat,
+                  )
+              }
+              selectedEventIndex = -1
+              syncHistoryButtons()
+          }
+
+              fun clearActiveTrack() {
+          '''
+          screen = replace_once(screen, insertion_anchor, measure_functions, 'measure functions')
+
+          toolbar_call_anchor = '''                    onTogglePianoKeyboard = {
+                      stopLiveRecording()
+                      cancelNaturalEntryGroup()
+                      LiveInstrumentBus.allNotesOff()
+                      showPianoKeyboard = !showPianoKeyboard
+                  },
+              )
+          '''
+          toolbar_call_replacement = '''                    onTogglePianoKeyboard = {
+                      stopLiveRecording()
+                      cancelNaturalEntryGroup()
+                      LiveInstrumentBus.allNotesOff()
+                      showPianoKeyboard = !showPianoKeyboard
+                  },
+                      measurePasteEnabled = measureClipboard != null,
+                      onCopyMeasure = ::copyActiveMeasure,
+                      onPasteMeasure = ::pasteActiveMeasure,
+                      onDuplicateMeasure = { duplicateActiveMeasure(1) },
+                      onDuplicateMeasure2 = { duplicateActiveMeasure(2) },
+                      onDuplicateMeasure4 = { duplicateActiveMeasure(4) },
+                      onDuplicateMeasure8 = { duplicateActiveMeasure(8) },
+              )
+          '''
+          screen = replace_once(screen, toolbar_call_anchor, toolbar_call_replacement, 'toolbar measure callbacks')
+          screen_path.write_text(screen)
+
+          toolbar_path = Path('app/src/main/java/com/scoreforge/app/ui/ComposerTransformToolbar.kt')
+          toolbar = toolbar_path.read_text()
+          toolbar = replace_once(
+              toolbar,
+              '''    onEditorModeChanged: (ScoreEditorMode) -> Unit,
+              onTogglePianoKeyboard: () -> Unit,
+              modifier: Modifier = Modifier,
+          ''',
+              '''    onEditorModeChanged: (ScoreEditorMode) -> Unit,
+              onTogglePianoKeyboard: () -> Unit,
+              measurePasteEnabled: Boolean = false,
+              onCopyMeasure: () -> Unit = {},
+              onPasteMeasure: () -> Unit = {},
+              onDuplicateMeasure: () -> Unit = {},
+              onDuplicateMeasure2: () -> Unit = {},
+              onDuplicateMeasure4: () -> Unit = {},
+              onDuplicateMeasure8: () -> Unit = {},
+              modifier: Modifier = Modifier,
+          ''',
+              'toolbar signature',
+          )
+          toolbar = replace_once(
+              toolbar,
+              '''            ComposerToolbarSection.MEASURE -> {
+                  BackButton { section = ComposerToolbarSection.ROOT }
+                  Text("Measure ${measureNumber.coerceAtLeast(1)}", style = MaterialTheme.typography.labelLarge)
+                  Text("Copy / paste / duplicate tools go here next", style = MaterialTheme.typography.bodySmall)
+              }
+          ''',
+              '''            ComposerToolbarSection.MEASURE -> {
+                  BackButton { section = ComposerToolbarSection.ROOT }
+                  Text("Measure ${measureNumber.coerceAtLeast(1)}", style = MaterialTheme.typography.labelLarge)
+                  ComposerSubmenuButton(label = "Copy", onClick = onCopyMeasure)
+                  ComposerSubmenuButton(
+                      label = "Paste",
+                      onClick = onPasteMeasure,
+                      enabled = measurePasteEnabled,
+                  )
+                  ComposerSubmenuButton(label = "Duplicate", onClick = onDuplicateMeasure)
+                  ComposerSubmenuButton(label = "×2", onClick = onDuplicateMeasure2)
+                  ComposerSubmenuButton(label = "×4", onClick = onDuplicateMeasure4)
+                  ComposerSubmenuButton(label = "×8", onClick = onDuplicateMeasure8)
+              }
+          ''',
+              'measure toolbar contents',
+          )
+          toolbar_path.write_text(toolbar)
+
+          gradle_path = Path('app/build.gradle.kts')
+          gradle = gradle_path.read_text()
+          gradle = replace_once(gradle, '        versionCode = 52\n        versionName = "0.2.49"\n', '        versionCode = 53\n        versionName = "0.2.50"\n', 'version bump')
+          gradle_path.write_text(gradle)
+          PY
+
+      - name: Commit patch and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "Score Forge automation"
+          git config user.email "actions@users.noreply.github.com"
+          git rm .github/workflows/measure-tools-patch.yml
+          git add app/build.gradle.kts app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt app/src/main/java/com/scoreforge/app/ui/ComposerTransformToolbar.kt
+          git commit -m "Wire measure tools into composer"
+          git push origin HEAD:feature/measure-tools
