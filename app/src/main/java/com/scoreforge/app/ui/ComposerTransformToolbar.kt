@@ -7,9 +7,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -117,11 +115,11 @@ fun ComposerTransformToolbar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(54.dp)
+            .height(44.dp)
             .horizontalScroll(rememberScrollState())
-            .padding(horizontal = 12.dp, vertical = 5.dp),
+            .padding(horizontal = 12.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         when (section) {
             ComposerToolbarSection.ROOT -> {
@@ -158,7 +156,7 @@ fun ComposerTransformToolbar(
             ComposerToolbarSection.TEMPO -> {
                 BackButton { section = ComposerToolbarSection.ROOT }
                 Text("${activeTempo.bpm} BPM", style = MaterialTheme.typography.labelLarge)
-                CompactCommandButton(
+                ComposerSubmenuCommandButton(
                     label = "−5",
                     feedback = UiCommandFeedback.DECREASE,
                     onClick = {
@@ -169,7 +167,7 @@ fun ComposerTransformToolbar(
                     },
                     enabled = activeTempo.bpm > ScoreTempos.MIN_BPM,
                 )
-                CompactCommandButton(
+                ComposerSubmenuCommandButton(
                     label = "+5",
                     feedback = UiCommandFeedback.INCREASE,
                     onClick = {
@@ -181,7 +179,7 @@ fun ComposerTransformToolbar(
                     enabled = activeTempo.bpm < ScoreTempos.MAX_BPM,
                 )
                 if (removableTempo) {
-                    CompactCommandButton(
+                    ComposerSubmenuCommandButton(
                         label = "Remove Change",
                         onClick = { onRemoveTempo(tempoEditBeat) },
                     )
@@ -191,17 +189,17 @@ fun ComposerTransformToolbar(
                     comfortTempoCapturing -> {
                         val remaining = (ComfortTempo.REQUIRED_ATTACKS - comfortTempoAttackCount).coerceAtLeast(0)
                         Text("Tap piano $remaining more", style = MaterialTheme.typography.bodySmall)
-                        OutlinedButton(onClick = onCancelComfortTempo) { Text("Cancel") }
+                        ComposerSubmenuButton(label = "Cancel", onClick = onCancelComfortTempo)
                     }
 
                     comfortTempoEstimate != null -> {
                         Text("Measured: $comfortTempoEstimate BPM", style = MaterialTheme.typography.bodySmall)
-                        Button(onClick = onApplyComfortTempo) { Text("Apply") }
-                        OutlinedButton(onClick = onTryComfortTempoAgain) { Text("Try Again") }
+                        ComposerSubmenuButton(label = "Apply", onClick = onApplyComfortTempo)
+                        ComposerSubmenuButton(label = "Try Again", onClick = onTryComfortTempoAgain)
                     }
 
                     else -> {
-                        OutlinedButton(onClick = onStartComfortTempo) { Text("Measure Tempo") }
+                        ComposerSubmenuButton(label = "Measure Tempo", onClick = onStartComfortTempo)
                     }
                 }
             }
@@ -209,7 +207,7 @@ fun ComposerTransformToolbar(
             ComposerToolbarSection.TIME -> {
                 BackButton { section = ComposerToolbarSection.ROOT }
                 Text(activeTime.displayName, style = MaterialTheme.typography.labelLarge)
-                CompactCommandButton(
+                ComposerSubmenuCommandButton(
                     label = "Num −",
                     feedback = UiCommandFeedback.DECREASE,
                     onClick = {
@@ -221,7 +219,7 @@ fun ComposerTransformToolbar(
                     },
                     enabled = activeTime.numerator > 1,
                 )
-                CompactCommandButton(
+                ComposerSubmenuCommandButton(
                     label = "Num +",
                     feedback = UiCommandFeedback.INCREASE,
                     onClick = {
@@ -233,7 +231,7 @@ fun ComposerTransformToolbar(
                     },
                     enabled = activeTime.numerator < 32,
                 )
-                CompactCommandButton(
+                ComposerSubmenuCommandButton(
                     label = "Denom −",
                     feedback = UiCommandFeedback.DECREASE,
                     onClick = {
@@ -245,7 +243,7 @@ fun ComposerTransformToolbar(
                     },
                     enabled = denominatorIndex > 0,
                 )
-                CompactCommandButton(
+                ComposerSubmenuCommandButton(
                     label = "Denom +",
                     feedback = UiCommandFeedback.INCREASE,
                     onClick = {
@@ -258,7 +256,7 @@ fun ComposerTransformToolbar(
                     enabled = denominatorIndex < denominators.lastIndex,
                 )
                 if (removableTime) {
-                    CompactCommandButton(
+                    ComposerSubmenuCommandButton(
                         label = "Remove Change",
                         onClick = { onRemoveTimeSignature(measureStart) },
                     )
@@ -268,7 +266,7 @@ fun ComposerTransformToolbar(
             ComposerToolbarSection.KEY -> {
                 BackButton { section = ComposerToolbarSection.ROOT }
                 Text(activeKey.displayName, style = MaterialTheme.typography.labelLarge)
-                CompactCommandButton(
+                ComposerSubmenuCommandButton(
                     label = "Flatter ♭",
                     feedback = UiCommandFeedback.DECREASE,
                     onClick = {
@@ -280,7 +278,7 @@ fun ComposerTransformToolbar(
                     },
                     enabled = activeKey.fifths > -7,
                 )
-                CompactCommandButton(
+                ComposerSubmenuCommandButton(
                     label = "Sharper ♯",
                     feedback = UiCommandFeedback.INCREASE,
                     onClick = {
@@ -292,14 +290,14 @@ fun ComposerTransformToolbar(
                     },
                     enabled = activeKey.fifths < 7,
                 )
-                CompactCommandButton(
+                ComposerSubmenuCommandButton(
                     label = if (activeKey.minor) "Minor → Major" else "Major → Minor",
                     onClick = {
                         onSetKeySignature(measureStart, activeKey.fifths, !activeKey.minor)
                     },
                 )
                 if (removableKey) {
-                    CompactCommandButton(
+                    ComposerSubmenuCommandButton(
                         label = "Remove Change",
                         onClick = { onRemoveKeySignature(measureStart) },
                     )
@@ -309,11 +307,11 @@ fun ComposerTransformToolbar(
             ComposerToolbarSection.CLEF -> {
                 BackButton { section = ComposerToolbarSection.ROOT }
                 ScoreClefMode.entries.forEach { option ->
-                    if (option == clefMode) {
-                        Button(onClick = { onClefModeChanged(option) }) { Text(option.displayName) }
-                    } else {
-                        OutlinedButton(onClick = { onClefModeChanged(option) }) { Text(option.displayName) }
-                    }
+                    ComposerSubmenuButton(
+                        label = option.displayName,
+                        onClick = { onClefModeChanged(option) },
+                        selected = option == clefMode,
+                    )
                 }
                 if (clefMode == ScoreClefMode.AUTO) {
                     Text("Using ${effectiveClef.displayName}", style = MaterialTheme.typography.bodySmall)
@@ -323,41 +321,50 @@ fun ComposerTransformToolbar(
             ComposerToolbarSection.NOTES -> {
                 BackButton { section = ComposerToolbarSection.ROOT }
                 NoteDuration.entries.forEach { duration ->
-                    if (duration == selectedDuration) {
-                        Button(onClick = { onDurationSelected(duration) }) { Text(duration.displayName) }
-                    } else {
-                        OutlinedButton(onClick = { onDurationSelected(duration) }) { Text(duration.displayName) }
-                    }
+                    ComposerSubmenuButton(
+                        label = duration.displayName,
+                        onClick = { onDurationSelected(duration) },
+                        selected = duration == selectedDuration,
+                    )
                 }
-                if (dotted) Button(onClick = onToggleDotted) { Text("Dot •") }
-                else OutlinedButton(onClick = onToggleDotted) { Text("Dot") }
-
-                OutlinedButton(onClick = onInsertRest) {
-                    Text(if (dotted) "Dotted Rest" else "Rest")
-                }
-
-                if (tieActive) Button(onClick = onToggleTie, enabled = tieEnabled) { Text("Tie →") }
-                else OutlinedButton(onClick = onToggleTie, enabled = tieEnabled) { Text("Tie →") }
-
-                if (sharpInput) Button(onClick = onToggleSharpInput) { Text("Staff ♯") }
-                else OutlinedButton(onClick = onToggleSharpInput) { Text("Staff ♯") }
+                ComposerSubmenuButton(
+                    label = if (dotted) "Dot •" else "Dot",
+                    onClick = onToggleDotted,
+                    selected = dotted,
+                )
+                ComposerSubmenuButton(
+                    label = if (dotted) "Dotted Rest" else "Rest",
+                    onClick = onInsertRest,
+                )
+                ComposerSubmenuButton(
+                    label = "Tie →",
+                    onClick = onToggleTie,
+                    selected = tieActive,
+                    enabled = tieEnabled,
+                )
+                ComposerSubmenuButton(
+                    label = "Staff ♯",
+                    onClick = onToggleSharpInput,
+                    selected = sharpInput,
+                )
             }
 
             ComposerToolbarSection.EDITOR -> {
                 BackButton { section = ComposerToolbarSection.ROOT }
-                if (editorMode == ScoreEditorMode.STAFF) {
-                    Button(onClick = { onEditorModeChanged(ScoreEditorMode.STAFF) }) { Text("Staff") }
-                } else {
-                    OutlinedButton(onClick = { onEditorModeChanged(ScoreEditorMode.STAFF) }) { Text("Staff") }
-                }
-                if (editorMode == ScoreEditorMode.PIANO_ROLL) {
-                    Button(onClick = { onEditorModeChanged(ScoreEditorMode.PIANO_ROLL) }) { Text("Piano Roll") }
-                } else {
-                    OutlinedButton(onClick = { onEditorModeChanged(ScoreEditorMode.PIANO_ROLL) }) { Text("Piano Roll") }
-                }
-                OutlinedButton(onClick = onTogglePianoKeyboard) {
-                    Text(if (showPianoKeyboard) "Hide Piano" else "Show Piano")
-                }
+                ComposerSubmenuButton(
+                    label = "Staff",
+                    onClick = { onEditorModeChanged(ScoreEditorMode.STAFF) },
+                    selected = editorMode == ScoreEditorMode.STAFF,
+                )
+                ComposerSubmenuButton(
+                    label = "Piano Roll",
+                    onClick = { onEditorModeChanged(ScoreEditorMode.PIANO_ROLL) },
+                    selected = editorMode == ScoreEditorMode.PIANO_ROLL,
+                )
+                ComposerSubmenuButton(
+                    label = if (showPianoKeyboard) "Hide Piano" else "Show Piano",
+                    onClick = onTogglePianoKeyboard,
+                )
             }
 
             ComposerToolbarSection.MEASURE -> {
