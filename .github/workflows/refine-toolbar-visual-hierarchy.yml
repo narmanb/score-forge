@@ -1,0 +1,35 @@
+name: Refine toolbar visual hierarchy
+
+on:
+  push:
+    branches:
+      - feature/composer-transform-toolbar
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/composer-transform-toolbar
+          fetch-depth: 0
+
+      - name: Apply toolbar visual hierarchy
+        run: python3 tools/refine_toolbar_visual_hierarchy.py
+
+      - name: Commit visual refinement
+        run: |
+          if git diff --quiet; then
+            echo "No visual refinement changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/scoreforge/app/ui/ControlShapes.kt \
+                  app/src/main/java/com/scoreforge/app/ui/ComposerTransformToolbar.kt
+          git commit -m "Refine toolbar visual hierarchy"
+          git push origin HEAD:feature/composer-transform-toolbar
