@@ -14,7 +14,7 @@ class MidiImporterTest {
             tracks = listOf(
                 track(
                     bytes(
-                        0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20, // 120 BPM
+                        0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20,
                         0x00, 0xFF, 0x2F, 0x00,
                     )
                 ),
@@ -147,12 +147,12 @@ class MidiImporterTest {
             tracks = listOf(
                 track(
                     bytes(
-                        0x00, 0xFF, 0x58, 0x04, 0x03, 0x02, 0x18, 0x08, // 3/4 at beat 0
+                        0x00, 0xFF, 0x58, 0x04, 0x03, 0x02, 0x18, 0x08,
                         0x00, 0x90, 60, 96,
                     ) + varLen(480) + bytes(
                         0x80, 60, 0,
                     ) + varLen(960) + bytes(
-                        0xFF, 0x58, 0x04, 0x06, 0x03, 0x18, 0x08, // 6/8 at beat 3
+                        0xFF, 0x58, 0x04, 0x06, 0x03, 0x18, 0x08,
                         0x00, 0xFF, 0x2F, 0x00,
                     )
                 )
@@ -204,14 +204,14 @@ class MidiImporterTest {
                     bytes(
                         0x00,
                         0xF0, 0x08,
-                        0x43, 0x10, 0x4C, 0x00, 0x00, 0x7E, 0x00, 0xF7, // Yamaha XG System On
+                        0x43, 0x10, 0x4C, 0x00, 0x00, 0x7E, 0x00, 0xF7,
                         0x00, 0xFF, 0x2F, 0x00,
                     )
                 ),
                 track(
                     bytes(
-                        0x00, 0xB0, 0x00, 0x00, // MSB 0
-                        0x00, 0xB0, 0x20, 0x06, // LSB 6 -> XG melodic bank 6
+                        0x00, 0xB0, 0x00, 0x00,
+                        0x00, 0xB0, 0x20, 0x06,
                         0x00, 0xC0, 39,
                         0x00, 0x90, 60, 96,
                     ) + varLen(120) + bytes(
@@ -221,7 +221,7 @@ class MidiImporterTest {
                 ),
                 track(
                     bytes(
-                        0x00, 0xB1, 0x00, 64, // XG SFX/voice MSB, not a 14-bit bank multiplier
+                        0x00, 0xB1, 0x00, 64,
                         0x00, 0xB1, 0x20, 0,
                         0x00, 0xC1, 97,
                         0x00, 0x91, 64, 96,
@@ -232,7 +232,7 @@ class MidiImporterTest {
                 ),
                 track(
                     bytes(
-                        0x00, 0xB9, 0x00, 127, // XG drum mode
+                        0x00, 0xB9, 0x00, 127,
                         0x00, 0xB9, 0x20, 0,
                         0x00, 0xC9, 25,
                         0x00, 0x99, 36, 110,
@@ -253,6 +253,43 @@ class MidiImporterTest {
         assertEquals(97, result.snapshot.tracks[1].presetProgram)
         assertEquals(128, result.snapshot.tracks[2].presetBank)
         assertEquals(25, result.snapshot.tracks[2].presetProgram)
+    }
+
+    @Test
+    fun infersXgBanksWhenResetSysexIsMissing() {
+        val midi = midiFile(
+            ticksPerQuarter = 480,
+            tracks = listOf(
+                track(
+                    bytes(
+                        0x00, 0xB0, 0x00, 0,
+                        0x00, 0xB0, 0x20, 6,
+                        0x00, 0xC0, 39,
+                        0x00, 0x90, 60, 96,
+                    ) + varLen(120) + bytes(0x80, 60, 0, 0x00, 0xFF, 0x2F, 0x00)
+                ),
+                track(
+                    bytes(
+                        0x00, 0xB1, 0x00, 64,
+                        0x00, 0xC1, 97,
+                        0x00, 0x91, 64, 96,
+                    ) + varLen(120) + bytes(0x81, 64, 0, 0x00, 0xFF, 0x2F, 0x00)
+                ),
+                track(
+                    bytes(
+                        0x00, 0xB9, 0x00, 127,
+                        0x00, 0xC9, 25,
+                        0x00, 0x99, 36, 110,
+                    ) + varLen(120) + bytes(0x89, 36, 0, 0x00, 0xFF, 0x2F, 0x00)
+                ),
+            ),
+        )
+
+        val result = MidiImporter.import(midi, "Disco Train (XG Version)")
+
+        assertEquals(6, result.snapshot.tracks[0].presetBank)
+        assertEquals(0, result.snapshot.tracks[1].presetBank)
+        assertEquals(128, result.snapshot.tracks[2].presetBank)
     }
 
     @Test
