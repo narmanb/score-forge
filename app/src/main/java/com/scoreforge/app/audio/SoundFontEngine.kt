@@ -167,14 +167,13 @@ class SoundFontEngine private constructor(
         repeat(16) { NativeFluidSynth.allNotesOff(handle, it) }
         playable.forEachIndexed { channel, track ->
             if (track.notes.isEmpty()) return@forEachIndexed
-            val requestedPreset = if (track.presetBank != null && track.presetProgram != null) {
-                loadedPresets.firstOrNull {
-                    it.bank == track.presetBank && it.program == track.presetProgram
-                }
-            } else {
-                null
-            }
-            (requestedPreset ?: fallbackPreset)?.let {
+            val requestedPreset = resolvePresetFallback(
+                presets = loadedPresets,
+                requestedBank = track.presetBank,
+                requestedProgram = track.presetProgram,
+                fallbackPreset = fallbackPreset,
+            )
+            requestedPreset?.let {
                 selectPresetOnChannelLocked(it, channel.coerceIn(0, 15))
             }
             setChannelMixerLocked(channel.coerceIn(0, 15), track.volume, track.pan)
@@ -230,17 +229,16 @@ class SoundFontEngine private constructor(
             .take(ScoreTracks.MAX_TRACKS)
             .mapIndexedNotNull { channel, track ->
                 if (track.notes.isEmpty()) return@mapIndexedNotNull null
-                val requestedPreset = if (track.presetBank != null && track.presetProgram != null) {
-                    loadedPresets.firstOrNull {
-                        it.bank == track.presetBank && it.program == track.presetProgram
-                    }
-                } else {
-                    null
-                }
+                val requestedPreset = resolvePresetFallback(
+                    presets = loadedPresets,
+                    requestedBank = track.presetBank,
+                    requestedProgram = track.presetProgram,
+                    fallbackPreset = originalPreset ?: loadedPresets.firstOrNull(),
+                )
                 ChannelNotes(
                     channel = channel,
                     notes = track.notes,
-                    preset = requestedPreset ?: originalPreset ?: loadedPresets.firstOrNull(),
+                    preset = requestedPreset,
                     volume = track.volume,
                     pan = track.pan,
                 )
@@ -403,6 +401,29 @@ class SoundFontEngine private constructor(
     companion object {
         private const val MIDI_CC_VOLUME = 7
         private const val MIDI_CC_PAN = 10
+
+        internal fun resolvePresetFallback(
+            presets: List<SoundFontPreset>,
+            requestedBank: Int?,
+            requestedProgram: Int?,
+            fallbackPreset: SoundFontPreset?,
+        ): SoundFontPreset? {
+            if (requestedBank == null || requestedProgram == null) {
+                return fallbackPreset ?: presets.firstOrNull()
+            }
+
+            presets.firstOrNull {
+                it.bank == requestedBank && it.program == requestedProgram
+            }?.let { return it }
+
+            if (requestedBank != 0 && requestedBank != 128) {
+                presets.firstOrNull {
+                    it.bank == 0 && it.program == requestedProgram
+                }?.let { return it }
+            }
+
+            return fallbackPreset ?: presets.firstOrNull()
+        }
 
         fun createOrNull(sampleRate: Int = 44_100): SoundFontEngine? = try {
             val handle = NativeFluidSynth.create(sampleRate)
