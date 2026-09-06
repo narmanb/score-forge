@@ -43,7 +43,7 @@ class ScoreMeasureEditsTest {
             note(60, 0f),
             note(
                 pitch = 64,
-                start = 3.5f,
+                start = 4.5f,
                 duration = NoteDuration.HALF,
                 dotted = true,
                 velocity = 71,
@@ -59,7 +59,7 @@ class ScoreMeasureEditsTest {
         assertEquals(2, clipboard.events.size)
         val copiedNote = clipboard.events[0] as ScoreNote
         assertEquals(64, copiedNote.midiPitch)
-        assertEquals(0f, copiedNote.startBeat, 0.001f)
+        assertEquals(0.5f, copiedNote.startBeat, 0.001f)
         assertEquals(NoteDuration.HALF, copiedNote.duration)
         assertTrue(copiedNote.dotted)
         assertEquals(71, copiedNote.velocity)
