@@ -2,11 +2,14 @@ package com.scoreforge.app.ui
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -16,12 +19,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 internal val ChamferedControlShape = GenericShape { size, _ ->
     val cut = minOf(size.width, size.height) * 0.20f
@@ -81,6 +86,27 @@ internal fun ChamferedControlButton(
     val scope = rememberCoroutineScope()
     val view = LocalView.current
     val visuallyPressed = physicallyPressed || latchedPressed.value
+
+    // The app-level Settings control is intentionally just a large accent gear.
+    // Keep a generous invisible touch target, haptic feedback, and no button chrome.
+    if (label == "⚙" && !compact) {
+        Box(
+            modifier = modifier
+                .size(50.dp)
+                .clickable(enabled = enabled) {
+                    view.performScoreForgeHaptic(UiHapticFeedback.TICK)
+                    onClick()
+                },
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = "⚙",
+                color = if (enabled) Color(0xFFD0B8FF) else Color(0xFF8A8197),
+                fontSize = 40.sp,
+            )
+        }
+        return
+    }
 
     Button(
         onClick = {
