@@ -17,7 +17,7 @@ import kotlin.math.roundToInt
  *
  * FluidSynth is driven in small blocks using the same note/tie/articulation interpretation as
  * streaming playback. The WAV header is written up-front because project duration is known from the
- * score/tempo map, so SAF output streams do not need to support seeking.
+ * score/tempo map, so output streams do not need to support seeking.
  */
 object WavAudioExporter {
     const val DEFAULT_SAMPLE_RATE = 44_100
@@ -58,6 +58,7 @@ object WavAudioExporter {
         snapshot: ScoreProjectSnapshot,
         output: OutputStream,
         sampleRate: Int = DEFAULT_SAMPLE_RATE,
+        onProgress: (Float) -> Unit = {},
     ): Result {
         require(sampleRate in 8_000..192_000) { "Unsupported WAV sample rate: $sampleRate Hz." }
         val plan = buildRenderPlan(snapshot, sampleRate)
@@ -67,6 +68,8 @@ object WavAudioExporter {
         require(dataBytes <= MAX_RIFF_DATA_BYTES) {
             "This project is too long for a standard WAV file."
         }
+
+        onProgress(0f)
 
         val savedSelection = SoundFontRepository.loadActiveSelection(context)
         val sourceSelection = if (savedSelection != null) {
@@ -115,6 +118,23 @@ object WavAudioExporter {
 
             var frameCursor = 0
             var eventIndex = 0
+            var lastReportedPercent = -1
+
+            fun reportProgress() {
+                val percent = if (plan.totalFrames <= 0) {
+                    100
+                } else {
+                    ((frameCursor.toLong() * 100L) / plan.totalFrames.toLong())
+                        .toInt()
+                        .coerceIn(0, 100)
+                }
+                if (percent != lastReportedPercent) {
+                    lastReportedPercent = percent
+                    onProgress(percent / 100f)
+                }
+            }
+
+            reportProgress()
             while (frameCursor < plan.totalFrames) {
                 while (eventIndex < plan.events.size && plan.events[eventIndex].frame <= frameCursor) {
                     val event = plan.events[eventIndex++]
@@ -140,8 +160,10 @@ object WavAudioExporter {
                 }
                 writePcm16Le(buffered, pcm)
                 frameCursor += frames
+                reportProgress()
             }
             buffered.flush()
+            onProgress(1f)
         } finally {
             engine.finishStreamingTracks()
             engine.close()
@@ -165,9 +187,7 @@ object WavAudioExporter {
             .take(ScoreTracks.MAX_TRACKS)
             .map { it.copy(events = it.events.toList()) }
         val tempoChanges = snapshot.effectiveTempoChanges()
-        val throughBeat = tracks.maxOfOrNull { track ->
-            track.events.maxOfOrNull { it.startBeat + it.effectiveBeats } ?: 0f
-        } ?: 0f
+        val throughBeat = tracks.maxOfOrNull { it.endBeat } ?: 0f
         val scoreFrames = (ScoreTempos.secondsAtBeat(tempoChanges, throughBeat) * sampleRate)
             .roundToInt()
             .coerceAtLeast(1)
