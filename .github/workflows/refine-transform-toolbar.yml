@@ -1,0 +1,36 @@
+name: Refine transform toolbar
+
+on:
+  push:
+    branches:
+      - feature/composer-transform-toolbar
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/composer-transform-toolbar
+          fetch-depth: 0
+
+      - name: Refine transforming toolbar
+        run: python3 tools/refine_transform_toolbar.py
+
+      - name: Commit toolbar refinement
+        run: |
+          if git diff --quiet; then
+            echo "No refinement changes needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/scoreforge/app/ui/ControlShapes.kt \
+                  app/src/main/java/com/scoreforge/app/ui/ComposerTransformToolbar.kt \
+                  app/src/main/java/com/scoreforge/app/ui/ProjectFileControls.kt
+          git commit -m "Refine composer toolbar controls"
+          git push origin HEAD:feature/composer-transform-toolbar
