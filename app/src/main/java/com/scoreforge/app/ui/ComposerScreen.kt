@@ -1473,7 +1473,7 @@ fun ScoreForgeComposerScreen(
                         LiveInstrumentBus.allNotesOff()
                         showPianoKeyboard = !showPianoKeyboard
                     },
-                    measurePasteEnabled = measureClipboard != null,
+                    measurePasteEnabled = measureClipboard?.let { ScoreMeasureEdits.canPasteAt(timeSignatures, activeCursorBeat, it) } == true,
                     onCopyMeasure = ::copyActiveMeasure,
                     onPasteMeasure = ::pasteActiveMeasure,
                     onDuplicateMeasure = { duplicateActiveMeasure(1) },
