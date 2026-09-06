@@ -100,16 +100,36 @@ object WavAudioExporter {
                 }?.let { engine.selectPreset(it) }
             }
 
-            val availablePresets = engine.presets.map { it.bank to it.program }.toSet()
-            plan.tracks.forEach { track ->
+            val fallbackPreset = engine.selectedPreset ?: engine.presets.firstOrNull()
+            val resolvedTracks = plan.tracks.map { track ->
                 val bank = track.presetBank
                 val program = track.presetProgram
-                if (bank != null && program != null && (bank to program) !in availablePresets) {
-                    warnings += "${track.name}: preset bank $bank program ${program + 1} is unavailable; the active SoundFont fallback was used."
+                if (bank == null || program == null) return@map track
+
+                val exact = engine.presets.firstOrNull { it.bank == bank && it.program == program }
+                if (exact != null) return@map track
+
+                val resolved = resolvePresetFallback(
+                    presets = engine.presets,
+                    requestedBank = bank,
+                    requestedProgram = program,
+                    fallbackPreset = fallbackPreset,
+                )
+
+                if (resolved != null && resolved.bank == 0 && resolved.program == program && bank != 128) {
+                    warnings +=
+                        "${track.name}: preset bank $bank program ${program + 1} is unavailable; " +
+                            "bank 0 program ${program + 1} (${resolved.name}) was used instead."
+                    track.copy(presetBank = 0, presetProgram = program)
+                } else {
+                    warnings +=
+                        "${track.name}: preset bank $bank program ${program + 1} is unavailable; " +
+                            "the active SoundFont fallback was used."
+                    track
                 }
             }
 
-            require(engine.prepareStreamingTracks(plan.tracks)) {
+            require(engine.prepareStreamingTracks(resolvedTracks)) {
                 "The active SoundFont could not prepare the audible tracks for WAV export."
             }
 
@@ -176,6 +196,25 @@ object WavAudioExporter {
             soundFontName = sourceSelection.soundFont.displayName,
             warnings = warnings.distinct(),
         )
+    }
+
+    internal fun resolvePresetFallback(
+        presets: List<SoundFontPreset>,
+        requestedBank: Int,
+        requestedProgram: Int,
+        fallbackPreset: SoundFontPreset?,
+    ): SoundFontPreset? {
+        presets.firstOrNull {
+            it.bank == requestedBank && it.program == requestedProgram
+        }?.let { return it }
+
+        if (requestedBank != 0 && requestedBank != 128) {
+            presets.firstOrNull {
+                it.bank == 0 && it.program == requestedProgram
+            }?.let { return it }
+        }
+
+        return fallbackPreset ?: presets.firstOrNull()
     }
 
     internal fun buildRenderPlan(
