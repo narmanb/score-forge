@@ -51,43 +51,31 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:mimeType="application/x-scoreforge-project" />
-                <!-- Custom extensions such as .sfp are exposed inconsistently by file providers.
-                     Keep common MIME fallbacks, then validate the display name and Score Forge
-                     file signature before opening. -->
                 <data android:mimeType="application/octet-stream" />
                 <data android:mimeType="text/plain" />
             </intent-filter>
 
             <!--
-                Files by Google can launch nested-storage files through its NBU provider with no
-                MIME type at all. Its content URI still carries the real filename, so keep this
-                fallback narrowly limited to .sfp paths from that exact provider.
+                Some Android file managers do not provide enough filename/MIME information for
+                custom .sfp files during resolver matching. The only cross-provider behavior proven
+                on-device is a broad content/file VIEW entry point. Score Forge does not trust this
+                resolver match: ExternalOpenHandler queries DISPLAY_NAME and inspects the actual file
+                signature, and rejects anything that is not a valid SFP project or MIDI file.
             -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="content"
-                    android:host="com.google.android.apps.nbu.files.provider"
-                    android:pathPattern=".*\.sfp" />
+                <data android:scheme="content" />
+                <data android:mimeType="*/*" />
             </intent-filter>
 
-            <!--
-                Samsung My Files can hand Android a content://media/external/file/<id> URI with no
-                usable MIME type in the VIEW intent and no filename in the URI. Android therefore
-                cannot extension-match before launching an app. Limit the no-MIME fallback to the
-                MediaStore external-file route; Score Forge then verifies DISPLAY_NAME and the
-                actual SFP/MIDI file signature before accepting the file.
-            -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="content"
-                    android:host="media"
-                    android:pathPrefix="/external/file/" />
+                <data android:scheme="file" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
 
