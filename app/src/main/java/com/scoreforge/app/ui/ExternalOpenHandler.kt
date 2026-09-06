@@ -89,6 +89,19 @@ private fun openExternalFile(
     return when (ExternalFileTypes.classify(displayName, mimeType)) {
         ExternalFileKind.SCORE_FORGE_PROJECT -> openScoreForgeProject(context, request.uri, displayName)
         ExternalFileKind.MIDI -> importMidi(context, request.uri, displayName)
+        ExternalFileKind.UNKNOWN -> openExternalFileByContent(context, request.uri, displayName)
+    }
+}
+
+private fun openExternalFileByContent(
+    context: Context,
+    uri: Uri,
+    displayName: String?,
+): ExternalOpenOutcome {
+    val bytes = readExternalBytes(context, uri)
+    return when (ExternalFileTypes.detectContent(bytes)) {
+        ExternalFileKind.SCORE_FORGE_PROJECT -> decodeScoreForgeProject(bytes, displayName)
+        ExternalFileKind.MIDI -> importMidiBytes(bytes, displayName)
         ExternalFileKind.UNKNOWN -> error(
             "That file is not a supported Score Forge project or MIDI file."
         )
@@ -99,17 +112,18 @@ private fun openScoreForgeProject(
     context: Context,
     uri: Uri,
     displayName: String?,
+): ExternalOpenOutcome = decodeScoreForgeProject(readExternalBytes(context, uri), displayName)
+
+private fun decodeScoreForgeProject(
+    bytes: ByteArray,
+    displayName: String?,
 ): ExternalOpenOutcome {
-    val raw = context.contentResolver.openInputStream(uri).use { input ->
-        requireNotNull(input) { "Could not open the selected file." }
-        input.bufferedReader().use { it.readText() }
-    }
-    var snapshot = requireNotNull(ScoreProjectCodec.decode(raw)) {
+    var snapshot = requireNotNull(ScoreProjectCodec.decode(bytes.toString(Charsets.UTF_8))) {
         "That file is not a supported Score Forge project."
     }
     if (snapshot.projectName == "Untitled") {
         val inferredName = displayName
-            ?.removeSuffix(".sfp")
+            ?.replace(Regex("(?i)\\.sfp$"), "")
             ?.trim()
             .orEmpty()
         if (inferredName.isNotBlank()) {
@@ -125,15 +139,16 @@ private fun importMidi(
     context: Context,
     uri: Uri,
     displayName: String?,
+): ExternalOpenOutcome = importMidiBytes(readExternalBytes(context, uri), displayName)
+
+private fun importMidiBytes(
+    bytes: ByteArray,
+    displayName: String?,
 ): ExternalOpenOutcome {
     val projectName = displayName.orEmpty()
         .replace(Regex("(?i)\\.(mid|midi)$"), "")
         .trim()
         .ifBlank { "Imported MIDI" }
-    val bytes = context.contentResolver.openInputStream(uri).use { input ->
-        requireNotNull(input) { "Could not open the selected MIDI file." }
-        input.readBytes()
-    }
     val imported = MidiImporter.import(bytes, projectName)
     val message = imported.warnings
         .takeIf { it.isNotEmpty() }
@@ -144,6 +159,12 @@ private fun importMidi(
         dialogMessage = message,
     )
 }
+
+private fun readExternalBytes(context: Context, uri: Uri): ByteArray =
+    context.contentResolver.openInputStream(uri).use { input ->
+        requireNotNull(input) { "Could not open the selected file." }
+        input.readBytes()
+    }
 
 private fun queryDisplayName(context: Context, uri: Uri): String? =
     context.contentResolver.query(

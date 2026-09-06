@@ -1,6 +1,7 @@
 package com.scoreforge.app
 
 import android.net.Uri
+import kotlin.math.min
 
 data class ExternalOpenRequest(
     val uri: Uri,
@@ -36,5 +37,33 @@ object ExternalFileTypes {
             in midiMimeTypes -> ExternalFileKind.MIDI
             else -> ExternalFileKind.UNKNOWN
         }
+    }
+
+    /**
+     * File managers do not consistently report MIME types for custom extensions such as .sfp.
+     * Use the file signatures as a final fallback after filename/MIME classification fails.
+     */
+    fun detectContent(bytes: ByteArray): ExternalFileKind {
+        if (
+            bytes.size >= 4 &&
+            bytes[0] == 'M'.code.toByte() &&
+            bytes[1] == 'T'.code.toByte() &&
+            bytes[2] == 'h'.code.toByte() &&
+            bytes[3] == 'd'.code.toByte()
+        ) {
+            return ExternalFileKind.MIDI
+        }
+
+        if (bytes.isNotEmpty()) {
+            val prefixLength = min(bytes.size, 64)
+            val prefix = bytes.copyOfRange(0, prefixLength)
+                .toString(Charsets.UTF_8)
+                .trimStart('\uFEFF', ' ', '\t', '\r', '\n')
+            if (prefix.startsWith("SCOREFORGE\t")) {
+                return ExternalFileKind.SCORE_FORGE_PROJECT
+            }
+        }
+
+        return ExternalFileKind.UNKNOWN
     }
 }

@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.scoreforge.app.ExternalFileTypes
+import com.scoreforge.app.music.MidiExporter
 import com.scoreforge.app.music.MidiImporter
 import com.scoreforge.app.music.ScoreProjectCodec
 import com.scoreforge.app.music.ScoreProjectSnapshot
@@ -52,6 +53,7 @@ fun ProjectFileControls(
     var renameText by remember { mutableStateOf("") }
     var status by remember { mutableStateOf("Autosave on") }
     var midiImportWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
+    var midiExportWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(ExternalFileTypes.SCORE_FORGE_PROJECT_MIME),
@@ -62,7 +64,8 @@ fun ProjectFileControls(
             status = "Saving…"
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    context.contentResolver.openOutputStream(uri, "w").use { output ->
+                    val safeUri = DocumentFileExtensions.ensure(context, uri, ".sfp")
+                    context.contentResolver.openOutputStream(safeUri, "w").use { output ->
                         requireNotNull(output) { "Could not open the selected file for writing." }
                         output.bufferedWriter().use { writer ->
                             writer.write(ScoreProjectCodec.encode(snapshot))
@@ -79,27 +82,30 @@ fun ProjectFileControls(
     }
 
     val openLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
+        contract = ExactMimeOpenDocument(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             status = "Opening…"
             val result = withContext(Dispatchers.IO) {
                 runCatching {
+                    val displayName = queryDisplayNameLocal(context, uri).orEmpty()
+                    require(displayName.endsWith(".sfp", ignoreCase = true)) {
+                        "Choose a Score Forge .sfp project file."
+                    }
                     val raw = context.contentResolver.openInputStream(uri).use { input ->
                         requireNotNull(input) { "Could not open the selected file." }
                         input.bufferedReader().use { it.readText() }
                     }
                     val decoded = requireNotNull(ScoreProjectCodec.decode(raw)) {
-                        "That file is not a supported Score Forge project."
+                        "That .sfp file is not a valid Score Forge project."
                     }
                     if (decoded.projectName == "Untitled") {
-                        val displayName = queryDisplayName(context, uri)
-                            ?.removeSuffix(".sfp")
-                            ?.trim()
-                            .orEmpty()
-                        if (displayName.isNotBlank()) {
-                            decoded.copy(projectName = ScoreProjectSnapshot.sanitizeProjectName(displayName))
+                        val projectNameFromFile = displayName
+                            .removeSuffix(".sfp")
+                            .trim()
+                        if (projectNameFromFile.isNotBlank()) {
+                            decoded.copy(projectName = ScoreProjectSnapshot.sanitizeProjectName(projectNameFromFile))
                         } else {
                             decoded
                         }
@@ -119,14 +125,20 @@ fun ProjectFileControls(
     }
 
     val midiImportLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocument(),
+        contract = ExactMimeOpenDocument(),
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch {
             status = "Importing MIDI…"
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val displayName = queryDisplayName(context, uri).orEmpty()
+                    val displayName = queryDisplayNameLocal(context, uri).orEmpty()
+                    require(
+                        displayName.endsWith(".mid", ignoreCase = true) ||
+                            displayName.endsWith(".midi", ignoreCase = true)
+                    ) {
+                        "Choose a MIDI .mid or .midi file."
+                    }
                     val projectNameFromFile = displayName
                         .replace(Regex("(?i)\\.(mid|midi)$"), "")
                         .trim()
@@ -145,6 +157,42 @@ fun ProjectFileControls(
                 midiImportWarnings = imported.warnings
             }.onFailure { error ->
                 status = error.message ?: "MIDI import failed"
+            }
+        }
+    }
+
+    val midiExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("audio/midi"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val snapshot = snapshotProvider()
+        scope.launch {
+            status = "Exporting MIDI…"
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val safeUri = DocumentFileExtensions.ensure(context, uri, ".mid")
+                    val exported = MidiExporter.export(snapshot)
+                    context.contentResolver.openOutputStream(safeUri, "w").use { output ->
+                        requireNotNull(output) { "Could not open the selected MIDI file for writing." }
+                        output.write(exported.bytes)
+                        output.flush()
+                    }
+                    exported
+                }
+            }
+
+            result.onSuccess { exported ->
+                status = buildString {
+                    append("Exported ")
+                    append(exported.exportedTrackCount)
+                    append(if (exported.exportedTrackCount == 1) " track" else " tracks")
+                    append(" • ")
+                    append(exported.exportedNoteCount)
+                    append(if (exported.exportedNoteCount == 1) " note" else " notes")
+                }
+                midiExportWarnings = exported.warnings
+            }.onFailure { error ->
+                status = error.message ?: "MIDI export failed"
             }
         }
     }
@@ -195,7 +243,9 @@ fun ProjectFileControls(
         }
 
         OutlinedButton(
-            onClick = { openLauncher.launch(arrayOf("*/*")) },
+            onClick = {
+                openLauncher.launch(ExternalFileTypes.SCORE_FORGE_PROJECT_MIME)
+            },
         ) {
             Text("Open")
         }
@@ -203,18 +253,22 @@ fun ProjectFileControls(
         OutlinedButton(
             onClick = {
                 midiImportWarnings = emptyList()
-                midiImportLauncher.launch(
-                    arrayOf(
-                        "audio/midi",
-                        "audio/x-midi",
-                        "audio/sp-midi",
-                        "application/x-midi",
-                        "application/octet-stream",
-                    )
-                )
+                midiImportLauncher.launch("audio/midi")
             },
         ) {
             Text("Import MIDI")
+        }
+
+        OutlinedButton(
+            onClick = {
+                midiExportWarnings = emptyList()
+                val safeName = ScoreProjectSnapshot.sanitizeProjectName(projectName)
+                    .replace(Regex("[\\/:*?\"<>|]"), "_")
+                    .ifBlank { "Untitled" }
+                midiExportLauncher.launch("$safeName.mid")
+            },
+        ) {
+            Text("Export MIDI")
         }
 
         Text(
@@ -295,9 +349,24 @@ fun ProjectFileControls(
             },
         )
     }
+
+    if (midiExportWarnings.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { midiExportWarnings = emptyList() },
+            title = { Text("MIDI export notes") },
+            text = {
+                Text(midiExportWarnings.joinToString(separator = "\n\n") { "• $it" })
+            },
+            confirmButton = {
+                TextButton(onClick = { midiExportWarnings = emptyList() }) {
+                    Text("OK")
+                }
+            },
+        )
+    }
 }
 
-private fun queryDisplayName(context: android.content.Context, uri: android.net.Uri): String? =
+private fun queryDisplayNameLocal(context: android.content.Context, uri: android.net.Uri): String? =
     context.contentResolver.query(
         uri,
         arrayOf(OpenableColumns.DISPLAY_NAME),
