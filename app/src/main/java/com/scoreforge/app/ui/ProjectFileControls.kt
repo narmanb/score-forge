@@ -13,10 +13,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -263,21 +261,22 @@ fun ProjectFileControls(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        OutlinedButton(onClick = { newProjectDialogOpen = true }) {
+        ScoreForgeOutlinedButton(onClick = { newProjectDialogOpen = true }) {
             Text("New")
         }
 
-        OutlinedButton(
+        ScoreForgeOutlinedButton(
             onClick = {
                 onClearTrack()
                 status = "Cleared $activeTrackName"
             },
             enabled = canClearTrack,
+            haptic = UiHapticFeedback.STRONG,
         ) {
             Text("Clear Track")
         }
 
-        OutlinedButton(
+        ScoreForgeOutlinedButton(
             onClick = {
                 renameText = projectName
                 renameDialogOpen = true
@@ -286,7 +285,7 @@ fun ProjectFileControls(
             Text("Rename")
         }
 
-        OutlinedButton(
+        ScoreForgeOutlinedButton(
             onClick = {
                 val safeName = ScoreProjectSnapshot.sanitizeProjectName(projectName)
                     .replace(Regex("[\\/:*?\"<>|]"), "_")
@@ -297,7 +296,7 @@ fun ProjectFileControls(
             Text("Save As")
         }
 
-        OutlinedButton(
+        ScoreForgeOutlinedButton(
             onClick = {
                 openLauncher.launch(ExternalFileTypes.SCORE_FORGE_PROJECT_MIME)
             },
@@ -305,7 +304,7 @@ fun ProjectFileControls(
             Text("Open")
         }
 
-        OutlinedButton(
+        ScoreForgeOutlinedButton(
             onClick = {
                 midiImportWarnings = emptyList()
                 midiImportLauncher.launch("audio/midi")
@@ -314,7 +313,7 @@ fun ProjectFileControls(
             Text("Import MIDI")
         }
 
-        OutlinedButton(
+        ScoreForgeOutlinedButton(
             onClick = {
                 midiExportWarnings = emptyList()
                 val safeName = ScoreProjectSnapshot.sanitizeProjectName(projectName)
@@ -326,7 +325,7 @@ fun ProjectFileControls(
             Text("Export MIDI")
         }
 
-        OutlinedButton(
+        ScoreForgeOutlinedButton(
             onClick = {
                 wavExportWarnings = emptyList()
                 val snapshot = snapshotProvider()
@@ -416,18 +415,19 @@ fun ProjectFileControls(
                 Text("The current composition will be replaced by a blank project. Use Save As first if you want a separate .sfp copy.")
             },
             confirmButton = {
-                TextButton(
+                ScoreForgeTextButton(
                     onClick = {
                         onNewProject()
                         status = "New project"
                         newProjectDialogOpen = false
                     },
+                    haptic = UiHapticFeedback.CONFIRM,
                 ) {
                     Text("New Project")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { newProjectDialogOpen = false }) {
+                ScoreForgeTextButton(onClick = { newProjectDialogOpen = false }) {
                     Text("Cancel")
                 }
             },
@@ -447,7 +447,7 @@ fun ProjectFileControls(
                 )
             },
             confirmButton = {
-                TextButton(
+                ScoreForgeTextButton(
                     onClick = {
                         onRenameProject(ScoreProjectSnapshot.sanitizeProjectName(renameText))
                         renameDialogOpen = false
@@ -458,7 +458,7 @@ fun ProjectFileControls(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { renameDialogOpen = false }) {
+                ScoreForgeTextButton(onClick = { renameDialogOpen = false }) {
                     Text("Cancel")
                 }
             },
@@ -473,7 +473,7 @@ fun ProjectFileControls(
                 Text(midiImportWarnings.joinToString(separator = "\n\n") { "• $it" })
             },
             confirmButton = {
-                TextButton(onClick = { midiImportWarnings = emptyList() }) {
+                ScoreForgeTextButton(onClick = { midiImportWarnings = emptyList() }) {
                     Text("OK")
                 }
             },
@@ -488,7 +488,7 @@ fun ProjectFileControls(
                 Text(midiExportWarnings.joinToString(separator = "\n\n") { "• $it" })
             },
             confirmButton = {
-                TextButton(onClick = { midiExportWarnings = emptyList() }) {
+                ScoreForgeTextButton(onClick = { midiExportWarnings = emptyList() }) {
                     Text("OK")
                 }
             },
@@ -503,7 +503,7 @@ fun ProjectFileControls(
                 Text(wavExportWarnings.joinToString(separator = "\n\n") { "• $it" })
             },
             confirmButton = {
-                TextButton(onClick = { wavExportWarnings = emptyList() }) {
+                ScoreForgeTextButton(onClick = { wavExportWarnings = emptyList() }) {
                     Text("OK")
                 }
             },

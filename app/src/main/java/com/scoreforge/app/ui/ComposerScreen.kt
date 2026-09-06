@@ -21,9 +21,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -1539,9 +1537,9 @@ private fun ClefControls(
         Text("Clef:", style = MaterialTheme.typography.titleSmall)
         ScoreClefMode.entries.forEach { option ->
             if (option == mode) {
-                Button(onClick = { onModeChanged(option) }) { Text(option.displayName) }
+                ScoreForgeButton(onClick = { onModeChanged(option) }) { Text(option.displayName) }
             } else {
-                OutlinedButton(onClick = { onModeChanged(option) }) { Text(option.displayName) }
+                ScoreForgeOutlinedButton(onClick = { onModeChanged(option) }) { Text(option.displayName) }
             }
         }
         if (mode == ScoreClefMode.AUTO) {
@@ -1623,13 +1621,13 @@ private fun HeaderBar(
         )
 
         if (metronomeEnabled) {
-            Button(onClick = onToggleMetronome) { Text("Metronome On") }
+            ScoreForgeButton(onClick = onToggleMetronome) { Text("Metronome On") }
         } else {
-            OutlinedButton(onClick = onToggleMetronome) { Text("Metronome Off") }
+            ScoreForgeOutlinedButton(onClick = onToggleMetronome) { Text("Metronome Off") }
         }
 
-        if (isPlaying) Button(onClick = onStop) { Text("Stop") }
-        else Button(onClick = onPlay, enabled = canPlay) { Text("Play") }
+        if (isPlaying) ScoreForgeButton(onClick = onStop) { Text("Stop") }
+        else ScoreForgeButton(onClick = onPlay, enabled = canPlay) { Text("Play") }
     }
 }
 
@@ -1659,22 +1657,22 @@ private fun DurationSelector(
     ) {
         Text("Duration:", style = MaterialTheme.typography.labelLarge)
         NoteDuration.entries.forEach { duration ->
-            if (duration == selected) Button(onClick = { onSelected(duration) }) { Text(duration.displayName) }
-            else OutlinedButton(onClick = { onSelected(duration) }) { Text(duration.displayName) }
+            if (duration == selected) ScoreForgeButton(onClick = { onSelected(duration) }) { Text(duration.displayName) }
+            else ScoreForgeOutlinedButton(onClick = { onSelected(duration) }) { Text(duration.displayName) }
         }
 
-        if (dotted) Button(onClick = onToggleDotted) { Text("Dot •") }
-        else OutlinedButton(onClick = onToggleDotted) { Text("Dot") }
+        if (dotted) ScoreForgeButton(onClick = onToggleDotted) { Text("Dot •") }
+        else ScoreForgeOutlinedButton(onClick = onToggleDotted) { Text("Dot") }
 
-        OutlinedButton(onClick = onInsertRest) {
+        ScoreForgeOutlinedButton(onClick = onInsertRest) {
             Text(if (dotted) "Insert Dotted Rest" else "Insert Rest")
         }
 
-        if (tieActive) Button(onClick = onToggleTie, enabled = tieEnabled) { Text("Tie →") }
-        else OutlinedButton(onClick = onToggleTie, enabled = tieEnabled) { Text("Tie →") }
+        if (tieActive) ScoreForgeButton(onClick = onToggleTie, enabled = tieEnabled) { Text("Tie →") }
+        else ScoreForgeOutlinedButton(onClick = onToggleTie, enabled = tieEnabled) { Text("Tie →") }
 
-        if (sharpInput) Button(onClick = onToggleSharpInput) { Text("Staff ♯") }
-        else OutlinedButton(onClick = onToggleSharpInput) { Text("Staff ♯") }
+        if (sharpInput) ScoreForgeButton(onClick = onToggleSharpInput) { Text("Staff ♯") }
+        else ScoreForgeOutlinedButton(onClick = onToggleSharpInput) { Text("Staff ♯") }
 
         Text(
             buildString {

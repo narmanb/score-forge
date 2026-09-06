@@ -8,13 +8,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,20 +61,20 @@ fun TrackControls(
                     if (track.muted) append(" [M]")
                 }
                 if (index == activeTrackIndex) {
-                    Button(onClick = { onSelectTrack(index) }) { Text(label) }
+                    ScoreForgeButton(onClick = { onSelectTrack(index) }) { Text(label) }
                 } else {
-                    OutlinedButton(onClick = { onSelectTrack(index) }) { Text(label) }
+                    ScoreForgeOutlinedButton(onClick = { onSelectTrack(index) }) { Text(label) }
                 }
             }
 
-            OutlinedButton(
+            ScoreForgeOutlinedButton(
                 onClick = onAddTrack,
                 enabled = tracks.size < ScoreTracks.MAX_TRACKS,
             ) {
                 Text("+ Track")
             }
 
-            OutlinedButton(
+            ScoreForgeOutlinedButton(
                 onClick = {
                     renameText = active?.name.orEmpty()
                     renameDialogOpen = true
@@ -89,21 +86,22 @@ fun TrackControls(
 
             if (active != null) {
                 if (active.muted) {
-                    Button(onClick = onToggleMute) { Text("Muted") }
+                    ScoreForgeButton(onClick = onToggleMute) { Text("Muted") }
                 } else {
-                    OutlinedButton(onClick = onToggleMute) { Text("Mute") }
+                    ScoreForgeOutlinedButton(onClick = onToggleMute) { Text("Mute") }
                 }
 
                 if (active.solo) {
-                    Button(onClick = onToggleSolo) { Text("Solo") }
+                    ScoreForgeButton(onClick = onToggleSolo) { Text("Solo") }
                 } else {
-                    OutlinedButton(onClick = onToggleSolo) { Text("Solo") }
+                    ScoreForgeOutlinedButton(onClick = onToggleSolo) { Text("Solo") }
                 }
             }
 
-            OutlinedButton(
+            ScoreForgeOutlinedButton(
                 onClick = onDeleteTrack,
                 enabled = tracks.size > 1,
+                haptic = UiHapticFeedback.STRONG,
             ) {
                 Text("Delete Track")
             }
@@ -151,7 +149,7 @@ fun TrackControls(
                 )
             },
             confirmButton = {
-                TextButton(
+                ScoreForgeTextButton(
                     onClick = {
                         val safeName = renameText.trim()
                         if (safeName.isNotEmpty()) onRenameTrack(safeName)
@@ -163,7 +161,7 @@ fun TrackControls(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { renameDialogOpen = false }) {
+                ScoreForgeTextButton(onClick = { renameDialogOpen = false }) {
                     Text("Cancel")
                 }
             },

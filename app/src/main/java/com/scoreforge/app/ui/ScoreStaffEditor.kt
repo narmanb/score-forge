@@ -20,10 +20,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -727,13 +725,13 @@ fun ScoreStaffEditor(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (isPlaying) {
-                    Button(
+                    ScoreForgeButton(
                         onClick = onStop,
                         modifier = Modifier.height(28.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                     ) { Text("■", style = MaterialTheme.typography.labelSmall) }
                 } else {
-                    OutlinedButton(
+                    ScoreForgeOutlinedButton(
                         onClick = onPlay,
                         enabled = canPlay,
                         modifier = Modifier.height(28.dp),
@@ -745,13 +743,13 @@ fun ScoreStaffEditor(
                 }
 
                 if (staffInputEnabled) {
-                    Button(
+                    ScoreForgeButton(
                         onClick = { staffInputEnabled = false },
                         modifier = Modifier.height(28.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
                     ) { Text("Input On", style = MaterialTheme.typography.labelSmall) }
                 } else {
-                    OutlinedButton(
+                    ScoreForgeOutlinedButton(
                         onClick = { staffInputEnabled = true },
                         modifier = Modifier.height(28.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
@@ -761,7 +759,7 @@ fun ScoreStaffEditor(
                     ) { Text("Input Off", style = MaterialTheme.typography.labelSmall) }
                 }
 
-                OutlinedButton(
+                ScoreForgeOutlinedButton(
                     onClick = {
                         zoom = StaffTimelineLayout.clampZoom(
                             zoom - StaffTimelineLayout.ZOOM_STEP
@@ -779,7 +777,7 @@ fun ScoreStaffEditor(
                     color = Color(0xFF333333),
                     style = MaterialTheme.typography.labelSmall,
                 )
-                OutlinedButton(
+                ScoreForgeOutlinedButton(
                     onClick = {
                         zoom = StaffTimelineLayout.clampZoom(
                             zoom + StaffTimelineLayout.ZOOM_STEP

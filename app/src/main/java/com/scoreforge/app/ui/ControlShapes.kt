@@ -84,8 +84,8 @@ internal fun ChamferedControlButton(
 
     Button(
         onClick = {
+            view.performScoreForgeHaptic(UiHapticFeedback.TICK)
             if (feedback != UiCommandFeedback.NONE) {
-                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
                 ScoreForgeUiFeedback.play(feedback)
                 latchedPressed.value = true
                 scope.launch {
@@ -143,8 +143,12 @@ internal fun ComposerToolbarButton(
     selected: Boolean = false,
     enabled: Boolean = true,
 ) {
+    val view = LocalView.current
     Button(
-        onClick = onClick,
+        onClick = {
+            view.performScoreForgeHaptic(UiHapticFeedback.TICK)
+            onClick()
+        },
         enabled = enabled,
         modifier = modifier.height(31.dp),
         shape = ChamferedControlShape,
@@ -184,8 +188,12 @@ internal fun ComposerSubmenuButton(
     selected: Boolean = false,
     enabled: Boolean = true,
 ) {
+    val view = LocalView.current
     Button(
-        onClick = onClick,
+        onClick = {
+            view.performScoreForgeHaptic(UiHapticFeedback.TICK)
+            onClick()
+        },
         enabled = enabled,
         modifier = modifier.height(32.dp),
         shape = ChamferedControlShape,
@@ -228,7 +236,7 @@ internal fun ComposerSubmenuCommandButton(
 
     Button(
         onClick = {
-            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            view.performScoreForgeHaptic(UiHapticFeedback.TICK)
             ScoreForgeUiFeedback.play(feedback)
             latchedPressed.value = true
             scope.launch {
@@ -282,7 +290,7 @@ internal fun CompactCommandButton(
 
     Button(
         onClick = {
-            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            view.performScoreForgeHaptic(UiHapticFeedback.TICK)
             ScoreForgeUiFeedback.play(feedback)
             latchedPressed.value = true
             scope.launch {

@@ -12,9 +12,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -324,7 +322,7 @@ fun SoundFontControls(
         Text("Instrument:", style = MaterialTheme.typography.labelLarge)
 
         if (presets.isNotEmpty()) {
-            OutlinedButton(
+            ScoreForgeOutlinedButton(
                 onClick = { selectPreset((presetIndex - 1).coerceAtLeast(0)) },
                 enabled = presetIndex > 0 && !isLoading,
             ) {
@@ -332,7 +330,7 @@ fun SoundFontControls(
             }
 
             Box {
-                OutlinedButton(
+                ScoreForgeOutlinedButton(
                     onClick = { presetMenuExpanded = true },
                     enabled = !isLoading,
                 ) {
@@ -350,7 +348,7 @@ fun SoundFontControls(
                     onDismissRequest = { presetMenuExpanded = false },
                 ) {
                     presets.forEachIndexed { index, preset ->
-                        DropdownMenuItem(
+                        ScoreForgeDropdownMenuItem(
                             text = { Text("${index + 1}. ${preset.displayName}") },
                             onClick = {
                                 selectPreset(index)
@@ -361,7 +359,7 @@ fun SoundFontControls(
                 }
             }
 
-            OutlinedButton(
+            ScoreForgeOutlinedButton(
                 onClick = { selectPreset((presetIndex + 1).coerceAtMost(presets.lastIndex)) },
                 enabled = presetIndex in 0 until presets.lastIndex && !isLoading,
             ) {
@@ -372,7 +370,7 @@ fun SoundFontControls(
         }
 
         Box {
-            OutlinedButton(
+            ScoreForgeOutlinedButton(
                 onClick = { libraryMenuExpanded = true },
                 enabled = engine != null && !isLoading,
             ) {
@@ -383,11 +381,11 @@ fun SoundFontControls(
                 expanded = libraryMenuExpanded,
                 onDismissRequest = { libraryMenuExpanded = false },
             ) {
-                DropdownMenuItem(
+                ScoreForgeDropdownMenuItem(
                     text = { Text("Use ${SoundFontRepository.STARTER_DISPLAY_NAME}") },
                     onClick = ::useStarterInstruments,
                 )
-                DropdownMenuItem(
+                ScoreForgeDropdownMenuItem(
                     text = { Text("Import SoundFont…") },
                     onClick = {
                         libraryMenuExpanded = false
