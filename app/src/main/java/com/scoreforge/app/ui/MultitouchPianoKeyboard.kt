@@ -78,6 +78,8 @@ fun MultitouchPianoKeyboard(
     holdPreviewDuration: NoteDuration?,
     holdPreviewDotted: Boolean,
     selectedDuration: NoteDuration,
+    durationOrder: NoteDurationOrderSetting = NoteDurationOrderSetting.LONG_TO_SHORT,
+    noteLabelSetting: KeyboardNoteLabelSetting = KeyboardNoteLabelSetting.DEFAULT,
     selectedDotted: Boolean,
     selectedArticulation: NoteArticulation,
     tieEnabled: Boolean,
@@ -244,12 +246,20 @@ fun MultitouchPianoKeyboard(
                             .border(0.8.dp, Color(0xFF555555)),
                         contentAlignment = Alignment.BottomCenter,
                     ) {
-                        Text(
-                            PitchNames.name(pitch),
-                            modifier = Modifier.padding(bottom = 5.dp),
-                            color = Color(0xFF222222),
-                            style = MaterialTheme.typography.labelSmall,
-                        )
+                        val showLabel = when (noteLabelSetting) {
+                            KeyboardNoteLabelSetting.DEFAULT -> true
+                            KeyboardNoteLabelSetting.OFF -> false
+                            KeyboardNoteLabelSetting.C_ONLY -> pitch % 12 == 0
+                            KeyboardNoteLabelSetting.ALL -> true
+                        }
+                        if (showLabel) {
+                            Text(
+                                PitchNames.name(pitch),
+                                modifier = Modifier.padding(bottom = 5.dp),
+                                color = Color(0xFF222222),
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
                     }
                 }
             }
@@ -270,7 +280,17 @@ fun MultitouchPianoKeyboard(
                             if (active) Color(0xFF536A91) else Color(0xFF151515),
                             RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp),
                         ),
-                )
+                    contentAlignment = Alignment.BottomCenter,
+                ) {
+                    if (noteLabelSetting == KeyboardNoteLabelSetting.ALL) {
+                        Text(
+                            PitchNames.name(pitch),
+                            modifier = Modifier.padding(bottom = 3.dp),
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
             }
         }
 
@@ -311,7 +331,7 @@ fun MultitouchPianoKeyboard(
                     enabled = canRedo,
                 )
 
-                NoteDuration.entries.forEach { duration ->
+                durationOrder.orderedDurations().forEach { duration ->
                     ChamferedControlButton(
                         label = durationControlLabel(duration, dotted = false),
                         onClick = {

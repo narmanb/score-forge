@@ -3,6 +3,7 @@ package com.scoreforge.app.ui
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
+import android.content.Context
 import kotlin.math.PI
 import kotlin.math.sin
 
@@ -15,13 +16,16 @@ internal object ScoreForgeUiFeedback {
     private val increaseTrack by lazy { buildTrack(startHz = 700.0, endHz = 980.0) }
     private val decreaseTrack by lazy { buildTrack(startHz = 620.0, endHz = 420.0) }
     private val neutralTrack by lazy { buildTrack(startHz = 610.0, endHz = 660.0) }
+    private val settingsTrack by lazy { buildTrack(startHz = 480.0, endHz = 760.0, durationMs = 68) }
 
-    fun play(feedback: UiCommandFeedback) {
+    fun play(feedback: UiCommandFeedback, context: Context) {
+        if (!ScoreForgeSettingsRepository.commandSoundsEnabled(context)) return
         val track = when (feedback) {
             UiCommandFeedback.NONE -> return
             UiCommandFeedback.NEUTRAL -> neutralTrack
             UiCommandFeedback.INCREASE -> increaseTrack
             UiCommandFeedback.DECREASE -> decreaseTrack
+            UiCommandFeedback.SETTINGS -> settingsTrack
         } ?: return
 
         synchronized(track) {
@@ -36,8 +40,8 @@ internal object ScoreForgeUiFeedback {
         }
     }
 
-    private fun buildTrack(startHz: Double, endHz: Double): AudioTrack? = try {
-        val sampleCount = (SAMPLE_RATE * DURATION_MS / 1000.0).toInt().coerceAtLeast(1)
+    private fun buildTrack(startHz: Double, endHz: Double, durationMs: Int = DURATION_MS): AudioTrack? = try {
+        val sampleCount = (SAMPLE_RATE * durationMs / 1000.0).toInt().coerceAtLeast(1)
         val pcm = ShortArray(sampleCount)
         var phase = 0.0
         for (i in pcm.indices) {

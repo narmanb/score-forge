@@ -16,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import kotlinx.coroutines.delay
@@ -56,6 +57,7 @@ enum class UiCommandFeedback {
     NEUTRAL,
     INCREASE,
     DECREASE,
+    SETTINGS,
 }
 
 internal val ComposerControlStripColor = Color(0xFF4A4752)
@@ -86,7 +88,7 @@ internal fun ChamferedControlButton(
         onClick = {
             view.performScoreForgeHaptic(UiHapticFeedback.TICK)
             if (feedback != UiCommandFeedback.NONE) {
-                ScoreForgeUiFeedback.play(feedback)
+                ScoreForgeUiFeedback.play(feedback, view.context)
                 latchedPressed.value = true
                 scope.launch {
                     delay(110L)
@@ -237,7 +239,7 @@ internal fun ComposerSubmenuCommandButton(
     Button(
         onClick = {
             view.performScoreForgeHaptic(UiHapticFeedback.TICK)
-            ScoreForgeUiFeedback.play(feedback)
+            ScoreForgeUiFeedback.play(feedback, view.context)
             latchedPressed.value = true
             scope.launch {
                 delay(110L)
@@ -291,7 +293,7 @@ internal fun CompactCommandButton(
     Button(
         onClick = {
             view.performScoreForgeHaptic(UiHapticFeedback.TICK)
-            ScoreForgeUiFeedback.play(feedback)
+            ScoreForgeUiFeedback.play(feedback, view.context)
             latchedPressed.value = true
             scope.launch {
                 delay(110L)

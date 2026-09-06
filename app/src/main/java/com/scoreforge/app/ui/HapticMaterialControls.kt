@@ -24,20 +24,27 @@ internal enum class UiHapticFeedback {
 
 internal fun View.performScoreForgeHaptic(feedback: UiHapticFeedback = UiHapticFeedback.TICK) {
     if (feedback == UiHapticFeedback.NONE) return
-    val constant = when (feedback) {
-        UiHapticFeedback.NONE -> return
-        // CLOCK_TICK proved too faint on-device. VIRTUAL_KEY is still a standard Android
-        // interaction haptic, but is easier to perceive without becoming a custom vibration.
-        UiHapticFeedback.TICK -> HapticFeedbackConstants.VIRTUAL_KEY
-        UiHapticFeedback.CONFIRM -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            HapticFeedbackConstants.CONFIRM
-        } else {
-            HapticFeedbackConstants.VIRTUAL_KEY
+    val strength = ScoreForgeSettingsRepository.hapticStrength(context)
+    if (strength == HapticStrength.OFF) return
+    val constant = when (strength) {
+        HapticStrength.OFF -> return
+        HapticStrength.LIGHT -> when (feedback) {
+            UiHapticFeedback.NONE -> return
+            UiHapticFeedback.TICK -> HapticFeedbackConstants.CLOCK_TICK
+            UiHapticFeedback.CONFIRM -> HapticFeedbackConstants.VIRTUAL_KEY
+            UiHapticFeedback.STRONG -> HapticFeedbackConstants.LONG_PRESS
         }
-        UiHapticFeedback.STRONG -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            HapticFeedbackConstants.REJECT
-        } else {
-            HapticFeedbackConstants.LONG_PRESS
+        HapticStrength.STANDARD -> when (feedback) {
+            UiHapticFeedback.NONE -> return
+            UiHapticFeedback.TICK -> HapticFeedbackConstants.VIRTUAL_KEY
+            UiHapticFeedback.CONFIRM -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
+            UiHapticFeedback.STRONG -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS
+        }
+        HapticStrength.STRONG -> when (feedback) {
+            UiHapticFeedback.NONE -> return
+            UiHapticFeedback.TICK -> HapticFeedbackConstants.LONG_PRESS
+            UiHapticFeedback.CONFIRM -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.LONG_PRESS
+            UiHapticFeedback.STRONG -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS
         }
     }
     performHapticFeedback(constant)

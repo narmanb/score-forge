@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -72,8 +73,10 @@ import com.scoreforge.app.music.ScoreTimeline
 import com.scoreforge.app.music.ScoreTrack
 import com.scoreforge.app.music.ScoreTracks
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private data class NaturalHeldInput(
@@ -116,17 +119,21 @@ fun ScoreForgeComposerScreen(
     onExternalOpenConsumed: (ExternalOpenRequest) -> Unit = {},
 ) {
     val context = LocalContext.current
+    var appSettings by remember { mutableStateOf(ScoreForgeSettingsRepository.load(context)) }
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission(),
     ) { /* Playback remains available even if notification permission is declined. */ }
     val pageScrollState = rememberScrollState()
-    val tracks = remember { mutableStateListOf(ScoreTracks.defaultTrack()) }
+    val tracks = remember { mutableStateListOf(ScoreTracks.defaultTrack().copy(clefMode = appSettings.defaultClefMode)) }
     val playback = remember { ScoreForgeAudioSession.playbackEngine }
     val soundFontEngine = remember { ScoreForgeAudioSession.soundFontEngine }
     val editHistory = remember { ScoreEditHistory() }
     val naturalHeldInputs = remember { mutableMapOf<Int, NaturalHeldInput>() }
     val holdHeldInputs = remember { mutableMapOf<Int, HoldHeldInput>() }
     val liveHeldInputs = remember { mutableMapOf<Int, LiveHeldInput>() }
+    val durationAuditionScope = rememberCoroutineScope()
+    var durationAuditionJob by remember { mutableStateOf<Job?>(null) }
 
     var activeTrackIndex by remember { mutableIntStateOf(0) }
     var selectedEventIndex by remember { mutableIntStateOf(-1) }
@@ -144,7 +151,7 @@ fun ScoreForgeComposerScreen(
     var metronomeEnabled by rememberSaveable { mutableStateOf(false) }
     var isPlaying by remember { mutableStateOf(ScoreTransportBus.state.value.isPlaying) }
     var chordMode by rememberSaveable { mutableStateOf(StepChordMode.OFF) }
-    var pianoEntryMode by rememberSaveable { mutableStateOf(PianoEntryMode.STEP) }
+    var pianoEntryMode by rememberSaveable { mutableStateOf(appSettings.defaultEntryMode) }
     var holdDurationMode by rememberSaveable { mutableStateOf(HoldDurationMode.STANDARD) }
     var naturalCurrentGroup by remember { mutableStateOf<NaturalOnsetGroup?>(null) }
     var naturalRecentIntervalsMs by remember { mutableStateOf(emptyList<Long>()) }
@@ -154,9 +161,9 @@ fun ScoreForgeComposerScreen(
     var liveRecordingStartedAtMs by remember { mutableStateOf<Long?>(null) }
     var liveRecordingStartBeat by remember { mutableFloatStateOf(0f) }
     var liveRecordingBpm by remember { mutableIntStateOf(120) }
-    var pianoOctaveShift by rememberSaveable { mutableIntStateOf(0) }
+    var pianoOctaveShift by rememberSaveable { mutableIntStateOf(if (appSettings.rememberKeyboardOctave) appSettings.rememberedKeyboardOctave else 0) }
     var staffSharpInput by rememberSaveable { mutableStateOf(false) }
-    var editorMode by rememberSaveable { mutableStateOf(ScoreEditorMode.STAFF) }
+    var editorMode by rememberSaveable { mutableStateOf(appSettings.defaultEditorMode) }
     var showPianoKeyboard by rememberSaveable { mutableStateOf(true) }
     var draftLoaded by remember { mutableStateOf(false) }
     var canUndo by remember { mutableStateOf(false) }
@@ -181,10 +188,47 @@ fun ScoreForgeComposerScreen(
     val liveRecordingActive = liveRecordingStartedAtMs != null
     val activeTempoBpm = ScoreTempos.atBeat(tempoChanges, activeCursorBeat).bpm
 
+    fun stopDurationAudition() {
+        durationAuditionJob?.cancel()
+        durationAuditionJob = null
+        LiveInstrumentBus.noteOff(NoteDurationAudition.MIDI_PITCH)
+    }
+
+    fun selectDurationWithAudition(duration: NoteDuration) {
+        selectedDuration = duration
+        stopDurationAudition()
+        if (
+            !appSettings.noteDurationAuditionEnabled ||
+            isPlaying ||
+            liveRecordingActive ||
+            comfortTempoCapturing
+        ) return
+
+        val previewVelocity = NoteDurationAudition.velocity(appSettings.noteDurationAuditionVolume)
+        if (!LiveInstrumentBus.noteOn(NoteDurationAudition.MIDI_PITCH, velocity = previewVelocity)) return
+
+        val previewMs = NoteDurationAudition.durationMs(
+            duration = duration,
+            dotted = selectedDotted,
+            bpm = activeTempoBpm,
+        )
+        durationAuditionJob = durationAuditionScope.launch {
+            try {
+                delay(previewMs)
+            } finally {
+                LiveInstrumentBus.noteOff(NoteDurationAudition.MIDI_PITCH)
+            }
+        }
+    }
+
     LaunchedEffect(Unit) {
         ScoreTransportBus.state.collect { state ->
             isPlaying = state.isPlaying
         }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { stopDurationAudition() }
     }
 
     fun syncHistoryButtons() {
@@ -485,7 +529,7 @@ fun ScoreForgeComposerScreen(
     }
 
     fun restoreEditState(state: ScoreEditState) {
-        val restoredTracks = state.tracks.ifEmpty { listOf(ScoreTracks.defaultTrack()) }
+        val restoredTracks = state.tracks.ifEmpty { listOf(ScoreTracks.defaultTrack().copy(clefMode = appSettings.defaultClefMode)) }
             .take(ScoreTracks.MAX_TRACKS)
             .map { it.normalized() }
         tracks.clear()
@@ -528,7 +572,9 @@ fun ScoreForgeComposerScreen(
     }
 
     LaunchedEffect(Unit) {
-        val restored = withContext(Dispatchers.IO) { ScoreProjectRepository.loadDraft(context) }
+        val restored = if (appSettings.restoreLastProject) {
+            withContext(Dispatchers.IO) { ScoreProjectRepository.loadDraft(context) }
+        } else null
         if (restored != null) {
             applyProjectSnapshot(restored, clearHistory = true)
         } else {
@@ -554,7 +600,7 @@ fun ScoreForgeComposerScreen(
         pianoOctaveShift,
         staffSharpInput,
     ) {
-        if (!draftLoaded || draftTracks.isEmpty()) return@LaunchedEffect
+        if (!draftLoaded || draftTracks.isEmpty() || !appSettings.autosaveRecovery) return@LaunchedEffect
         delay(250L)
         val snapshot = currentProjectSnapshot()
         withContext(Dispatchers.IO) { ScoreProjectRepository.saveDraft(context, snapshot) }
@@ -636,7 +682,9 @@ fun ScoreForgeComposerScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            ScoreProjectRepository.saveDraft(context, currentProjectSnapshot())
+            if (ScoreForgeSettingsRepository.load(context).autosaveRecovery) {
+                ScoreProjectRepository.saveDraft(context, currentProjectSnapshot())
+            }
             cancelNaturalEntryGroup()
             if (liveRecordingStartedAtMs != null) cancelLiveRecording()
             LiveInstrumentBus.allNotesOff()
@@ -699,7 +747,8 @@ fun ScoreForgeComposerScreen(
         applyProjectSnapshot(snapshot, clearHistory = true)
         ScoreTransportBus.seek(0f)
         chordMode = StepChordMode.OFF
-        pianoEntryMode = PianoEntryMode.STEP
+        pianoEntryMode = appSettings.defaultEntryMode
+        editorMode = appSettings.defaultEditorMode
     }
 
     fun newProject() {
@@ -711,6 +760,7 @@ fun ScoreForgeComposerScreen(
         val blankTrack = ScoreTracks.defaultTrack().copy(
             presetBank = preset?.bank,
             presetProgram = preset?.program,
+            clefMode = appSettings.defaultClefMode,
         )
         applyProjectSnapshot(
             ScoreProjectSnapshot(
@@ -720,7 +770,7 @@ fun ScoreForgeComposerScreen(
                 selectedDuration = NoteDuration.QUARTER,
                 selectedDotted = false,
                 selectedArticulation = NoteArticulation.NORMAL,
-                pianoOctaveShift = 0,
+                pianoOctaveShift = if (appSettings.rememberKeyboardOctave) pianoOctaveShift else 0,
                 staffSharpInput = false,
                 tracks = listOf(blankTrack),
                 activeTrackIndex = 0,
@@ -729,7 +779,8 @@ fun ScoreForgeComposerScreen(
             clearHistory = true,
         )
         chordMode = StepChordMode.OFF
-        pianoEntryMode = PianoEntryMode.STEP
+        pianoEntryMode = appSettings.defaultEntryMode
+        editorMode = appSettings.defaultEditorMode
         ScoreTransportBus.seek(0f)
     }
 
@@ -1012,6 +1063,7 @@ fun ScoreForgeComposerScreen(
         cancelNaturalEntryGroup()
         LiveInstrumentBus.allNotesOff()
         pianoOctaveShift = (pianoOctaveShift + delta).coerceIn(-4, 3)
+        ScoreForgeSettingsRepository.rememberKeyboardOctave(context, pianoOctaveShift)
     }
 
     fun deleteEvent(eventIndex: Int) {
@@ -1084,6 +1136,7 @@ fun ScoreForgeComposerScreen(
         val newTrack = ScoreTracks.newTrack(tracks).copy(
             presetBank = preset?.bank,
             presetProgram = preset?.program,
+            clefMode = appSettings.defaultClefMode,
         )
         tracks.add(newTrack)
         activeTrackIndex = tracks.lastIndex
@@ -1190,6 +1243,12 @@ fun ScoreForgeComposerScreen(
     }
 
     MaterialTheme(colorScheme = darkColorScheme()) {
+        if (settingsOpen) {
+            ScoreForgeSettingsScreen(
+                onBack = { settingsOpen = false },
+                onSettingsChanged = { updated -> appSettings = updated },
+            )
+        } else {
         ExternalOpenHandler(
             request = externalOpenRequest.takeIf { draftLoaded },
             onOpenProject = ::openProject,
@@ -1245,6 +1304,10 @@ fun ScoreForgeComposerScreen(
                     },
                     onPlay = ::startPlayback,
                     onStop = ::stopPlayback,
+                    onOpenSettings = {
+                        stopDurationAudition()
+                        settingsOpen = true
+                    },
                 )
 
                 ProjectFileControls(
@@ -1296,6 +1359,7 @@ fun ScoreForgeComposerScreen(
                     clefMode = activeTrack.clefMode,
                     effectiveClef = ScoreClefs.effective(activeTrack.clefMode, activeEvents),
                     selectedDuration = selectedDuration,
+                    durationOrder = appSettings.noteDurationOrder,
                     dotted = selectedDotted,
                     sharpInput = staffSharpInput,
                     tieEnabled = canTieSelected,
@@ -1339,7 +1403,7 @@ fun ScoreForgeComposerScreen(
                         keySignatures = ScoreKeySignatures.withoutChange(keySignatures, startBeat)
                     },
                     onClefModeChanged = ::setActiveTrackClefMode,
-                    onDurationSelected = { selectedDuration = it },
+                    onDurationSelected = ::selectDurationWithAudition,
                     onToggleDotted = { selectedDotted = !selectedDotted },
                     onInsertRest = ::insertRest,
                     onToggleSharpInput = { staffSharpInput = !staffSharpInput },
@@ -1365,6 +1429,8 @@ fun ScoreForgeComposerScreen(
                         selectedEventIndex = selectedEventIndex,
                         isPlaying = isPlaying,
                         canPlay = playableNoteCount > 0 && !liveRecordingActive && !comfortTempoCapturing,
+                        initialInputEnabled = appSettings.staffInputDefault,
+                        followPlayback = appSettings.followPlayback,
                         onPlay = ::startPlayback,
                         onStop = ::stopPlayback,
                         onAddPitch = { naturalPitch, tappedBeat ->
@@ -1403,6 +1469,7 @@ fun ScoreForgeComposerScreen(
                         timeSignatures = timeSignatures,
                         octaveShift = pianoOctaveShift,
                         selectedEventIndex = selectedEventIndex,
+                        followPlayback = appSettings.followPlayback,
                         onAddPitch = { pitch, tappedBeat ->
                             insertNoteAt(pitch, tappedBeat, preview = true, advanceCursor = false)
                         },
@@ -1425,6 +1492,8 @@ fun ScoreForgeComposerScreen(
                         holdPreviewDuration = holdPreviewWritten?.duration,
                         holdPreviewDotted = holdPreviewWritten?.dotted ?: false,
                         selectedDuration = selectedDuration,
+                        durationOrder = appSettings.noteDurationOrder,
+                        noteLabelSetting = appSettings.keyboardNoteLabels,
                         selectedDotted = selectedDotted,
                         selectedArticulation = selectedArticulation,
                         tieEnabled = canTieSelected,
@@ -1433,7 +1502,7 @@ fun ScoreForgeComposerScreen(
                         canRedo = canRedo,
                         onUndo = ::undoScore,
                         onRedo = ::redoScore,
-                        onDurationSelected = { selectedDuration = it },
+                        onDurationSelected = ::selectDurationWithAudition,
                         onToggleDotted = { selectedDotted = !selectedDotted },
                         onArticulationSelected = { selectedArticulation = it },
                         onToggleTie = ::toggleSelectedTie,
@@ -1517,6 +1586,7 @@ fun ScoreForgeComposerScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
         }
+        }
     }
 }
 
@@ -1572,6 +1642,7 @@ private fun HeaderBar(
     onTempoUp: () -> Unit,
     onPlay: () -> Unit,
     onStop: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -1582,6 +1653,8 @@ private fun HeaderBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
+        SettingsLaunchButton(onClick = onOpenSettings)
+
         Column {
             Text("Score Forge", style = MaterialTheme.typography.titleLarge, color = Color.White)
             Text(
