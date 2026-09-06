@@ -31,9 +31,8 @@ data class MidiImportResult(
  *
  * Version 1 intentionally targets the information Score Forge can already edit well: note pitch,
  * start, written duration, velocity, track/channel grouping, tempo, time signatures, key signatures, program,
- * bank, volume and pan. Continuous controllers, automation and mid-song tempo changes are retained
- * only as warnings until Score Forge has a model that can represent them without silently pretending
- * they were preserved.
+ * bank, volume and pan. Continuous controllers and automation are retained only as warnings until Score Forge
+ * has a model that can represent them without silently pretending they were preserved.
  */
 object MidiImporter {
     private const val HEADER = "MThd"
@@ -59,6 +58,17 @@ object MidiImporter {
         var pan: Int? = null,
     )
 
+    /**
+     * Bank Select interpretation advertised by common MIDI reset SysEx messages.
+     * MMA is the safe legacy/default behavior Score Forge used before mode detection landed.
+     */
+    private enum class BankSelectMode {
+        MMA,
+        GM,
+        GS,
+        XG,
+    }
+
     private data class TempoEvent(val tick: Long, val microsecondsPerQuarter: Int)
 
     private data class TimeSignatureEvent(
@@ -81,6 +91,7 @@ object MidiImporter {
         val timeSignatureEvents: List<TimeSignatureEvent>,
         val keySignatureEvents: List<KeySignatureEvent>,
         val sourceTrackNames: Map<Int, String>,
+        val bankSelectMode: BankSelectMode,
         val warnings: MutableList<String>,
     )
 
@@ -228,9 +239,12 @@ object MidiImporter {
                 .replace('\n', ' ')
                 .take(80)
 
-            val explicitBank = ((state.bankMsb and 0x7F) shl 7) or (state.bankLsb and 0x7F)
-            val bank = if (channel == 9 && explicitBank == 0) 128 else explicitBank
-            val program = state.program ?: if (channel == 9) 0 else null
+            val bank = resolvePresetBank(
+                state = state,
+                channel = channel,
+                mode = parsed.bankSelectMode,
+            )
+            val program = state.program ?: if (bank == 128) 0 else null
             ScoreTrack(
                 id = index + 1,
                 name = trackName,
@@ -272,6 +286,28 @@ object MidiImporter {
             bpm = bpm,
             warnings = warnings.distinct(),
         )
+    }
+
+    private fun resolvePresetBank(
+        state: TrackChannelState,
+        channel: Int,
+        mode: BankSelectMode,
+    ): Int {
+        val msb = state.bankMsb and 0x7F
+        val lsb = state.bankLsb and 0x7F
+        return when (mode) {
+            BankSelectMode.GM -> if (channel == 9) 128 else 0
+            BankSelectMode.GS -> if (channel == 9) 128 else msb
+            BankSelectMode.XG -> when {
+                channel == 9 -> 128
+                msb == 120 || msb == 126 || msb == 127 -> 128
+                else -> lsb
+            }
+            BankSelectMode.MMA -> {
+                val combined = (msb shl 7) or lsb
+                if (channel == 9 && combined == 0) 128 else combined
+            }
+        }
     }
 
     private data class WrittenDuration(
@@ -409,6 +445,7 @@ object MidiImporter {
         val timeSignatureEvents = mutableListOf<TimeSignatureEvent>()
         val keySignatureEvents = mutableListOf<KeySignatureEvent>()
         val sourceTrackNames = mutableMapOf<Int, String>()
+        val systemExclusiveMessages = mutableListOf<ByteArray>()
         val warnings = mutableListOf<String>()
         var parsedTracks = 0
 
@@ -430,6 +467,7 @@ object MidiImporter {
                 timeSignatureEvents = timeSignatureEvents,
                 keySignatureEvents = keySignatureEvents,
                 sourceTrackNames = sourceTrackNames,
+                systemExclusiveMessages = systemExclusiveMessages,
             )
             parsedTracks += 1
         }
@@ -444,8 +482,46 @@ object MidiImporter {
             timeSignatureEvents = timeSignatureEvents,
             keySignatureEvents = keySignatureEvents,
             sourceTrackNames = sourceTrackNames,
+            bankSelectMode = detectBankSelectMode(systemExclusiveMessages),
             warnings = warnings,
         )
+    }
+
+    private fun detectBankSelectMode(messages: List<ByteArray>): BankSelectMode {
+        var mode = BankSelectMode.MMA
+        messages.forEach { payload ->
+            fun byte(index: Int): Int = payload[index].toInt() and 0xFF
+            when {
+                payload.size >= 7 &&
+                    byte(0) == 0x43 &&
+                    (byte(1) and 0xF0) == 0x10 &&
+                    byte(2) == 0x4C &&
+                    byte(3) == 0x00 &&
+                    byte(4) == 0x00 &&
+                    byte(5) == 0x7E &&
+                    byte(6) == 0x00 -> mode = BankSelectMode.XG
+
+                payload.size >= 8 &&
+                    byte(0) == 0x41 &&
+                    byte(2) == 0x42 &&
+                    byte(3) == 0x12 &&
+                    byte(4) == 0x40 &&
+                    byte(5) == 0x00 &&
+                    byte(6) == 0x7F &&
+                    byte(7) == 0x00 -> mode = BankSelectMode.GS
+
+                payload.size >= 4 &&
+                    byte(0) == 0x7E &&
+                    byte(2) == 0x09 &&
+                    byte(3) == 0x03 -> mode = BankSelectMode.MMA
+
+                payload.size >= 4 &&
+                    byte(0) == 0x7E &&
+                    byte(2) == 0x09 &&
+                    byte(3) == 0x01 -> mode = BankSelectMode.GM
+            }
+        }
+        return mode
     }
 
     private fun parseTrack(
@@ -457,6 +533,7 @@ object MidiImporter {
         timeSignatureEvents: MutableList<TimeSignatureEvent>,
         keySignatureEvents: MutableList<KeySignatureEvent>,
         sourceTrackNames: MutableMap<Int, String>,
+        systemExclusiveMessages: MutableList<ByteArray>,
     ) {
         val cursor = Cursor(bytes)
         val active = mutableMapOf<Pair<Int, Int>, ArrayDeque<Pair<Long, Int>>>()
@@ -513,13 +590,9 @@ object MidiImporter {
                         }
                         0x59 -> if (payload.size >= 2) {
                             val fifths = payload[0].toInt()
-                            val mode = payload[1].toInt() and 0xFF
-                            if (fifths in -7..7 && mode in 0..1) {
-                                keySignatureEvents += KeySignatureEvent(
-                                    tick = tick,
-                                    fifths = fifths,
-                                    minor = mode == 1,
-                                )
+                            val minor = (payload[1].toInt() and 0xFF) == 1
+                            if (fifths in -7..7) {
+                                keySignatureEvents += KeySignatureEvent(tick, fifths, minor)
                             }
                         }
                     }
@@ -527,7 +600,9 @@ object MidiImporter {
                 status == 0xF0 || status == 0xF7 -> {
                     runningStatus = -1
                     val length = cursor.readVarLen().toInt()
-                    cursor.skip(length)
+                    require(length <= cursor.remaining) { "A MIDI SysEx event is truncated." }
+                    val payload = cursor.readBytes(length)
+                    if (status == 0xF0) systemExclusiveMessages += payload
                 }
                 status in 0x80..0xEF -> {
                     val command = status and 0xF0
@@ -588,7 +663,7 @@ object MidiImporter {
     ) {
         val queue = active[channel to pitch] ?: return
         val start = if (queue.isEmpty()) null else queue.removeFirst()
-        if (queue.isEmpty()) active.remove(channel to pitch)
+        if (queue.isEmpty()) active.remove(channel to pitch
         if (start != null) {
             notes += RawNote(
                 sourceTrack = sourceTrack,
