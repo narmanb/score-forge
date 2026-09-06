@@ -125,27 +125,34 @@ fun ComposerTransformToolbar(
     ) {
         when (section) {
             ComposerToolbarSection.ROOT -> {
-                OutlinedButton(onClick = { section = ComposerToolbarSection.TEMPO }) {
-                    Text("Tempo ${activeTempo.bpm}")
-                }
-                OutlinedButton(onClick = { section = ComposerToolbarSection.TIME }) {
-                    Text("Time ${activeTime.displayName}")
-                }
-                OutlinedButton(onClick = { section = ComposerToolbarSection.KEY }) {
-                    Text("Key ${activeKey.displayName}")
-                }
-                OutlinedButton(onClick = { section = ComposerToolbarSection.CLEF }) {
-                    Text("Clef ${clefMode.displayName}")
-                }
-                OutlinedButton(onClick = { section = ComposerToolbarSection.NOTES }) {
-                    Text("Notes ${selectedDuration.displayName}${if (dotted) " •" else ""}")
-                }
-                OutlinedButton(onClick = { section = ComposerToolbarSection.EDITOR }) {
-                    Text(if (editorMode == ScoreEditorMode.STAFF) "Editor Staff" else "Editor Piano Roll")
-                }
-                OutlinedButton(onClick = { section = ComposerToolbarSection.MEASURE }) {
-                    Text("Measure ${measureNumber.coerceAtLeast(1)}")
-                }
+                ComposerToolbarButton(
+                    label = "Tempo ${activeTempo.bpm}",
+                    onClick = { section = ComposerToolbarSection.TEMPO },
+                )
+                ComposerToolbarButton(
+                    label = "Time ${activeTime.displayName}",
+                    onClick = { section = ComposerToolbarSection.TIME },
+                )
+                ComposerToolbarButton(
+                    label = "Key ${activeKey.displayName}",
+                    onClick = { section = ComposerToolbarSection.KEY },
+                )
+                ComposerToolbarButton(
+                    label = "Clef ${clefMode.displayName}",
+                    onClick = { section = ComposerToolbarSection.CLEF },
+                )
+                ComposerToolbarButton(
+                    label = "Notes ${selectedDuration.displayName}${if (dotted) " •" else ""}",
+                    onClick = { section = ComposerToolbarSection.NOTES },
+                )
+                ComposerToolbarButton(
+                    label = if (editorMode == ScoreEditorMode.STAFF) "Editor Staff" else "Editor Piano Roll",
+                    onClick = { section = ComposerToolbarSection.EDITOR },
+                )
+                ComposerToolbarButton(
+                    label = "Measure ${measureNumber.coerceAtLeast(1)}",
+                    onClick = { section = ComposerToolbarSection.MEASURE },
+                )
             }
 
             ComposerToolbarSection.TEMPO -> {
@@ -364,5 +371,5 @@ fun ComposerTransformToolbar(
 
 @Composable
 private fun BackButton(onClick: () -> Unit) {
-    OutlinedButton(onClick = onClick) { Text("← Back") }
+    ComposerToolbarButton(label = "← Back", onClick = onClick)
 }

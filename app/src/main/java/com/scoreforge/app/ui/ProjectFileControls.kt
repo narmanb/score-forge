@@ -263,9 +263,6 @@ fun ProjectFileControls(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
-        Text("Project:", style = MaterialTheme.typography.labelLarge)
-        Text(projectName, style = MaterialTheme.typography.labelLarge)
-
         OutlinedButton(onClick = { newProjectDialogOpen = true }) {
             Text("New")
         }

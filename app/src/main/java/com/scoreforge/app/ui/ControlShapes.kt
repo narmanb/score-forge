@@ -136,6 +136,40 @@ internal fun ChamferedControlButton(
 }
 
 @Composable
+internal fun ComposerToolbarButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    enabled: Boolean = true,
+) {
+    Button(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.height(36.dp),
+        shape = ChamferedControlShape,
+        border = BorderStroke(
+            if (selected) 2.dp else 1.dp,
+            if (enabled) ComposerControlOutlineColor else ComposerControlDisabledOutline,
+        ),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (selected) ComposerControlPressedColor else ComposerControlButtonColor,
+            contentColor = Color.White,
+            disabledContainerColor = ComposerControlDisabledColor,
+            disabledContentColor = Color(0xFFAAA5B0),
+        ),
+        elevation = ButtonDefaults.buttonElevation(
+            defaultElevation = if (selected) 0.dp else 2.dp,
+            pressedElevation = 0.dp,
+            disabledElevation = 0.dp,
+        ),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+    ) {
+        Text(label, style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+@Composable
 internal fun CompactCommandButton(
     label: String,
     onClick: () -> Unit,
