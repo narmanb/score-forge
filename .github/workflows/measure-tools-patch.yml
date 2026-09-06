@@ -23,164 +23,143 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          def replace_once(text, old, new, label):
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"{label}: expected exactly 1 match, found {count}")
-              return text.replace(old, new, 1)
+          def find_unique(lines, predicate, label):
+              matches = [i for i, line in enumerate(lines) if predicate(line)]
+              if len(matches) != 1:
+                  raise SystemExit(f"{label}: expected exactly 1 match, found {len(matches)}")
+              return matches[0]
 
           screen_path = Path('app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt')
-          screen = screen_path.read_text()
+          lines = screen_path.read_text().splitlines()
 
-          screen = replace_once(
-              screen,
-              'import com.scoreforge.app.music.ScoreKeySignatures\n',
-              'import com.scoreforge.app.music.ScoreKeySignatures\nimport com.scoreforge.app.music.ScoreMeasureClipboard\nimport com.scoreforge.app.music.ScoreMeasureEdits\n',
-              'measure imports',
-          )
+          i = find_unique(lines, lambda s: s.strip() == 'import com.scoreforge.app.music.ScoreKeySignatures', 'measure import anchor')
+          lines[i + 1:i + 1] = [
+              'import com.scoreforge.app.music.ScoreMeasureClipboard',
+              'import com.scoreforge.app.music.ScoreMeasureEdits',
+          ]
 
-          screen = replace_once(
-              screen,
-              '    var mixerGestureHistoryRecorded by remember { mutableStateOf(false) }\n',
-              '    var mixerGestureHistoryRecorded by remember { mutableStateOf(false) }\n    var measureClipboard by remember { mutableStateOf<ScoreMeasureClipboard?>(null) }\n',
-              'measure clipboard state',
-          )
+          i = find_unique(lines, lambda s: s.strip() == 'var mixerGestureHistoryRecorded by remember { mutableStateOf(false) }', 'clipboard state anchor')
+          indent = lines[i][:-len(lines[i].lstrip())]
+          lines.insert(i + 1, indent + 'var measureClipboard by remember { mutableStateOf<ScoreMeasureClipboard?>(null) }')
 
-          insertion_anchor = '    fun clearActiveTrack() {\n'
-          measure_functions = '''    fun copyActiveMeasure() {
-              measureClipboard = ScoreMeasureEdits.copyMeasure(
-                  events = currentTrack().events,
-                  timeSignatures = timeSignatures,
-                  beat = currentTrack().cursorBeat,
-              )
-          }
+          i = find_unique(lines, lambda s: s.strip() == 'fun clearActiveTrack() {', 'clear track anchor')
+          indent = lines[i][:-len(lines[i].lstrip())]
+          block = [
+              indent + 'fun copyActiveMeasure() {',
+              indent + '    measureClipboard = ScoreMeasureEdits.copyMeasure(',
+              indent + '        events = currentTrack().events,',
+              indent + '        timeSignatures = timeSignatures,',
+              indent + '        beat = currentTrack().cursorBeat,',
+              indent + '    )',
+              indent + '}',
+              '',
+              indent + 'fun pasteActiveMeasure() {',
+              indent + '    val clipboard = measureClipboard ?: return',
+              indent + '    stopPlayback()',
+              indent + '    stopLiveRecording()',
+              indent + '    cancelNaturalEntryGroup()',
+              indent + '    LiveInstrumentBus.allNotesOff()',
+              indent + '    val track = currentTrack()',
+              indent + '    recordBeforeScoreEdit()',
+              indent + '    val updatedEvents = ScoreMeasureEdits.pasteReplace(',
+              indent + '        events = track.events,',
+              indent + '        timeSignatures = timeSignatures,',
+              indent + '        destinationBeat = track.cursorBeat,',
+              indent + '        clipboard = clipboard,',
+              indent + '    )',
+              indent + '    replaceActiveTrack { it.copy(events = updatedEvents) }',
+              indent + '    selectedEventIndex = -1',
+              indent + '    syncHistoryButtons()',
+              indent + '}',
+              '',
+              indent + 'fun duplicateActiveMeasure(copies: Int) {',
+              indent + '    stopPlayback()',
+              indent + '    stopLiveRecording()',
+              indent + '    cancelNaturalEntryGroup()',
+              indent + '    LiveInstrumentBus.allNotesOff()',
+              indent + '    val track = currentTrack()',
+              indent + '    recordBeforeScoreEdit()',
+              indent + '    val updatedEvents = ScoreMeasureEdits.duplicateMeasure(',
+              indent + '        events = track.events,',
+              indent + '        timeSignatures = timeSignatures,',
+              indent + '        beat = track.cursorBeat,',
+              indent + '        copies = copies,',
+              indent + '    )',
+              indent + '    val newCursorBeat = ScoreMeasureEdits.duplicateCursorBeat(',
+              indent + '        timeSignatures = timeSignatures,',
+              indent + '        beat = track.cursorBeat,',
+              indent + '        copies = copies,',
+              indent + '    )',
+              indent + '    replaceActiveTrack {',
+              indent + '        it.copy(',
+              indent + '            events = updatedEvents,',
+              indent + '            cursorBeat = newCursorBeat,',
+              indent + '        )',
+              indent + '    }',
+              indent + '    selectedEventIndex = -1',
+              indent + '    syncHistoryButtons()',
+              indent + '}',
+              '',
+          ]
+          lines[i:i] = block
 
-          fun pasteActiveMeasure() {
-              val clipboard = measureClipboard ?: return
-              stopPlayback()
-              stopLiveRecording()
-              cancelNaturalEntryGroup()
-              LiveInstrumentBus.allNotesOff()
-              val track = currentTrack()
-              recordBeforeScoreEdit()
-              val updatedEvents = ScoreMeasureEdits.pasteReplace(
-                  events = track.events,
-                  timeSignatures = timeSignatures,
-                  destinationBeat = track.cursorBeat,
-                  clipboard = clipboard,
-              )
-              replaceActiveTrack { it.copy(events = updatedEvents) }
-              selectedEventIndex = -1
-              syncHistoryButtons()
-          }
-
-          fun duplicateActiveMeasure(copies: Int) {
-              stopPlayback()
-              stopLiveRecording()
-              cancelNaturalEntryGroup()
-              LiveInstrumentBus.allNotesOff()
-              val track = currentTrack()
-              recordBeforeScoreEdit()
-              val updatedEvents = ScoreMeasureEdits.duplicateMeasure(
-                  events = track.events,
-                  timeSignatures = timeSignatures,
-                  beat = track.cursorBeat,
-                  copies = copies,
-              )
-              val newCursorBeat = ScoreMeasureEdits.duplicateCursorBeat(
-                  timeSignatures = timeSignatures,
-                  beat = track.cursorBeat,
-                  copies = copies,
-              )
-              replaceActiveTrack {
-                  it.copy(
-                      events = updatedEvents,
-                      cursorBeat = newCursorBeat,
-                  )
-              }
-              selectedEventIndex = -1
-              syncHistoryButtons()
-          }
-
-          fun clearActiveTrack() {
-          '''
-          screen = replace_once(screen, insertion_anchor, measure_functions, 'measure functions')
-
-          toolbar_call_anchor = '''                        showPianoKeyboard = !showPianoKeyboard
-                      },
-                  )
-          '''
-          toolbar_call_replacement = '''                        showPianoKeyboard = !showPianoKeyboard
-                      },
-                      measurePasteEnabled = measureClipboard != null,
-                      onCopyMeasure = ::copyActiveMeasure,
-                      onPasteMeasure = ::pasteActiveMeasure,
-                      onDuplicateMeasure = { duplicateActiveMeasure(1) },
-                      onDuplicateMeasure2 = { duplicateActiveMeasure(2) },
-                      onDuplicateMeasure4 = { duplicateActiveMeasure(4) },
-                      onDuplicateMeasure8 = { duplicateActiveMeasure(8) },
-                  )
-          '''
-          screen = replace_once(screen, toolbar_call_anchor, toolbar_call_replacement, 'toolbar measure callbacks')
-          screen_path.write_text(screen)
+          i = find_unique(lines, lambda s: s.strip() == 'showPianoKeyboard = !showPianoKeyboard', 'toolbar call anchor')
+          close_lambda = i + 1
+          if lines[close_lambda].strip() != '},':
+              raise SystemExit('toolbar call anchor: lambda close not found')
+          call_close = close_lambda + 1
+          if lines[call_close].strip() != ')':
+              raise SystemExit('toolbar call anchor: call close not found')
+          arg_indent = lines[close_lambda][:-len(lines[close_lambda].lstrip())]
+          callbacks = [
+              arg_indent + 'measurePasteEnabled = measureClipboard != null,',
+              arg_indent + 'onCopyMeasure = ::copyActiveMeasure,',
+              arg_indent + 'onPasteMeasure = ::pasteActiveMeasure,',
+              arg_indent + 'onDuplicateMeasure = { duplicateActiveMeasure(1) },',
+              arg_indent + 'onDuplicateMeasure2 = { duplicateActiveMeasure(2) },',
+              arg_indent + 'onDuplicateMeasure4 = { duplicateActiveMeasure(4) },',
+              arg_indent + 'onDuplicateMeasure8 = { duplicateActiveMeasure(8) },',
+          ]
+          lines[call_close:call_close] = callbacks
+          screen_path.write_text('\n'.join(lines) + '\n')
 
           toolbar_path = Path('app/src/main/java/com/scoreforge/app/ui/ComposerTransformToolbar.kt')
-          toolbar = toolbar_path.read_text()
-          toolbar = replace_once(
-              toolbar,
-              '''    onEditorModeChanged: (ScoreEditorMode) -> Unit,
-              onTogglePianoKeyboard: () -> Unit,
-              modifier: Modifier = Modifier,
-          ''',
-              '''    onEditorModeChanged: (ScoreEditorMode) -> Unit,
-              onTogglePianoKeyboard: () -> Unit,
-              measurePasteEnabled: Boolean = false,
-              onCopyMeasure: () -> Unit = {},
-              onPasteMeasure: () -> Unit = {},
-              onDuplicateMeasure: () -> Unit = {},
-              onDuplicateMeasure2: () -> Unit = {},
-              onDuplicateMeasure4: () -> Unit = {},
-              onDuplicateMeasure8: () -> Unit = {},
-              modifier: Modifier = Modifier,
-          ''',
-              'toolbar signature',
-          )
-          toolbar = replace_once(
-              toolbar,
-              '''            ComposerToolbarSection.MEASURE -> {
-                  BackButton { section = ComposerToolbarSection.ROOT }
-                  Text("Measure ${measureNumber.coerceAtLeast(1)}", style = MaterialTheme.typography.labelLarge)
-                  Text("Copy / paste / duplicate tools go here next", style = MaterialTheme.typography.bodySmall)
-              }
-          ''',
-              '''            ComposerToolbarSection.MEASURE -> {
-                  BackButton { section = ComposerToolbarSection.ROOT }
-                  Text("Measure ${measureNumber.coerceAtLeast(1)}", style = MaterialTheme.typography.labelLarge)
-                  ComposerSubmenuButton(label = "Copy", onClick = onCopyMeasure)
-                  ComposerSubmenuButton(
-                      label = "Paste",
-                      onClick = onPasteMeasure,
-                      enabled = measurePasteEnabled,
-                  )
-                  ComposerSubmenuButton(label = "Duplicate", onClick = onDuplicateMeasure)
-                  ComposerSubmenuButton(label = "×2", onClick = onDuplicateMeasure2)
-                  ComposerSubmenuButton(label = "×4", onClick = onDuplicateMeasure4)
-                  ComposerSubmenuButton(label = "×8", onClick = onDuplicateMeasure8)
-              }
-          ''',
-              'measure toolbar contents',
-          )
-          toolbar_path.write_text(toolbar)
+          lines = toolbar_path.read_text().splitlines()
+          i = find_unique(lines, lambda s: s.strip() == 'onTogglePianoKeyboard: () -> Unit,', 'toolbar signature anchor')
+          indent = lines[i][:-len(lines[i].lstrip())]
+          lines[i + 1:i + 1] = [
+              indent + 'measurePasteEnabled: Boolean = false,',
+              indent + 'onCopyMeasure: () -> Unit = {},',
+              indent + 'onPasteMeasure: () -> Unit = {},',
+              indent + 'onDuplicateMeasure: () -> Unit = {},',
+              indent + 'onDuplicateMeasure2: () -> Unit = {},',
+              indent + 'onDuplicateMeasure4: () -> Unit = {},',
+              indent + 'onDuplicateMeasure8: () -> Unit = {},',
+          ]
+
+          i = find_unique(lines, lambda s: 'Copy / paste / duplicate tools go here next' in s, 'measure placeholder')
+          indent = lines[i][:-len(lines[i].lstrip())]
+          lines[i:i + 1] = [
+              indent + 'ComposerSubmenuButton(label = "Copy", onClick = onCopyMeasure)',
+              indent + 'ComposerSubmenuButton(',
+              indent + '    label = "Paste",',
+              indent + '    onClick = onPasteMeasure,',
+              indent + '    enabled = measurePasteEnabled,',
+              indent + ')',
+              indent + 'ComposerSubmenuButton(label = "Duplicate", onClick = onDuplicateMeasure)',
+              indent + 'ComposerSubmenuButton(label = "×2", onClick = onDuplicateMeasure2)',
+              indent + 'ComposerSubmenuButton(label = "×4", onClick = onDuplicateMeasure4)',
+              indent + 'ComposerSubmenuButton(label = "×8", onClick = onDuplicateMeasure8)',
+          ]
+          toolbar_path.write_text('\n'.join(lines) + '\n')
 
           gradle_path = Path('app/build.gradle.kts')
           gradle = gradle_path.read_text()
-          gradle = replace_once(
-              gradle,
-              '        versionCode = 52\n        versionName = "0.2.49"\n',
-              '        versionCode = 53\n        versionName = "0.2.50"\n',
-              'version bump',
-          )
-          gradle_path.write_text(gradle)
+          old = '        versionCode = 52\n        versionName = "0.2.49"\n'
+          new = '        versionCode = 53\n        versionName = "0.2.50"\n'
+          if gradle.count(old) != 1:
+              raise SystemExit('version bump: expected exactly 1 match')
+          gradle_path.write_text(gradle.replace(old, new, 1))
           PY
 
       - name: Check patch
