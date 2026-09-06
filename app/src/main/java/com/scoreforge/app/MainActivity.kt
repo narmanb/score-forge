@@ -1,10 +1,16 @@
 package com.scoreforge.app
 
+import android.app.AlertDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -35,6 +41,7 @@ class MainActivity : ComponentActivity() {
                 },
             )
         }
+        if (savedInstanceState == null) showFileOpenDiagnosticsIfNeeded(intent)
         requestImmersiveMode()
     }
 
@@ -42,6 +49,7 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         externalOpenRequest = intent.toExternalOpenRequestOrNull()
+        showFileOpenDiagnosticsIfNeeded(intent)
         requestImmersiveMode()
     }
 
@@ -63,6 +71,67 @@ class MainActivity : ComponentActivity() {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) requestImmersiveMode()
     }
+
+    private fun showFileOpenDiagnosticsIfNeeded(source: Intent) {
+        if (source.action != Intent.ACTION_VIEW) return
+        val uri = source.data ?: return
+        window.decorView.post {
+            val report = buildFileOpenDiagnosticReport(source, uri)
+            AlertDialog.Builder(this)
+                .setTitle("File-open diagnostics")
+                .setMessage(report)
+                .setNeutralButton("Copy") { _, _ ->
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Score Forge file diagnostics", report))
+                }
+                .setPositiveButton("OK", null)
+                .show()
+        }
+    }
+
+    private fun buildFileOpenDiagnosticReport(source: Intent, uri: Uri): String {
+        val resolverType = runCatching { contentResolver.getType(uri) }.getOrNull()
+        val displayName = queryExternalDisplayName(uri)
+        val documentId = runCatching {
+            if (DocumentsContract.isDocumentUri(this, uri)) DocumentsContract.getDocumentId(uri) else null
+        }.getOrNull()
+        val clipMimeTypes = source.clipData?.description?.let { description ->
+            (0 until description.mimeTypeCount)
+                .joinToString(", ") { index -> description.getMimeType(index) }
+        }
+
+        return buildString {
+            appendLine("TEMPORARY DIAGNOSTIC BUILD")
+            appendLine()
+            appendLine("Intent MIME: ${source.type ?: "<null>"}")
+            appendLine("Resolver MIME: ${resolverType ?: "<null>"}")
+            appendLine("Display name: ${displayName ?: "<null>"}")
+            appendLine("URI scheme: ${uri.scheme ?: "<null>"}")
+            appendLine("URI authority: ${uri.authority ?: "<null>"}")
+            appendLine("URI path: ${uri.path ?: "<null>"}")
+            appendLine("Document ID: ${documentId ?: "<not a document URI>"}")
+            appendLine("Last path segment: ${uri.lastPathSegment ?: "<null>"}")
+            appendLine("Clip MIME types: ${clipMimeTypes ?: "<none>"}")
+            appendLine("Intent flags: 0x${source.flags.toUInt().toString(16)}")
+            appendLine()
+            append("Full URI: ").append(uri)
+        }
+    }
+
+    private fun queryExternalDisplayName(uri: Uri): String? =
+        runCatching {
+            contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (!cursor.moveToFirst()) return@use null
+                val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (index < 0) null else cursor.getString(index)
+            }
+        }.getOrNull()
 
     private fun requestImmersiveMode() {
         window.decorView.post {
