@@ -26,10 +26,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.scoreforge.app.ExternalFileTypes
+import com.scoreforge.app.audio.WavAudioExporter
 import com.scoreforge.app.music.MidiExporter
 import com.scoreforge.app.music.MidiImporter
 import com.scoreforge.app.music.ScoreProjectCodec
 import com.scoreforge.app.music.ScoreProjectSnapshot
+import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -54,6 +56,7 @@ fun ProjectFileControls(
     var status by remember { mutableStateOf("Autosave on") }
     var midiImportWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
     var midiExportWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
+    var wavExportWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
 
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(ExternalFileTypes.SCORE_FORGE_PROJECT_MIME),
@@ -197,6 +200,38 @@ fun ProjectFileControls(
         }
     }
 
+    val wavExportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("audio/wav"),
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val snapshot = snapshotProvider()
+        scope.launch {
+            status = "Rendering WAV…"
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val safeUri = DocumentFileExtensions.ensure(context, uri, ".wav")
+                    context.contentResolver.openOutputStream(safeUri, "w").use { output ->
+                        requireNotNull(output) { "Could not open the selected WAV file for writing." }
+                        WavAudioExporter.export(context, snapshot, output)
+                    }
+                }
+            }
+
+            result.onSuccess { exported ->
+                status = buildString {
+                    append("Exported WAV • ")
+                    append(String.format(Locale.US, "%.1f s", exported.durationSeconds))
+                    append(" • ")
+                    append(exported.exportedTrackCount)
+                    append(if (exported.exportedTrackCount == 1) " track" else " tracks")
+                }
+                wavExportWarnings = exported.warnings
+            }.onFailure { error ->
+                status = error.message ?: "WAV export failed"
+            }
+        }
+    }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -269,6 +304,18 @@ fun ProjectFileControls(
             },
         ) {
             Text("Export MIDI")
+        }
+
+        OutlinedButton(
+            onClick = {
+                wavExportWarnings = emptyList()
+                val safeName = ScoreProjectSnapshot.sanitizeProjectName(projectName)
+                    .replace(Regex("[\\/:*?\"<>|]"), "_")
+                    .ifBlank { "Untitled" }
+                wavExportLauncher.launch("$safeName.wav")
+            },
+        ) {
+            Text("Export WAV")
         }
 
         Text(
@@ -359,6 +406,21 @@ fun ProjectFileControls(
             },
             confirmButton = {
                 TextButton(onClick = { midiExportWarnings = emptyList() }) {
+                    Text("OK")
+                }
+            },
+        )
+    }
+
+    if (wavExportWarnings.isNotEmpty()) {
+        AlertDialog(
+            onDismissRequest = { wavExportWarnings = emptyList() },
+            title = { Text("WAV export notes") },
+            text = {
+                Text(wavExportWarnings.joinToString(separator = "\n\n") { "• $it" })
+            },
+            confirmButton = {
+                TextButton(onClick = { wavExportWarnings = emptyList() }) {
                     Text("OK")
                 }
             },
