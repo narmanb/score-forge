@@ -100,6 +100,33 @@ class WavAudioExporterTest {
         assertTrue(noteOffs.single().frame > noteOns.single().frame)
     }
 
+    @Test
+    fun renderPlan_honorsCursorBeyondLastNote() {
+        val note = ScoreNote(
+            midiPitch = 60,
+            duration = NoteDuration.QUARTER,
+            startBeat = 0f,
+        )
+        val track = ScoreTrack(
+            id = 1,
+            name = "Trailing space",
+            events = listOf(note),
+            cursorBeat = 8f,
+        )
+        val snapshot = ScoreProjectSnapshot(
+            events = track.events,
+            tracks = listOf(track),
+        )
+
+        val plan = WavAudioExporter.buildRenderPlan(
+            snapshot = snapshot,
+            sampleRate = 44_100,
+            tailSeconds = 0f,
+        )
+
+        assertEquals(176_400, plan.scoreFrames)
+    }
+
     private fun le16(bytes: ByteArray, offset: Int): Int =
         (bytes[offset].toInt() and 0xff) or
             ((bytes[offset + 1].toInt() and 0xff) shl 8)
