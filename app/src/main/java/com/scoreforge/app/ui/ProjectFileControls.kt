@@ -5,11 +5,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -31,10 +33,17 @@ import com.scoreforge.app.music.MidiExporter
 import com.scoreforge.app.music.MidiImporter
 import com.scoreforge.app.music.ScoreProjectCodec
 import com.scoreforge.app.music.ScoreProjectSnapshot
+import java.io.File
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+private data class PendingWavExport(
+    val tempFile: File,
+    val result: WavAudioExporter.Result,
+    val suggestedName: String,
+)
 
 @Composable
 fun ProjectFileControls(
@@ -57,6 +66,8 @@ fun ProjectFileControls(
     var midiImportWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
     var midiExportWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
     var wavExportWarnings by remember { mutableStateOf<List<String>>(emptyList()) }
+    var wavRenderProgress by remember { mutableStateOf<Float?>(null) }
+    var pendingWavExport by remember { mutableStateOf<PendingWavExport?>(null) }
 
     val saveLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument(ExternalFileTypes.SCORE_FORGE_PROJECT_MIME),
@@ -203,21 +214,33 @@ fun ProjectFileControls(
     val wavExportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("audio/wav"),
     ) { uri ->
-        if (uri == null) return@rememberLauncherForActivityResult
-        val snapshot = snapshotProvider()
+        val pending = pendingWavExport ?: return@rememberLauncherForActivityResult
+        if (uri == null) {
+            pending.tempFile.delete()
+            pendingWavExport = null
+            status = "WAV export canceled"
+            return@rememberLauncherForActivityResult
+        }
+
         scope.launch {
-            status = "Rendering WAV…"
-            val result = withContext(Dispatchers.IO) {
+            status = "Saving WAV…"
+            val saveResult = withContext(Dispatchers.IO) {
                 runCatching {
                     val safeUri = DocumentFileExtensions.ensure(context, uri, ".wav")
-                    context.contentResolver.openOutputStream(safeUri, "w").use { output ->
-                        requireNotNull(output) { "Could not open the selected WAV file for writing." }
-                        WavAudioExporter.export(context, snapshot, output)
+                    pending.tempFile.inputStream().buffered().use { input ->
+                        context.contentResolver.openOutputStream(safeUri, "w").use { output ->
+                            requireNotNull(output) { "Could not open the selected WAV file for writing." }
+                            input.copyTo(output, bufferSize = 64 * 1024)
+                            output.flush()
+                        }
                     }
                 }
             }
+            pending.tempFile.delete()
+            pendingWavExport = null
 
-            result.onSuccess { exported ->
+            saveResult.onSuccess {
+                val exported = pending.result
                 status = buildString {
                     append("Exported WAV • ")
                     append(String.format(Locale.US, "%.1f s", exported.durationSeconds))
@@ -227,7 +250,7 @@ fun ProjectFileControls(
                 }
                 wavExportWarnings = exported.warnings
             }.onFailure { error ->
-                status = error.message ?: "WAV export failed"
+                status = error.message ?: "WAV save failed"
             }
         }
     }
@@ -309,11 +332,51 @@ fun ProjectFileControls(
         OutlinedButton(
             onClick = {
                 wavExportWarnings = emptyList()
+                val snapshot = snapshotProvider()
                 val safeName = ScoreProjectSnapshot.sanitizeProjectName(projectName)
                     .replace(Regex("[\\/:*?\"<>|]"), "_")
                     .ifBlank { "Untitled" }
-                wavExportLauncher.launch("$safeName.wav")
+                scope.launch {
+                    wavRenderProgress = 0f
+                    status = "Rendering WAV…"
+                    val renderResult = withContext(Dispatchers.IO) {
+                        var tempFile: File? = null
+                        runCatching {
+                            tempFile = File.createTempFile("score-forge-wav-", ".wav", context.cacheDir)
+                            val exported = tempFile!!.outputStream().buffered().use { output ->
+                                WavAudioExporter.export(
+                                    context = context,
+                                    snapshot = snapshot,
+                                    output = output,
+                                    onProgress = { progress ->
+                                        scope.launch {
+                                            if (wavRenderProgress != null) {
+                                                wavRenderProgress = progress.coerceIn(0f, 1f)
+                                            }
+                                        }
+                                    },
+                                )
+                            }
+                            PendingWavExport(
+                                tempFile = tempFile!!,
+                                result = exported,
+                                suggestedName = "$safeName.wav",
+                            )
+                        }.onFailure {
+                            tempFile?.delete()
+                        }
+                    }
+                    wavRenderProgress = null
+                    renderResult.onSuccess { pending ->
+                        pendingWavExport = pending
+                        status = "WAV rendered • choose save location"
+                        wavExportLauncher.launch(pending.suggestedName)
+                    }.onFailure { error ->
+                        status = error.message ?: "WAV export failed"
+                    }
+                }
             },
+            enabled = wavRenderProgress == null && pendingWavExport == null,
         ) {
             Text("Export WAV")
         }
@@ -322,6 +385,29 @@ fun ProjectFileControls(
             status,
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    if (wavRenderProgress != null) {
+        val progress = wavRenderProgress!!.coerceIn(0f, 1f)
+        val percent = (progress * 100f).toInt().coerceIn(0, 100)
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Exporting WAV") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Rendering audio… $percent%")
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text(
+                        "The save location will open after rendering is complete.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            },
+            confirmButton = {},
         )
     }
 
