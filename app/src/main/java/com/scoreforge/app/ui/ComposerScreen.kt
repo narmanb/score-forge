@@ -303,8 +303,6 @@ fun ScoreForgeComposerScreen(
         val startedAt = liveRecordingStartedAtMs ?: run {
             liveHeldInputs.clear()
             LiveInstrumentBus.allNotesOff()
-            // A normal score may now legitimately own the shared transport in the background.
-            // Only repair/stop it here when score playback is not the owner.
             if (!isPlaying) ScoreTransportBus.stop()
             return
         }
@@ -324,9 +322,6 @@ fun ScoreForgeComposerScreen(
     }
 
     fun cancelLiveRecording() {
-        // Always stop the shared transport, even if the local Live bookkeeping is already empty.
-        // This repairs the impossible state seen on-device where the purple playhead kept moving
-        // in Natural mode after the Live owner had disappeared.
         liveHeldInputs.keys.toList().forEach { LiveInstrumentBus.noteOff(it) }
         liveHeldInputs.clear()
         LiveInstrumentBus.allNotesOff()
@@ -382,8 +377,6 @@ fun ScoreForgeComposerScreen(
         selectedEventIndex = eventIndex
         if (!LiveInstrumentBus.noteOn(pitch, velocity = 96)) playback.previewPitch(pitch)
     }
-
-
 
     fun applyHoldGroupDuration(
         group: HoldOnsetGroup,
@@ -479,8 +472,6 @@ fun ScoreForgeComposerScreen(
             updateHoldGroupAt(SystemClock.elapsedRealtime())
         }
         if (holdHeldInputs.values.none { it.groupOnsetMs == held.groupOnsetMs }) {
-            // Keep the completed onset as the performance-timing anchor for the next Hold note.
-            // Its written duration is already final; only the next note's start uses this anchor.
             holdPreviousGroup = holdCurrentGroup
             holdCurrentGroup = null
             syncHistoryButtons()
@@ -508,8 +499,6 @@ fun ScoreForgeComposerScreen(
 
     fun applyProjectSnapshot(snapshot: ScoreProjectSnapshot, clearHistory: Boolean) {
         cancelNaturalEntryGroup()
-        // Draft restoration also runs after Activity recreation. Do not stop a legitimate score
-        // that is owned by the foreground playback service merely because local Live state is empty.
         if (liveRecordingStartedAtMs != null) {
             cancelLiveRecording()
         } else {
@@ -592,8 +581,7 @@ fun ScoreForgeComposerScreen(
                 val updatedEvents = track.events.toMutableList()
                 var changed = false
                 liveHeldInputs.values.forEach { held ->
-                    val note = updatedEvents.getOrNull(held.eventIndex) as? ScoreNote
-                        ?: return@forEach
+                    val note = updatedEvents.getOrNull(held.eventIndex) as? ScoreNote ?: return@forEach
                     val written = LiveEntryTiming.quantizedDurationForHoldMs(
                         holdMs = now - held.startedAtMs,
                         bpm = held.bpmAtPress,
@@ -650,8 +638,6 @@ fun ScoreForgeComposerScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            // The foreground media service owns score playback across Activity recreation. Flush
-            // editor state, but do not release the process-lifetime playback engine or SoundFont.
             ScoreProjectRepository.saveDraft(context, currentProjectSnapshot())
             cancelNaturalEntryGroup()
             if (liveRecordingStartedAtMs != null) cancelLiveRecording()
@@ -930,10 +916,6 @@ fun ScoreForgeComposerScreen(
             intervalMs = intervalMs,
             phraseBreak = inference.phraseBreak,
         )
-
-        // Preserve the performed start-to-start spacing even when the previous written duration is
-        // shortened to the learned pulse at a phrase ending. The leftover space is musical silence,
-        // not a giant sustained note.
         val stepBeats = NaturalEntryTiming.quantizedOnsetSpacingBeats(intervalMs, group.bpm)
         val nextStartBeat = group.startBeat + stepBeats
         applyNaturalGroupDuration(group, inference.written, nextStartBeat)
@@ -1267,16 +1249,6 @@ fun ScoreForgeComposerScreen(
                     onStop = ::stopPlayback,
                 )
 
-                ComfortTempoControls(
-                    capturing = comfortTempoCapturing,
-                    attackCount = comfortTempoAttackTimes.size,
-                    estimatedBpm = comfortTempoEstimate,
-                    onStart = ::startComfortTempoMeasurement,
-                    onCancel = ::cancelComfortTempoMeasurement,
-                    onApply = ::applyComfortTempoEstimate,
-                    onTryAgain = ::startComfortTempoMeasurement,
-                )
-
                 ProjectFileControls(
                     projectName = projectName,
                     activeTrackName = activeTrack.name,
@@ -1286,46 +1258,6 @@ fun ScoreForgeComposerScreen(
                     onClearTrack = ::clearActiveTrack,
                     onRenameProject = ::renameProject,
                     onOpenProject = ::openProject,
-                )
-
-                TempoControls(
-                    tempoChanges = tempoChanges,
-                    cursorBeat = activeCursorBeat,
-                    onSetTempo = ::setTempoChange,
-                    onRemoveTempo = ::removeTempoChange,
-                )
-
-                TimeSignatureControls(
-                    timeSignatures = timeSignatures,
-                    cursorBeat = activeCursorBeat,
-                    onSetSignature = { startBeat, numerator, denominator ->
-                        timeSignatures = ScoreTimeSignatures.withChange(
-                            timeSignatures,
-                            startBeat,
-                            numerator,
-                            denominator,
-                        )
-                    },
-                    onRemoveSignature = { startBeat ->
-                        timeSignatures = ScoreTimeSignatures.withoutChange(timeSignatures, startBeat)
-                    },
-                )
-
-                KeySignatureControls(
-                    keySignatures = keySignatures,
-                    timeSignatures = timeSignatures,
-                    cursorBeat = activeCursorBeat,
-                    onSetSignature = { startBeat, fifths, minor ->
-                        keySignatures = ScoreKeySignatures.withChange(
-                            keySignatures,
-                            startBeat,
-                            fifths,
-                            minor,
-                        )
-                    },
-                    onRemoveSignature = { startBeat ->
-                        keySignatures = ScoreKeySignatures.withoutChange(keySignatures, startBeat)
-                    },
                 )
 
                 TrackControls(
@@ -1358,35 +1290,69 @@ fun ScoreForgeComposerScreen(
                     },
                 )
 
-                DurationSelector(
-                    selected = selectedDuration,
+                ComposerTransformToolbar(
+                    tempoChanges = tempoChanges,
+                    timeSignatures = timeSignatures,
+                    keySignatures = keySignatures,
+                    cursorBeat = activeCursorBeat,
+                    clefMode = activeTrack.clefMode,
+                    effectiveClef = ScoreClefs.effective(activeTrack.clefMode, activeEvents),
+                    selectedDuration = selectedDuration,
                     dotted = selectedDotted,
                     sharpInput = staffSharpInput,
                     tieEnabled = canTieSelected,
                     tieActive = selectedTieActive,
-                    onSelected = { selectedDuration = it },
+                    editorMode = editorMode,
+                    showPianoKeyboard = showPianoKeyboard,
+                    measureNumber = ScoreTimeline.measureCount(
+                        emptyList(),
+                        activeCursorBeat + 0.001f,
+                        timeSignatures = timeSignatures,
+                    ).coerceAtLeast(1),
+                    comfortTempoCapturing = comfortTempoCapturing,
+                    comfortTempoAttackCount = comfortTempoAttackTimes.size,
+                    comfortTempoEstimate = comfortTempoEstimate,
+                    onSetTempo = ::setTempoChange,
+                    onRemoveTempo = ::removeTempoChange,
+                    onStartComfortTempo = ::startComfortTempoMeasurement,
+                    onCancelComfortTempo = ::cancelComfortTempoMeasurement,
+                    onApplyComfortTempo = ::applyComfortTempoEstimate,
+                    onTryComfortTempoAgain = ::startComfortTempoMeasurement,
+                    onSetTimeSignature = { startBeat, numerator, denominator ->
+                        timeSignatures = ScoreTimeSignatures.withChange(
+                            timeSignatures,
+                            startBeat,
+                            numerator,
+                            denominator,
+                        )
+                    },
+                    onRemoveTimeSignature = { startBeat ->
+                        timeSignatures = ScoreTimeSignatures.withoutChange(timeSignatures, startBeat)
+                    },
+                    onSetKeySignature = { startBeat, fifths, minor ->
+                        keySignatures = ScoreKeySignatures.withChange(
+                            keySignatures,
+                            startBeat,
+                            fifths,
+                            minor,
+                        )
+                    },
+                    onRemoveKeySignature = { startBeat ->
+                        keySignatures = ScoreKeySignatures.withoutChange(keySignatures, startBeat)
+                    },
+                    onClefModeChanged = ::setActiveTrackClefMode,
+                    onDurationSelected = { selectedDuration = it },
                     onToggleDotted = { selectedDotted = !selectedDotted },
                     onInsertRest = ::insertRest,
                     onToggleSharpInput = { staffSharpInput = !staffSharpInput },
                     onToggleTie = ::toggleSelectedTie,
-                )
-
-                EditorModeControls(
-                    mode = editorMode,
-                    showPianoKeyboard = showPianoKeyboard,
-                    onModeChanged = { editorMode = it },
+                    onEditorModeChanged = { editorMode = it },
                     onTogglePianoKeyboard = {
                         stopLiveRecording()
                         cancelNaturalEntryGroup()
                         LiveInstrumentBus.allNotesOff()
                         showPianoKeyboard = !showPianoKeyboard
                     },
-                )
-
-                ClefControls(
-                    mode = activeTrack.clefMode,
-                    effectiveClef = ScoreClefs.effective(activeTrack.clefMode, activeEvents),
-                    onModeChanged = ::setActiveTrackClefMode,
                 )
 
                 when (editorMode) {
@@ -1556,7 +1522,6 @@ fun ScoreForgeComposerScreen(
     }
 }
 
-
 @Composable
 private fun ClefControls(
     mode: ScoreClefMode,
@@ -1610,7 +1575,6 @@ private fun HeaderBar(
     onPlay: () -> Unit,
     onStop: () -> Unit,
 ) {
-
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1666,7 +1630,6 @@ private fun HeaderBar(
 
         if (isPlaying) Button(onClick = onStop) { Text("Stop") }
         else Button(onClick = onPlay, enabled = canPlay) { Text("Play") }
-
     }
 }
 
