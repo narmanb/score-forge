@@ -279,7 +279,17 @@ fun MultitouchPianoKeyboard(
                             if (active) Color(0xFF536A91) else Color(0xFF151515),
                             RoundedCornerShape(bottomStart = 3.dp, bottomEnd = 3.dp),
                         ),
-                )
+                    contentAlignment = Alignment.BottomCenter,
+                ) {
+                    if (noteLabelSetting == KeyboardNoteLabelSetting.ALL) {
+                        Text(
+                            PitchNames.name(pitch),
+                            modifier = Modifier.padding(bottom = 3.dp),
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                }
             }
         }
 

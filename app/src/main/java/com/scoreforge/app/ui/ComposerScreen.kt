@@ -640,7 +640,9 @@ fun ScoreForgeComposerScreen(
 
     DisposableEffect(Unit) {
         onDispose {
-            ScoreProjectRepository.saveDraft(context, currentProjectSnapshot())
+            if (ScoreForgeSettingsRepository.load(context).autosaveRecovery) {
+                ScoreProjectRepository.saveDraft(context, currentProjectSnapshot())
+            }
             cancelNaturalEntryGroup()
             if (liveRecordingStartedAtMs != null) cancelLiveRecording()
             LiveInstrumentBus.allNotesOff()
@@ -703,7 +705,8 @@ fun ScoreForgeComposerScreen(
         applyProjectSnapshot(snapshot, clearHistory = true)
         ScoreTransportBus.seek(0f)
         chordMode = StepChordMode.OFF
-        pianoEntryMode = PianoEntryMode.STEP
+        pianoEntryMode = appSettings.defaultEntryMode
+        editorMode = appSettings.defaultEditorMode
     }
 
     fun newProject() {
@@ -715,6 +718,7 @@ fun ScoreForgeComposerScreen(
         val blankTrack = ScoreTracks.defaultTrack().copy(
             presetBank = preset?.bank,
             presetProgram = preset?.program,
+            clefMode = appSettings.defaultClefMode,
         )
         applyProjectSnapshot(
             ScoreProjectSnapshot(
@@ -724,7 +728,7 @@ fun ScoreForgeComposerScreen(
                 selectedDuration = NoteDuration.QUARTER,
                 selectedDotted = false,
                 selectedArticulation = NoteArticulation.NORMAL,
-                pianoOctaveShift = 0,
+                pianoOctaveShift = if (appSettings.rememberKeyboardOctave) pianoOctaveShift else 0,
                 staffSharpInput = false,
                 tracks = listOf(blankTrack),
                 activeTrackIndex = 0,
@@ -733,7 +737,8 @@ fun ScoreForgeComposerScreen(
             clearHistory = true,
         )
         chordMode = StepChordMode.OFF
-        pianoEntryMode = PianoEntryMode.STEP
+        pianoEntryMode = appSettings.defaultEntryMode
+        editorMode = appSettings.defaultEditorMode
         ScoreTransportBus.seek(0f)
     }
 

@@ -97,7 +97,6 @@ object ScoreForgeSettingsRepository {
             .putString("default_clef", settings.defaultClefMode.name)
             .putString("keyboard_labels", settings.keyboardNoteLabels.name)
             .putBoolean("remember_keyboard_octave", settings.rememberKeyboardOctave)
-            .putInt("keyboard_octave", settings.rememberedKeyboardOctave.coerceIn(-4, 3))
             .putString("default_entry_mode", settings.defaultEntryMode.name)
             .putBoolean("staff_input_default", settings.staffInputDefault)
             .putBoolean("follow_playback", settings.followPlayback)

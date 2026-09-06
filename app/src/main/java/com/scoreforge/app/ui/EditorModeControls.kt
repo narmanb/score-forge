@@ -13,9 +13,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
-enum class ScoreEditorMode {
-    STAFF,
-    PIANO_ROLL,
+enum class ScoreEditorMode(val displayName: String) {
+    STAFF("Staff"),
+    PIANO_ROLL("Piano Roll"),
 }
 
 @Composable
