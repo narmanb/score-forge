@@ -1,0 +1,40 @@
+name: Apply settings tile and duration audition
+
+on:
+  push:
+    branches:
+      - feature/settings-menu
+    paths:
+      - tools/add_settings_tile_and_duration_audition.py
+      - .github/workflows/apply-settings-tile-duration-audition.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/settings-menu
+      - name: Apply integration
+        run: python tools/add_settings_tile_and_duration_audition.py
+      - name: Sanity check generated diff
+        run: |
+          git diff --check
+          grep -R "SETTINGS" app/src/main/java/com/scoreforge/app/ui/ScoreForgeUiFeedback.kt app/src/main/java/com/scoreforge/app/ui/ControlShapes.kt
+          grep -R "selectDurationWithAudition" app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt
+          grep -R "Note Duration Audition" app/src/main/java/com/scoreforge/app/ui/ScoreForgeSettingsScreen.kt
+      - name: Commit integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app tools/add_settings_tile_and_duration_audition.py
+          git reset tools/add_settings_tile_and_duration_audition.py
+          if git diff --cached --quiet; then
+            echo "No generated changes to commit"
+          else
+            git commit -m "Add Settings tile feedback and note duration audition"
+            git push origin HEAD:feature/settings-menu
+          fi
