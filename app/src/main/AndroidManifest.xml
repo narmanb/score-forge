@@ -59,21 +59,31 @@
             </intent-filter>
 
             <!--
-                Samsung My Files can keep the MIME type that was assigned before a newly-created
-                document is renamed to add .sfp. Match the content-URI path as a narrow fallback so
-                a real .sfp filename can still be offered to Score Forge without advertising the app
-                for every unrelated file type. MainActivity/ExternalOpenHandler still validate the
-                Score Forge file signature before loading it.
+                Samsung My Files can expose raw Internal storage through a content provider whose
+                URI/MIME pair does not preserve enough of a custom filename for extension filtering
+                to work. Scope a wildcard fallback to Samsung My Files' own provider authorities
+                instead of registering Score Forge for */* globally. FileOpenActivity forwards the
+                URI, and ExternalOpenHandler still rejects anything that is not actually SFP/MIDI.
             -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data
-                    android:scheme="content"
-                    android:host="*"
-                    android:pathPattern=".*\.sfp"
-                    android:mimeType="*/*" />
+                <data android:scheme="content" />
+                <data android:host="com.sec.android.app.myfiles.FileProvider" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+
+            <!-- Older/newer Samsung builds have also used com.sec.android.app.myfiles as the
+                 authority with .FileProvider embedded in the URI path. Keep the same provider-only
+                 fallback for that authority as well. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" />
+                <data android:host="com.sec.android.app.myfiles" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
 
