@@ -107,6 +107,11 @@ object MidiImporter {
         val parsed = parse(bytes)
         require(parsed.notes.isNotEmpty()) { "No playable note events were found in this MIDI file." }
 
+        val bankSelectMode = if (parsed.bankSelectMode == BankSelectMode.MMA) {
+            inferBankSelectMode(parsed.states, projectName)
+        } else {
+            parsed.bankSelectMode
+        }
         val warnings = parsed.warnings.toMutableList()
         val tempoChanges = resolveTempos(
             events = parsed.tempoEvents,
@@ -242,7 +247,7 @@ object MidiImporter {
             val bank = resolvePresetBank(
                 state = state,
                 channel = channel,
-                mode = parsed.bankSelectMode,
+                mode = bankSelectMode,
             )
             val program = state.program ?: if (bank == 128) 0 else null
             ScoreTrack(
@@ -286,6 +291,35 @@ object MidiImporter {
             bpm = bpm,
             warnings = warnings.distinct(),
         )
+    }
+
+    private fun inferBankSelectMode(
+        states: Map<Pair<Int, Int>, TrackChannelState>,
+        projectName: String,
+    ): BankSelectMode {
+        val xgNameHint = Regex(
+            pattern = "(^|[^A-Za-z0-9])XG([^A-Za-z0-9]|$)",
+            option = RegexOption.IGNORE_CASE,
+        ).containsMatchIn(projectName)
+        val xgDrumHint = states.any { (key, state) ->
+            key.second == 9 && (state.bankMsb and 0x7F) in setOf(120, 126, 127)
+        }
+        val xgSfxHint = states.any { (key, state) ->
+            key.second != 9 && (state.bankMsb and 0x7F) == 64
+        }
+        val xgVariationHint = states.any { (key, state) ->
+            key.second != 9 &&
+                (state.bankMsb and 0x7F) == 0 &&
+                (state.bankLsb and 0x7F) != 0
+        }
+        return if (
+            (xgDrumHint && xgSfxHint) ||
+            (xgNameHint && (xgDrumHint || xgSfxHint || xgVariationHint))
+        ) {
+            BankSelectMode.XG
+        } else {
+            BankSelectMode.MMA
+        }
     }
 
     private fun resolvePresetBank(
