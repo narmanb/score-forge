@@ -1,7 +1,5 @@
 package com.scoreforge.app.music
 
-import kotlin.math.abs
-
 data class ScoreMeasureBounds(
     val startBeat: Float,
     val endBeat: Float,
@@ -49,6 +47,21 @@ object ScoreMeasureEdits {
     }
 
     /**
+     * Paste is safe when every copied onset still begins inside the destination measure. Written
+     * duration may extend across the barline; only event starts are constrained.
+     */
+    fun canPasteAt(
+        timeSignatures: List<ScoreTimeSignature>,
+        destinationBeat: Float,
+        clipboard: ScoreMeasureClipboard,
+    ): Boolean {
+        val destination = boundsAt(timeSignatures, destinationBeat)
+        return clipboard.events.all { event ->
+            event.startBeat >= -EPSILON && event.startBeat < destination.lengthBeats - EPSILON
+        }
+    }
+
+    /**
      * Replaces events whose start lies in the destination measure. Copied events retain their
      * relative onset and full written duration; events are never silently clipped at a barline.
      */
@@ -58,6 +71,7 @@ object ScoreMeasureEdits {
         destinationBeat: Float,
         clipboard: ScoreMeasureClipboard,
     ): List<ScoreEvent> {
+        if (!canPasteAt(timeSignatures, destinationBeat, clipboard)) return events
         val destination = boundsAt(timeSignatures, destinationBeat)
         val retained = events.filterNot {
             it.startBeat >= destination.startBeat - EPSILON &&
@@ -115,6 +129,4 @@ object ScoreMeasureEdits {
         is ScoreNote -> copy(startBeat = newStartBeat)
         is ScoreRest -> copy(startBeat = newStartBeat)
     }
-
-    fun sameMeasureLength(a: Float, b: Float): Boolean = abs(a - b) <= EPSILON
 }
