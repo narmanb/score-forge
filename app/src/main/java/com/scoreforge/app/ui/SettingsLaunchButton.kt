@@ -4,12 +4,12 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -18,11 +18,15 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -79,16 +83,53 @@ internal fun SettingsLaunchButton(
         shadowElevation = if (activated) 0.dp else 2.dp,
     ) {
         Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = "⚙",
+            ChunkySettingsGear(
                 color = if (enabled) Color(0xFFD0B8FF) else Color(0xFF8A8197),
-                fontSize = 37.sp,
-                modifier = Modifier.graphicsLayer {
-                    rotationZ = gearRotation
-                    scaleX = gearScale
-                    scaleY = gearScale
-                },
+                cutoutColor = if (enabled) tileColor else Color(0xFF302E35),
+                modifier = Modifier
+                    .size(34.dp)
+                    .graphicsLayer {
+                        rotationZ = gearRotation
+                        scaleX = gearScale
+                        scaleY = gearScale
+                    },
             )
         }
+    }
+}
+
+/**
+ * Custom cog instead of the platform Unicode gear glyph.
+ * Eight broad teeth and a thick body deliberately match the chunky mockup icon and avoid the
+ * thin-spoked/wagon-wheel appearance that varies by Android font.
+ */
+@Composable
+private fun ChunkySettingsGear(
+    color: Color,
+    cutoutColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier = modifier) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val outerRadius = size.minDimension * 0.49f
+        val rootRadius = size.minDimension * 0.36f
+        val holeRadius = size.minDimension * 0.17f
+        val pointCount = 32 // 8 teeth × 4 corners per tooth/root transition.
+        val path = Path()
+
+        repeat(pointCount) { index ->
+            val phase = index % 4
+            val radius = if (phase == 0 || phase == 1) outerRadius else rootRadius
+            val angle = -PI / 2.0 + (2.0 * PI * index.toDouble() / pointCount.toDouble())
+            val point = Offset(
+                x = center.x + cos(angle).toFloat() * radius,
+                y = center.y + sin(angle).toFloat() * radius,
+            )
+            if (index == 0) path.moveTo(point.x, point.y) else path.lineTo(point.x, point.y)
+        }
+        path.close()
+
+        drawPath(path = path, color = color)
+        drawCircle(color = cutoutColor, radius = holeRadius, center = center)
     }
 }
