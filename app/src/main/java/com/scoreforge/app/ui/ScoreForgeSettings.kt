@@ -32,6 +32,7 @@ enum class NoteDurationOrderSetting(val displayName: String) {
 }
 
 enum class KeyboardNoteLabelSetting(val displayName: String) {
+    DEFAULT("Default"),
     OFF("Off"),
     C_ONLY("C Notes Only"),
     ALL("All Notes"),
@@ -45,7 +46,7 @@ data class ScoreForgeSettings(
     val keepScreenAwake: Boolean = true,
     val defaultEditorMode: ScoreEditorMode = ScoreEditorMode.STAFF,
     val defaultClefMode: ScoreClefMode = ScoreClefMode.AUTO,
-    val keyboardNoteLabels: KeyboardNoteLabelSetting = KeyboardNoteLabelSetting.C_ONLY,
+    val keyboardNoteLabels: KeyboardNoteLabelSetting = KeyboardNoteLabelSetting.DEFAULT,
     val rememberKeyboardOctave: Boolean = true,
     val rememberedKeyboardOctave: Int = 0,
     val defaultEntryMode: PianoEntryMode = PianoEntryMode.STEP,
@@ -73,7 +74,7 @@ object ScoreForgeSettingsRepository {
             keepScreenAwake = prefs.getBoolean("keep_screen_awake", true),
             defaultEditorMode = prefs.enumValue("default_editor", ScoreEditorMode.STAFF),
             defaultClefMode = prefs.enumValue("default_clef", ScoreClefMode.AUTO),
-            keyboardNoteLabels = prefs.enumValue("keyboard_labels", KeyboardNoteLabelSetting.C_ONLY),
+            keyboardNoteLabels = prefs.enumValue("keyboard_labels", KeyboardNoteLabelSetting.DEFAULT),
             rememberKeyboardOctave = prefs.getBoolean("remember_keyboard_octave", true),
             rememberedKeyboardOctave = prefs.getInt("keyboard_octave", 0).coerceIn(-4, 3),
             defaultEntryMode = prefs.enumValue("default_entry_mode", PianoEntryMode.STEP),

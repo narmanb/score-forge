@@ -1608,6 +1608,12 @@ private fun HeaderBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(7.dp),
     ) {
+        ChamferedControlButton(
+            label = "⚙",
+            onClick = onOpenSettings,
+            compact = false,
+        )
+
         Column {
             Text("Score Forge", style = MaterialTheme.typography.titleLarge, color = Color.White)
             Text(
@@ -1616,11 +1622,6 @@ private fun HeaderBar(
                 color = Color(0xFFE0DCE5),
             )
         }
-
-        ComposerToolbarButton(
-            label = "⚙ Settings",
-            onClick = onOpenSettings,
-        )
 
         ChamferedControlButton(
             label = "−5",

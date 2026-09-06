@@ -79,7 +79,7 @@ fun MultitouchPianoKeyboard(
     holdPreviewDotted: Boolean,
     selectedDuration: NoteDuration,
     durationOrder: NoteDurationOrderSetting = NoteDurationOrderSetting.LONG_TO_SHORT,
-    noteLabelSetting: KeyboardNoteLabelSetting = KeyboardNoteLabelSetting.C_ONLY,
+    noteLabelSetting: KeyboardNoteLabelSetting = KeyboardNoteLabelSetting.DEFAULT,
     selectedDotted: Boolean,
     selectedArticulation: NoteArticulation,
     tieEnabled: Boolean,
@@ -247,6 +247,7 @@ fun MultitouchPianoKeyboard(
                         contentAlignment = Alignment.BottomCenter,
                     ) {
                         val showLabel = when (noteLabelSetting) {
+                            KeyboardNoteLabelSetting.DEFAULT -> true
                             KeyboardNoteLabelSetting.OFF -> false
                             KeyboardNoteLabelSetting.C_ONLY -> pitch % 12 == 0
                             KeyboardNoteLabelSetting.ALL -> true

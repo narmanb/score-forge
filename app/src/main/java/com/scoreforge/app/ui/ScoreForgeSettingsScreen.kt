@@ -142,7 +142,7 @@ fun ScoreForgeSettingsScreen(
                 )
                 ChoiceSetting(
                     label = "Keyboard Note Labels",
-                    description = "Choose how much pitch labeling appears on the touch piano.",
+                    description = "Default labels natural keys only. Off hides labels, C Notes Only labels Cs, and All Notes also labels sharps.",
                     choices = KeyboardNoteLabelSetting.entries.map { option ->
                         SettingChoice(option.displayName, settings.keyboardNoteLabels == option) {
                             update(settings.copy(keyboardNoteLabels = option))
