@@ -204,6 +204,50 @@ class ScoreMeasureEditsTest {
     }
 
     @Test
+    fun pasteProblemIdentifiesExactCopiedMeasureAndOnset() {
+        val signatures = listOf(
+            ScoreTimeSignature(0f, 4, 4),
+            ScoreTimeSignature(8f, 3, 4),
+        )
+        val clipboard = ScoreMeasureClipboard(
+            sourceLengthBeats = 8f,
+            events = listOf(note(70, 7.5f)),
+            sourceMeasureLengths = listOf(4f, 4f),
+        )
+
+        val problem = ScoreMeasureEdits.pasteProblemAt(signatures, 8f, clipboard)
+
+        assertEquals(2, problem?.sourceMeasureNumber)
+        assertEquals(3.5f, problem?.onsetWithinMeasure ?: -1f, 0.001f)
+        assertEquals(3f, problem?.destinationMeasureLength ?: -1f, 0.001f)
+    }
+
+    @Test
+    fun pasteInsertAddsClipboardAndShiftsLaterEvents() {
+        val events = listOf(
+            note(50, 0f),
+            note(51, 4f),
+            note(52, 8f),
+        )
+        val clipboard = ScoreMeasureClipboard(
+            sourceLengthBeats = 4f,
+            events = listOf(note(70, 1f, velocity = 87)),
+        )
+
+        val pasted = ScoreMeasureEdits.pasteInsert(
+            events,
+            listOf(ScoreTimeSignature()),
+            destinationBeat = 5f,
+            clipboard = clipboard,
+        )
+
+        assertTrue(pasted.any { it is ScoreNote && it.midiPitch == 50 && it.startBeat == 0f })
+        assertTrue(pasted.any { it is ScoreNote && it.midiPitch == 70 && it.startBeat == 5f && it.velocity == 87 })
+        assertTrue(pasted.any { it is ScoreNote && it.midiPitch == 51 && it.startBeat == 8f })
+        assertTrue(pasted.any { it is ScoreNote && it.midiPitch == 52 && it.startBeat == 12f })
+    }
+
+    @Test
     fun duplicateInsertsCopiesAndShiftsLaterEvents() {
         val events = listOf(
             note(60, 0f),
