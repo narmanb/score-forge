@@ -18,11 +18,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p apk
-          gh run download 34083000469 --repo narmanb/score-forge --name score-forge-debug-apk --dir apk
-          mv apk/app-debug.apk apk/Score-Forge-0.2.54-PR40.apk
+          gh run download 34097386265 --repo narmanb/score-forge --name score-forge-debug-apk --dir apk
+          mv apk/app-debug.apk apk/Score-Forge-0.2.55-PR41.apk
       - name: Publish browser-download prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete score-forge-pr40-test --repo narmanb/score-forge --yes --cleanup-tag || true
-          gh release create score-forge-pr40-test apk/Score-Forge-0.2.54-PR40.apk --repo narmanb/score-forge --target dabca9fd8ba74f6434c67bb371504e23eb98c286 --prerelease --title "Score Forge 0.2.54 PR #40 Test" --notes "Combined phone-test APK for PR #39 and stacked PR #40: multiline in-app paste error banner plus Input On / Rearrange / Off staff interaction modes. Do not treat either PR as merged or final until device verification passes."
+          gh release delete score-forge-pr41-test --repo narmanb/score-forge --yes --cleanup-tag || true
+          gh release create score-forge-pr41-test apk/Score-Forge-0.2.55-PR41.apk --repo narmanb/score-forge --target 11ef64c6ebcb05b91e9c54d874cd7577382f032f --prerelease --title "Score Forge 0.2.55 PR #41 Test" --notes "Phone-test APK for PR #41. Reorders the composer root toolbar to Notes, Measure, Time, Key, Tempo, Clef, Editor. Do not treat this prerelease as merged or final until device verification passes."
