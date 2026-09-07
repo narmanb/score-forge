@@ -116,7 +116,7 @@ fun ScoreStaffEditor(
     var draggingVerticalFromCursorGutter by remember { mutableStateOf(false) }
     var manualBrowseNotified by remember { mutableStateOf(false) }
     var zoom by rememberSaveable { mutableFloatStateOf(1f) }
-    var staffInputEnabled by rememberSaveable { mutableStateOf(initialInputEnabled) }
+    var staffInputMode by rememberSaveable { mutableStateOf(StaffInputMode.fromInputEnabled(initialInputEnabled)) }
     val scrollState = rememberScrollState()
     val density = LocalDensity.current
     val transport by ScoreTransportBus.state.collectAsState()
@@ -235,12 +235,13 @@ fun ScoreStaffEditor(
                             contentBeats,
                             beatWidthPx,
                             timelineLeftPx,
-                            staffInputEnabled,
+                            staffInputMode,
                             notationGaps,
                             effectiveClef,
                         ) {
                             detectTapGestures(
                                 onLongPress = { position ->
+                                    if (!staffInputMode.allowsDelete) return@detectTapGestures
                                     val geometry = staffGeometry(events, keySignatures, size.height.toFloat(), effectiveClef)
                                     val eventIndex = nearestEditableEventIndex(
                                         events,
@@ -301,8 +302,8 @@ fun ScoreStaffEditor(
                                         StaffCursorZone.STAFF -> Unit
                                     }
 
-                                    if (!staffInputEnabled) {
-                                        ScoreTransportBus.seek(tappedBeat)
+                                    if (!staffInputMode.allowsNoteEntry) {
+                                        onMoveEntryCursor(tappedBeat)
                                         onSelectEvent(-1)
                                         return@detectTapGestures
                                     }
@@ -311,7 +312,7 @@ fun ScoreStaffEditor(
                                 },
                             )
                         }
-                        .pointerInput(events, contentBeats, beatWidthPx, timelineLeftPx, notationGaps, effectiveClef) {
+                        .pointerInput(events, contentBeats, beatWidthPx, timelineLeftPx, notationGaps, effectiveClef, staffInputMode) {
                             detectDragGestures(
                                 onDragStart = { position ->
                                     manualBrowseNotified = false
@@ -321,7 +322,7 @@ fun ScoreStaffEditor(
                                     pendingEntryCursorDrag = false
                                     draggingVerticalFromCursorGutter = false
                                     val geometry = staffGeometry(events, keySignatures, size.height.toFloat(), effectiveClef)
-                                    draggingEventIndex = nearestEditableEventIndex(
+                                    val editableEventIndex = nearestEditableEventIndex(
                                         events,
                                         position,
                                         timelineLeftPx,
@@ -331,6 +332,8 @@ fun ScoreStaffEditor(
                                         keySignatures,
                                         notationGaps,
                                     )
+                                    draggingEventIndex =
+                                        if (staffInputMode.allowsRearrange) editableEventIndex else -1
                                     if (draggingEventIndex >= 0) {
                                         onSelectEvent(draggingEventIndex)
                                         onBeginMove(draggingEventIndex)
@@ -744,21 +747,21 @@ fun ScoreStaffEditor(
                     ) { Text("▶", style = MaterialTheme.typography.labelSmall) }
                 }
 
-                if (staffInputEnabled) {
+                if (staffInputMode == StaffInputMode.INPUT_ON) {
                     ScoreForgeButton(
-                        onClick = { staffInputEnabled = false },
-                        modifier = Modifier.height(28.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                    ) { Text("Input On", style = MaterialTheme.typography.labelSmall) }
+                        onClick = { staffInputMode = staffInputMode.next() },
+                        modifier = Modifier.width(94.dp).height(28.dp),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                    ) { Text(staffInputMode.label, style = MaterialTheme.typography.labelSmall) }
                 } else {
                     ScoreForgeOutlinedButton(
-                        onClick = { staffInputEnabled = true },
-                        modifier = Modifier.height(28.dp),
-                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        onClick = { staffInputMode = staffInputMode.next() },
+                        modifier = Modifier.width(94.dp).height(28.dp),
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = Color(0xFF222222)
                         ),
-                    ) { Text("Input Off", style = MaterialTheme.typography.labelSmall) }
+                    ) { Text(staffInputMode.label, style = MaterialTheme.typography.labelSmall) }
                 }
 
                 ScoreForgeOutlinedButton(
