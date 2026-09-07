@@ -1,0 +1,28 @@
+name: Measure All Tracks Patch
+
+on:
+  push:
+    branches:
+      - feature/measure-all-tracks
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Run measure all-tracks patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/measure-all-tracks
+      - name: Apply patch
+        run: python3 .github/scripts/patch_measure_all_tracks.py
+      - name: Commit changes
+        run: |
+          git config user.name "narmanb"
+          git config user.email "43427228+narmanb@users.noreply.github.com"
+          git rm .github/workflows/measure-all-tracks-patch.yml .github/scripts/patch_measure_all_tracks.py
+          git add app/build.gradle.kts app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt app/src/main/java/com/scoreforge/app/ui/ComposerTransformToolbar.kt
+          git commit -m "Add current-track and all-tracks measure scope"
+          git push origin HEAD:feature/measure-all-tracks
