@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - feature/measure-range-tools
-    paths:
-      - .github/workflows/measure-range-patch.yml
 
 permissions:
   contents: write
@@ -19,8 +17,8 @@ jobs:
           ref: feature/measure-range-tools
           fetch-depth: 0
       - name: Patch range UI and version
-        shell: python
         run: |
+          python - <<'PY'
           from pathlib import Path
 
           def replace_once(path, old, new):
@@ -134,6 +132,7 @@ import androidx.compose.runtime.mutableStateOf''',
           replace_once(gradle, 'versionCode = 53\n        versionName = "0.2.50"', 'versionCode = 54\n        versionName = "0.2.51"')
 
           Path(".github/workflows/measure-range-patch.yml").unlink()
+          PY
       - name: Commit source changes
         run: |
           git config user.name "github-actions[bot]"
