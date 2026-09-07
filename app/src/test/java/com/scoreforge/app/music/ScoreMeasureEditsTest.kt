@@ -56,6 +56,7 @@ class ScoreMeasureEditsTest {
         val clipboard = ScoreMeasureEdits.copyMeasure(events, listOf(ScoreTimeSignature()), 4.25f)
 
         assertEquals(4f, clipboard.sourceLengthBeats, 0.001f)
+        assertEquals(1, clipboard.sourceMeasureCount)
         assertEquals(2, clipboard.events.size)
         val copiedNote = clipboard.events[0] as ScoreNote
         assertEquals(64, copiedNote.midiPitch)
@@ -67,6 +68,27 @@ class ScoreMeasureEditsTest {
         val copiedRest = clipboard.events[1] as ScoreRest
         assertEquals(1f, copiedRest.startBeat, 0.001f)
         assertTrue(copiedRest.dotted)
+    }
+
+    @Test
+    fun copyRangeSpansActualMeasureLengths() {
+        val signatures = listOf(
+            ScoreTimeSignature(0f, 3, 4),
+            ScoreTimeSignature(6f, 5, 8),
+        )
+        val events = listOf(
+            note(60, 0.5f),
+            note(62, 3.5f),
+            note(64, 6.5f),
+            note(67, 8.5f),
+        )
+
+        val clipboard = ScoreMeasureEdits.copyMeasures(events, signatures, beat = 2f, measureCount = 3)
+
+        assertEquals(3, clipboard.sourceMeasureCount)
+        assertEquals(listOf(3f, 3f, 2.5f), clipboard.sourceMeasureLengths)
+        assertEquals(8.5f, clipboard.sourceLengthBeats, 0.001f)
+        assertEquals(listOf(0.5f, 3.5f, 6.5f), clipboard.events.map { it.startBeat })
     }
 
     @Test
@@ -114,6 +136,37 @@ class ScoreMeasureEditsTest {
     }
 
     @Test
+    fun pasteRangeMapsEachMeasureToDestinationMeter() {
+        val signatures = listOf(
+            ScoreTimeSignature(0f, 4, 4),
+            ScoreTimeSignature(8f, 3, 4),
+        )
+        val source = listOf(
+            note(60, 0.5f),
+            note(62, 4.5f),
+        )
+        val clipboard = ScoreMeasureEdits.copyMeasures(source, signatures, beat = 0f, measureCount = 2)
+        val destinationEvents = listOf(
+            note(50, 8f),
+            note(51, 11f),
+            note(52, 14f),
+        )
+
+        val pasted = ScoreMeasureEdits.pasteReplace(
+            destinationEvents,
+            signatures,
+            destinationBeat = 9f,
+            clipboard = clipboard,
+        )
+
+        assertTrue(pasted.any { it is ScoreNote && it.midiPitch == 60 && it.startBeat == 8.5f })
+        assertTrue(pasted.any { it is ScoreNote && it.midiPitch == 62 && it.startBeat == 11.5f })
+        assertFalse(pasted.any { it is ScoreNote && it.midiPitch == 50 })
+        assertFalse(pasted.any { it is ScoreNote && it.midiPitch == 51 })
+        assertTrue(pasted.any { it is ScoreNote && it.midiPitch == 52 && it.startBeat == 14f })
+    }
+
+    @Test
     fun pasteRejectsCopiedOnsetThatWouldStartBeyondShorterDestinationBar() {
         val signatures = listOf(
             ScoreTimeSignature(0f, 4, 4),
@@ -133,6 +186,21 @@ class ScoreMeasureEditsTest {
 
         assertFalse(ScoreMeasureEdits.canPasteAt(signatures, 5f, clipboard))
         assertEquals(original, ScoreMeasureEdits.pasteReplace(original, signatures, 5f, clipboard))
+    }
+
+    @Test
+    fun rangePasteRejectsLateOnsetInCorrespondingShorterMeasure() {
+        val signatures = listOf(
+            ScoreTimeSignature(0f, 4, 4),
+            ScoreTimeSignature(8f, 3, 4),
+        )
+        val source = listOf(
+            note(70, 3.5f),
+            note(71, 4.5f),
+        )
+        val clipboard = ScoreMeasureEdits.copyMeasures(source, signatures, beat = 0f, measureCount = 2)
+
+        assertFalse(ScoreMeasureEdits.canPasteAt(signatures, 8f, clipboard))
     }
 
     @Test
