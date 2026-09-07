@@ -17,7 +17,13 @@ data class ScoreMeasureClipboard(
         get() = sourceMeasureLengths.size.coerceAtLeast(1)
 }
 
-/** Meter-aware single-track copy, replace-paste, and duplicate operations. */
+data class ScoreMeasurePasteProblem(
+    val sourceMeasureNumber: Int,
+    val onsetWithinMeasure: Float,
+    val destinationMeasureLength: Float,
+)
+
+/** Meter-aware single-track copy, replace-paste, insert-paste, and duplicate operations. */
 object ScoreMeasureEdits {
     private const val EPSILON = 0.001f
 
@@ -77,22 +83,40 @@ object ScoreMeasureEdits {
     }
 
     /**
-     * Paste is safe when every copied onset still begins inside its corresponding destination
+     * Returns the first copied onset that cannot begin inside its corresponding destination
      * measure. Written duration may extend across a barline; only event starts are constrained.
      */
+    fun pasteProblemAt(
+        timeSignatures: List<ScoreTimeSignature>,
+        destinationBeat: Float,
+        clipboard: ScoreMeasureClipboard,
+    ): ScoreMeasurePasteProblem? {
+        val sourceLengths = effectiveSourceMeasureLengths(clipboard)
+        val destinations = boundsRange(timeSignatures, destinationBeat, sourceLengths.size)
+        clipboard.events.forEach { event ->
+            val mapped = sourceMeasurePosition(event.startBeat, sourceLengths)
+                ?: return ScoreMeasurePasteProblem(
+                    sourceMeasureNumber = 1,
+                    onsetWithinMeasure = event.startBeat.coerceAtLeast(0f),
+                    destinationMeasureLength = destinations.first().lengthBeats,
+                )
+            val destination = destinations[mapped.first]
+            if (mapped.second < -EPSILON || mapped.second >= destination.lengthBeats - EPSILON) {
+                return ScoreMeasurePasteProblem(
+                    sourceMeasureNumber = mapped.first + 1,
+                    onsetWithinMeasure = mapped.second.coerceAtLeast(0f),
+                    destinationMeasureLength = destination.lengthBeats,
+                )
+            }
+        }
+        return null
+    }
+
     fun canPasteAt(
         timeSignatures: List<ScoreTimeSignature>,
         destinationBeat: Float,
         clipboard: ScoreMeasureClipboard,
-    ): Boolean {
-        val sourceLengths = effectiveSourceMeasureLengths(clipboard)
-        val destinations = boundsRange(timeSignatures, destinationBeat, sourceLengths.size)
-        return clipboard.events.all { event ->
-            val mapped = sourceMeasurePosition(event.startBeat, sourceLengths) ?: return@all false
-            val destination = destinations[mapped.first]
-            mapped.second >= -EPSILON && mapped.second < destination.lengthBeats - EPSILON
-        }
-    }
+    ): Boolean = pasteProblemAt(timeSignatures, destinationBeat, clipboard) == null
 
     /**
      * Replaces events whose starts lie in the destination measure range. Copied events retain
@@ -112,12 +136,35 @@ object ScoreMeasureEdits {
         val retained = events.filterNot {
             it.startBeat >= rangeStart - EPSILON && it.startBeat < rangeEnd - EPSILON
         }
-        val pasted = clipboard.events.mapNotNull { event ->
-            val mapped = sourceMeasurePosition(event.startBeat, sourceLengths) ?: return@mapNotNull null
-            val destination = destinations[mapped.first]
-            event.withStartBeat(destination.startBeat + mapped.second)
-        }
+        val pasted = mapClipboardToDestinations(clipboard, sourceLengths, destinations)
         return sanitizeScoreTies(retained + pasted)
+    }
+
+    /**
+     * Inserts the copied measure range at the destination and shifts later events on this track
+     * forward by the destination range length. Global tempo/meter/key maps are intentionally not
+     * shifted by this current-track operation.
+     */
+    fun pasteInsert(
+        events: List<ScoreEvent>,
+        timeSignatures: List<ScoreTimeSignature>,
+        destinationBeat: Float,
+        clipboard: ScoreMeasureClipboard,
+    ): List<ScoreEvent> {
+        if (!canPasteAt(timeSignatures, destinationBeat, clipboard)) return events
+        val sourceLengths = effectiveSourceMeasureLengths(clipboard)
+        val destinations = boundsRange(timeSignatures, destinationBeat, sourceLengths.size)
+        val insertionStart = destinations.first().startBeat
+        val insertionEnd = destinations.last().endBeat
+        val insertedLength = (insertionEnd - insertionStart).coerceAtLeast(0f)
+        if (insertedLength <= EPSILON) return events
+
+        val beforeInsertion = events.filter { it.startBeat < insertionStart - EPSILON }
+        val afterInsertion = events
+            .filter { it.startBeat >= insertionStart - EPSILON }
+            .map { event -> event.withStartBeat(event.startBeat + insertedLength) }
+        val pasted = mapClipboardToDestinations(clipboard, sourceLengths, destinations)
+        return sanitizeScoreTies(beforeInsertion + pasted + afterInsertion)
     }
 
     /**
@@ -160,6 +207,16 @@ object ScoreMeasureEdits {
     ): Float {
         val bounds = boundsAt(timeSignatures, beat)
         return bounds.startBeat + bounds.lengthBeats * copies.coerceAtLeast(1)
+    }
+
+    private fun mapClipboardToDestinations(
+        clipboard: ScoreMeasureClipboard,
+        sourceLengths: List<Float>,
+        destinations: List<ScoreMeasureBounds>,
+    ): List<ScoreEvent> = clipboard.events.mapNotNull { event ->
+        val mapped = sourceMeasurePosition(event.startBeat, sourceLengths) ?: return@mapNotNull null
+        val destination = destinations[mapped.first]
+        event.withStartBeat(destination.startBeat + mapped.second)
     }
 
     private fun effectiveSourceMeasureLengths(clipboard: ScoreMeasureClipboard): List<Float> {
