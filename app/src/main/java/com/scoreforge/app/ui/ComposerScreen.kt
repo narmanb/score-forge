@@ -172,6 +172,14 @@ fun ScoreForgeComposerScreen(
     var canRedo by remember { mutableStateOf(false) }
     var mixerGestureHistoryRecorded by remember { mutableStateOf(false) }
     var measureClipboard by remember { mutableStateOf<ScoreMeasureClipboard?>(null) }
+    var measurePasteMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(measurePasteMessage) {
+        if (measurePasteMessage != null) {
+            delay(8000)
+            measurePasteMessage = null
+        }
+    }
 
     val safeActiveTrackIndex = activeTrackIndex.coerceIn(0, tracks.lastIndex)
     val activeTrack = tracks[safeActiveTrackIndex]
@@ -1233,6 +1241,7 @@ fun ScoreForgeComposerScreen(
     }
 
     fun copyActiveMeasure() {
+        measurePasteMessage = null
         measureClipboard = ScoreMeasureEdits.copyMeasure(
             events = currentTrack().events,
             timeSignatures = timeSignatures,
@@ -1240,15 +1249,64 @@ fun ScoreForgeComposerScreen(
         )
     }
 
+    fun copyActiveMeasureRange(measureCount: Int) {
+        measurePasteMessage = null
+        measureClipboard = ScoreMeasureEdits.copyMeasures(
+            events = currentTrack().events,
+            timeSignatures = timeSignatures,
+            beat = currentTrack().cursorBeat,
+            measureCount = measureCount,
+        )
+    }
+
+    fun pasteBeatLabel(value: Float): String =
+        if (kotlin.math.abs(value - value.toInt()) <= 0.001f) value.toInt().toString() else value.toString()
+
+    fun explainPasteProblem(clipboard: ScoreMeasureClipboard, destinationBeat: Float): Boolean {
+        val problem = ScoreMeasureEdits.pasteProblemAt(
+            timeSignatures = timeSignatures,
+            destinationBeat = destinationBeat,
+            clipboard = clipboard,
+        ) ?: return false
+        val message = "Can't paste: copied measure ${problem.sourceMeasureNumber} has an event at beat " +
+            "${pasteBeatLabel(problem.onsetWithinMeasure)}; destination measure " +
+            "${problem.sourceMeasureNumber} is only ${pasteBeatLabel(problem.destinationMeasureLength)} beats."
+        measurePasteMessage = message
+        return true
+    }
+
     fun pasteActiveMeasure() {
         val clipboard = measureClipboard ?: return
+        val track = currentTrack()
+        if (explainPasteProblem(clipboard, track.cursorBeat)) return
+        measurePasteMessage = null
         stopPlayback()
         stopLiveRecording()
         cancelNaturalEntryGroup()
         LiveInstrumentBus.allNotesOff()
-        val track = currentTrack()
         recordBeforeScoreEdit()
         val updatedEvents = ScoreMeasureEdits.pasteReplace(
+            events = track.events,
+            timeSignatures = timeSignatures,
+            destinationBeat = track.cursorBeat,
+            clipboard = clipboard,
+        )
+        replaceActiveTrack { it.copy(events = updatedEvents) }
+        selectedEventIndex = -1
+        syncHistoryButtons()
+    }
+
+    fun insertActiveMeasure() {
+        val clipboard = measureClipboard ?: return
+        val track = currentTrack()
+        if (explainPasteProblem(clipboard, track.cursorBeat)) return
+        measurePasteMessage = null
+        stopPlayback()
+        stopLiveRecording()
+        cancelNaturalEntryGroup()
+        LiveInstrumentBus.allNotesOff()
+        recordBeforeScoreEdit()
+        val updatedEvents = ScoreMeasureEdits.pasteInsert(
             events = track.events,
             timeSignatures = timeSignatures,
             destinationBeat = track.cursorBeat,
@@ -1473,14 +1531,32 @@ fun ScoreForgeComposerScreen(
                         LiveInstrumentBus.allNotesOff()
                         showPianoKeyboard = !showPianoKeyboard
                     },
-                    measurePasteEnabled = measureClipboard?.let { ScoreMeasureEdits.canPasteAt(timeSignatures, activeCursorBeat, it) } == true,
+                    measurePasteEnabled = measureClipboard != null,
                     onCopyMeasure = ::copyActiveMeasure,
+                    onCopyMeasureRange = ::copyActiveMeasureRange,
                     onPasteMeasure = ::pasteActiveMeasure,
+                    onInsertMeasure = ::insertActiveMeasure,
                     onDuplicateMeasure = { duplicateActiveMeasure(1) },
                     onDuplicateMeasure2 = { duplicateActiveMeasure(2) },
                     onDuplicateMeasure4 = { duplicateActiveMeasure(4) },
                     onDuplicateMeasure8 = { duplicateActiveMeasure(8) },
                 )
+
+                measurePasteMessage?.let { message ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 2.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                    ) {
+                        Text(
+                            text = message,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
 
                 when (editorMode) {
                     ScoreEditorMode.STAFF -> ScoreStaffEditor(
