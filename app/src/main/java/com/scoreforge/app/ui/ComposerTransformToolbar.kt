@@ -89,6 +89,7 @@ fun ComposerTransformToolbar(
     onCopyMeasure: () -> Unit = {},
     onCopyMeasureRange: (Int) -> Unit = {},
     onPasteMeasure: () -> Unit = {},
+    onInsertMeasure: () -> Unit = {},
     onDuplicateMeasure: () -> Unit = {},
     onDuplicateMeasure2: () -> Unit = {},
     onDuplicateMeasure4: () -> Unit = {},
@@ -96,7 +97,7 @@ fun ComposerTransformToolbar(
     modifier: Modifier = Modifier,
 ) {
     var section by rememberSaveable { mutableStateOf(ComposerToolbarSection.ROOT) }
-    var measureRangeCount by rememberSaveable { mutableIntStateOf(2) }
+    var measureRangeCount by rememberSaveable { mutableIntStateOf(1) }
 
     LaunchedEffect(comfortTempoCapturing, comfortTempoEstimate) {
         if (comfortTempoCapturing || comfortTempoEstimate != null) {
@@ -381,25 +382,32 @@ fun ComposerTransformToolbar(
             ComposerToolbarSection.MEASURE -> {
                 BackButton { section = ComposerToolbarSection.ROOT }
                 Text("Measure ${measureNumber.coerceAtLeast(1)}", style = MaterialTheme.typography.labelLarge)
-                ComposerSubmenuButton(label = "Copy", onClick = onCopyMeasure)
                 ComposerSubmenuButton(
-                    label = "Range −",
-                    onClick = { measureRangeCount = (measureRangeCount - 1).coerceAtLeast(2) },
-                    enabled = measureRangeCount > 2,
+                    label = "−",
+                    onClick = { measureRangeCount = (measureRangeCount - 1).coerceAtLeast(1) },
+                    enabled = measureRangeCount > 1,
                 )
-                Text("$measureRangeCount measures", style = MaterialTheme.typography.bodySmall)
+                Text("Measures $measureRangeCount", style = MaterialTheme.typography.bodySmall)
                 ComposerSubmenuButton(
-                    label = "Range +",
+                    label = "+",
                     onClick = { measureRangeCount = (measureRangeCount + 1).coerceAtMost(16) },
                     enabled = measureRangeCount < 16,
                 )
                 ComposerSubmenuButton(
-                    label = "Copy Range",
-                    onClick = { onCopyMeasureRange(measureRangeCount) },
+                    label = "Copy",
+                    onClick = {
+                        if (measureRangeCount == 1) onCopyMeasure()
+                        else onCopyMeasureRange(measureRangeCount)
+                    },
                 )
                 ComposerSubmenuButton(
-                    label = "Paste",
+                    label = "Replace",
                     onClick = onPasteMeasure,
+                    enabled = measurePasteEnabled,
+                )
+                ComposerSubmenuButton(
+                    label = "Insert",
+                    onClick = onInsertMeasure,
                     enabled = measurePasteEnabled,
                 )
                 ComposerSubmenuButton(label = "Duplicate", onClick = onDuplicateMeasure)

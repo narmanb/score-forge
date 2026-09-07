@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.SystemClock
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -1249,15 +1250,52 @@ fun ScoreForgeComposerScreen(
         )
     }
 
+    fun pasteBeatLabel(value: Float): String =
+        if (kotlin.math.abs(value - value.toInt()) <= 0.001f) value.toInt().toString() else value.toString()
+
+    fun explainPasteProblem(clipboard: ScoreMeasureClipboard, destinationBeat: Float): Boolean {
+        val problem = ScoreMeasureEdits.pasteProblemAt(
+            timeSignatures = timeSignatures,
+            destinationBeat = destinationBeat,
+            clipboard = clipboard,
+        ) ?: return false
+        val message = "Can't paste: copied measure ${problem.sourceMeasureNumber} has an event " +
+            "${pasteBeatLabel(problem.onsetWithinMeasure)} beats into it, but destination measure " +
+            "${problem.sourceMeasureNumber} is only ${pasteBeatLabel(problem.destinationMeasureLength)} beats long."
+        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        return true
+    }
+
     fun pasteActiveMeasure() {
         val clipboard = measureClipboard ?: return
+        val track = currentTrack()
+        if (explainPasteProblem(clipboard, track.cursorBeat)) return
         stopPlayback()
         stopLiveRecording()
         cancelNaturalEntryGroup()
         LiveInstrumentBus.allNotesOff()
-        val track = currentTrack()
         recordBeforeScoreEdit()
         val updatedEvents = ScoreMeasureEdits.pasteReplace(
+            events = track.events,
+            timeSignatures = timeSignatures,
+            destinationBeat = track.cursorBeat,
+            clipboard = clipboard,
+        )
+        replaceActiveTrack { it.copy(events = updatedEvents) }
+        selectedEventIndex = -1
+        syncHistoryButtons()
+    }
+
+    fun insertActiveMeasure() {
+        val clipboard = measureClipboard ?: return
+        val track = currentTrack()
+        if (explainPasteProblem(clipboard, track.cursorBeat)) return
+        stopPlayback()
+        stopLiveRecording()
+        cancelNaturalEntryGroup()
+        LiveInstrumentBus.allNotesOff()
+        recordBeforeScoreEdit()
+        val updatedEvents = ScoreMeasureEdits.pasteInsert(
             events = track.events,
             timeSignatures = timeSignatures,
             destinationBeat = track.cursorBeat,
@@ -1482,10 +1520,11 @@ fun ScoreForgeComposerScreen(
                         LiveInstrumentBus.allNotesOff()
                         showPianoKeyboard = !showPianoKeyboard
                     },
-                    measurePasteEnabled = measureClipboard?.let { ScoreMeasureEdits.canPasteAt(timeSignatures, activeCursorBeat, it) } == true,
+                    measurePasteEnabled = measureClipboard != null,
                     onCopyMeasure = ::copyActiveMeasure,
                     onCopyMeasureRange = ::copyActiveMeasureRange,
                     onPasteMeasure = ::pasteActiveMeasure,
+                    onInsertMeasure = ::insertActiveMeasure,
                     onDuplicateMeasure = { duplicateActiveMeasure(1) },
                     onDuplicateMeasure2 = { duplicateActiveMeasure(2) },
                     onDuplicateMeasure4 = { duplicateActiveMeasure(4) },
