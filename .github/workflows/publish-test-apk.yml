@@ -18,11 +18,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p apk
-          gh run download 34081776996 --repo narmanb/score-forge --name score-forge-debug-apk --dir apk
-          mv apk/app-debug.apk apk/Score-Forge-0.2.52-PR39.apk
+          gh run download 34083000469 --repo narmanb/score-forge --name score-forge-debug-apk --dir apk
+          mv apk/app-debug.apk apk/Score-Forge-0.2.54-PR40.apk
       - name: Publish browser-download prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete score-forge-pr39-test --repo narmanb/score-forge --yes --cleanup-tag || true
-          gh release create score-forge-pr39-test apk/Score-Forge-0.2.52-PR39.apk --repo narmanb/score-forge --target 2349fa7c86098068ca0a613f1cd5d33edaa8bf2e --prerelease --title "Score Forge 0.2.52 PR #39 Test" --notes "Phone-test APK for PR #39 with unified Copy count, Replace/Insert paste, and detailed incompatibility messages. Do not treat this prerelease as merged or final until device verification passes."
+          gh release delete score-forge-pr40-test --repo narmanb/score-forge --yes --cleanup-tag || true
+          gh release create score-forge-pr40-test apk/Score-Forge-0.2.54-PR40.apk --repo narmanb/score-forge --target dabca9fd8ba74f6434c67bb371504e23eb98c286 --prerelease --title "Score Forge 0.2.54 PR #40 Test" --notes "Combined phone-test APK for PR #39 and stacked PR #40: multiline in-app paste error banner plus Input On / Rearrange / Off staff interaction modes. Do not treat either PR as merged or final until device verification passes."
