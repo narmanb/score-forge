@@ -1,0 +1,143 @@
+name: Measure Range Patch
+
+on:
+  push:
+    branches:
+      - feature/measure-range-tools
+    paths:
+      - .github/workflows/measure-range-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/measure-range-tools
+          fetch-depth: 0
+      - name: Patch range UI and version
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f"anchor missing in {path}: {old[:80]!r}")
+              p.write_text(text.replace(old, new, 1))
+
+          screen = "app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt"
+          replace_once(
+              screen,
+              '''    fun copyActiveMeasure() {
+        measureClipboard = ScoreMeasureEdits.copyMeasure(
+            events = currentTrack().events,
+            timeSignatures = timeSignatures,
+            beat = currentTrack().cursorBeat,
+        )
+    }
+
+    fun pasteActiveMeasure() {''',
+              '''    fun copyActiveMeasure() {
+        measureClipboard = ScoreMeasureEdits.copyMeasure(
+            events = currentTrack().events,
+            timeSignatures = timeSignatures,
+            beat = currentTrack().cursorBeat,
+        )
+    }
+
+    fun copyActiveMeasureRange(measureCount: Int) {
+        measureClipboard = ScoreMeasureEdits.copyMeasures(
+            events = currentTrack().events,
+            timeSignatures = timeSignatures,
+            beat = currentTrack().cursorBeat,
+            measureCount = measureCount,
+        )
+    }
+
+    fun pasteActiveMeasure() {''',
+          )
+          replace_once(
+              screen,
+              '''                    onCopyMeasure = ::copyActiveMeasure,
+                    onPasteMeasure = ::pasteActiveMeasure,''',
+              '''                    onCopyMeasure = ::copyActiveMeasure,
+                    onCopyMeasureRange = ::copyActiveMeasureRange,
+                    onPasteMeasure = ::pasteActiveMeasure,''',
+          )
+
+          toolbar = "app/src/main/java/com/scoreforge/app/ui/ComposerTransformToolbar.kt"
+          replace_once(
+              toolbar,
+              '''import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf''',
+              '''import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf''',
+          )
+          replace_once(
+              toolbar,
+              '''    measurePasteEnabled: Boolean = false,
+    onCopyMeasure: () -> Unit = {},
+    onPasteMeasure: () -> Unit = {},''',
+              '''    measurePasteEnabled: Boolean = false,
+    onCopyMeasure: () -> Unit = {},
+    onCopyMeasureRange: (Int) -> Unit = {},
+    onPasteMeasure: () -> Unit = {},''',
+          )
+          replace_once(
+              toolbar,
+              '''    var section by rememberSaveable { mutableStateOf(ComposerToolbarSection.ROOT) }
+''',
+              '''    var section by rememberSaveable { mutableStateOf(ComposerToolbarSection.ROOT) }
+    var measureRangeCount by rememberSaveable { mutableIntStateOf(2) }
+''',
+          )
+          replace_once(
+              toolbar,
+              '''                ComposerSubmenuButton(label = "Copy", onClick = onCopyMeasure)
+                ComposerSubmenuButton(
+                    label = "Paste",
+                    onClick = onPasteMeasure,
+                    enabled = measurePasteEnabled,
+                )
+                ComposerSubmenuButton(label = "Duplicate", onClick = onDuplicateMeasure)''',
+              '''                ComposerSubmenuButton(label = "Copy", onClick = onCopyMeasure)
+                ComposerSubmenuButton(
+                    label = "Range −",
+                    onClick = { measureRangeCount = (measureRangeCount - 1).coerceAtLeast(2) },
+                    enabled = measureRangeCount > 2,
+                )
+                Text("$measureRangeCount measures", style = MaterialTheme.typography.bodySmall)
+                ComposerSubmenuButton(
+                    label = "Range +",
+                    onClick = { measureRangeCount = (measureRangeCount + 1).coerceAtMost(16) },
+                    enabled = measureRangeCount < 16,
+                )
+                ComposerSubmenuButton(
+                    label = "Copy Range",
+                    onClick = { onCopyMeasureRange(measureRangeCount) },
+                )
+                ComposerSubmenuButton(
+                    label = "Paste",
+                    onClick = onPasteMeasure,
+                    enabled = measurePasteEnabled,
+                )
+                ComposerSubmenuButton(label = "Duplicate", onClick = onDuplicateMeasure)''',
+          )
+
+          gradle = "app/build.gradle.kts"
+          replace_once(gradle, 'versionCode = 53\n        versionName = "0.2.50"', 'versionCode = 54\n        versionName = "0.2.51"')
+
+          Path(".github/workflows/measure-range-patch.yml").unlink()
+      - name: Commit source changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Wire multi-measure range copy UI"
+          git push origin HEAD:feature/measure-range-tools
