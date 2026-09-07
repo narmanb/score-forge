@@ -136,8 +136,12 @@ fun ComposerTransformToolbar(
         when (section) {
             ComposerToolbarSection.ROOT -> {
                 ComposerToolbarButton(
-                    label = "Tempo ${activeTempo.bpm}",
-                    onClick = { section = ComposerToolbarSection.TEMPO },
+                    label = "Notes ${selectedDuration.displayName}${if (dotted) " •" else ""}",
+                    onClick = { section = ComposerToolbarSection.NOTES },
+                )
+                ComposerToolbarButton(
+                    label = "Measure ${measureNumber.coerceAtLeast(1)}",
+                    onClick = { section = ComposerToolbarSection.MEASURE },
                 )
                 ComposerToolbarButton(
                     label = "Time ${activeTime.displayName}",
@@ -148,20 +152,16 @@ fun ComposerTransformToolbar(
                     onClick = { section = ComposerToolbarSection.KEY },
                 )
                 ComposerToolbarButton(
+                    label = "Tempo ${activeTempo.bpm}",
+                    onClick = { section = ComposerToolbarSection.TEMPO },
+                )
+                ComposerToolbarButton(
                     label = "Clef ${clefMode.displayName}",
                     onClick = { section = ComposerToolbarSection.CLEF },
                 )
                 ComposerToolbarButton(
-                    label = "Notes ${selectedDuration.displayName}${if (dotted) " •" else ""}",
-                    onClick = { section = ComposerToolbarSection.NOTES },
-                )
-                ComposerToolbarButton(
                     label = if (editorMode == ScoreEditorMode.STAFF) "Editor Staff" else "Editor Piano Roll",
                     onClick = { section = ComposerToolbarSection.EDITOR },
-                )
-                ComposerToolbarButton(
-                    label = "Measure ${measureNumber.coerceAtLeast(1)}",
-                    onClick = { section = ComposerToolbarSection.MEASURE },
                 )
             }
 
