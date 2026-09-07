@@ -12,8 +12,8 @@ android {
         applicationId = "com.scoreforge.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 55
-        versionName = "0.2.52"
+        versionCode = 56
+        versionName = "0.2.53"
 
         externalNativeBuild {
             cmake {

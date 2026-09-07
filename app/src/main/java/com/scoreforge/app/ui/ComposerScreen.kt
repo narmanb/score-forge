@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.SystemClock
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
@@ -173,6 +172,14 @@ fun ScoreForgeComposerScreen(
     var canRedo by remember { mutableStateOf(false) }
     var mixerGestureHistoryRecorded by remember { mutableStateOf(false) }
     var measureClipboard by remember { mutableStateOf<ScoreMeasureClipboard?>(null) }
+    var measurePasteMessage by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(measurePasteMessage) {
+        if (measurePasteMessage != null) {
+            delay(8000)
+            measurePasteMessage = null
+        }
+    }
 
     val safeActiveTrackIndex = activeTrackIndex.coerceIn(0, tracks.lastIndex)
     val activeTrack = tracks[safeActiveTrackIndex]
@@ -1234,6 +1241,7 @@ fun ScoreForgeComposerScreen(
     }
 
     fun copyActiveMeasure() {
+        measurePasteMessage = null
         measureClipboard = ScoreMeasureEdits.copyMeasure(
             events = currentTrack().events,
             timeSignatures = timeSignatures,
@@ -1242,6 +1250,7 @@ fun ScoreForgeComposerScreen(
     }
 
     fun copyActiveMeasureRange(measureCount: Int) {
+        measurePasteMessage = null
         measureClipboard = ScoreMeasureEdits.copyMeasures(
             events = currentTrack().events,
             timeSignatures = timeSignatures,
@@ -1259,10 +1268,10 @@ fun ScoreForgeComposerScreen(
             destinationBeat = destinationBeat,
             clipboard = clipboard,
         ) ?: return false
-        val message = "Can't paste: copied measure ${problem.sourceMeasureNumber} has an event " +
-            "${pasteBeatLabel(problem.onsetWithinMeasure)} beats into it, but destination measure " +
-            "${problem.sourceMeasureNumber} is only ${pasteBeatLabel(problem.destinationMeasureLength)} beats long."
-        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        val message = "Can't paste: copied measure ${problem.sourceMeasureNumber} has an event at beat " +
+            "${pasteBeatLabel(problem.onsetWithinMeasure)}; destination measure " +
+            "${problem.sourceMeasureNumber} is only ${pasteBeatLabel(problem.destinationMeasureLength)} beats."
+        measurePasteMessage = message
         return true
     }
 
@@ -1270,6 +1279,7 @@ fun ScoreForgeComposerScreen(
         val clipboard = measureClipboard ?: return
         val track = currentTrack()
         if (explainPasteProblem(clipboard, track.cursorBeat)) return
+        measurePasteMessage = null
         stopPlayback()
         stopLiveRecording()
         cancelNaturalEntryGroup()
@@ -1290,6 +1300,7 @@ fun ScoreForgeComposerScreen(
         val clipboard = measureClipboard ?: return
         val track = currentTrack()
         if (explainPasteProblem(clipboard, track.cursorBeat)) return
+        measurePasteMessage = null
         stopPlayback()
         stopLiveRecording()
         cancelNaturalEntryGroup()
@@ -1530,6 +1541,22 @@ fun ScoreForgeComposerScreen(
                     onDuplicateMeasure4 = { duplicateActiveMeasure(4) },
                     onDuplicateMeasure8 = { duplicateActiveMeasure(8) },
                 )
+
+                measurePasteMessage?.let { message ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 2.dp),
+                        color = MaterialTheme.colorScheme.errorContainer,
+                    ) {
+                        Text(
+                            text = message,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
 
                 when (editorMode) {
                     ScoreEditorMode.STAFF -> ScoreStaffEditor(
