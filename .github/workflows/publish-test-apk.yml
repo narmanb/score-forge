@@ -18,11 +18,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p apk
-          gh run download 34097386265 --repo narmanb/score-forge --name score-forge-debug-apk --dir apk
-          mv apk/app-debug.apk apk/Score-Forge-0.2.55-PR41.apk
+          gh run download 34099525329 --repo narmanb/score-forge --name score-forge-debug-apk --dir apk
+          mv apk/app-debug.apk apk/Score-Forge-0.2.56-PR42.apk
       - name: Publish browser-download prerelease
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release delete score-forge-pr41-test --repo narmanb/score-forge --yes --cleanup-tag || true
-          gh release create score-forge-pr41-test apk/Score-Forge-0.2.55-PR41.apk --repo narmanb/score-forge --target 11ef64c6ebcb05b91e9c54d874cd7577382f032f --prerelease --title "Score Forge 0.2.55 PR #41 Test" --notes "Phone-test APK for PR #41. Reorders the composer root toolbar to Notes, Measure, Time, Key, Tempo, Clef, Editor. Do not treat this prerelease as merged or final until device verification passes."
+          gh release delete score-forge-pr42-test --repo narmanb/score-forge --yes --cleanup-tag || true
+          gh release create score-forge-pr42-test apk/Score-Forge-0.2.56-PR42.apk --repo narmanb/score-forge --target 5fc681cc7ffd4038c8c56e94c13d945506d085ae --prerelease --title "Score Forge 0.2.56 PR #42 Test" --notes "Phone-test APK for PR #42. Adds Current Track / All Tracks measure scope for Copy, Replace, Insert, Duplicate, x2, x4, and x8, with all-track compatibility reporting and single-step Undo/Redo. Do not treat this prerelease as merged or final until device verification passes."
