@@ -1,0 +1,81 @@
+name: PR39 Message Banner
+
+on:
+  push:
+    branches:
+      - feature/measure-range-tools
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/measure-range-tools
+      - name: Replace Toast with in-app banner
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt')
+          text = path.read_text()
+
+          text = text.replace('import android.widget.Toast\n', '')
+
+          old = '    var measureClipboard by remember { mutableStateOf<ScoreMeasureClipboard?>(null) }\n\n'
+          new = '''    var measureClipboard by remember { mutableStateOf<ScoreMeasureClipboard?>(null) }\n    var measurePasteMessage by remember { mutableStateOf<String?>(null) }\n\n    LaunchedEffect(measurePasteMessage) {\n        if (measurePasteMessage != null) {\n            delay(8000)\n            measurePasteMessage = null\n        }\n    }\n\n'''
+          if old not in text:
+              raise SystemExit('measure clipboard state anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    fun copyActiveMeasure() {\n        measureClipboard = ScoreMeasureEdits.copyMeasure(\n'''
+          new = '''    fun copyActiveMeasure() {\n        measurePasteMessage = null\n        measureClipboard = ScoreMeasureEdits.copyMeasure(\n'''
+          if old not in text:
+              raise SystemExit('single copy anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = '''    fun copyActiveMeasureRange(measureCount: Int) {\n        measureClipboard = ScoreMeasureEdits.copyMeasures(\n'''
+          new = '''    fun copyActiveMeasureRange(measureCount: Int) {\n        measurePasteMessage = null\n        measureClipboard = ScoreMeasureEdits.copyMeasures(\n'''
+          if old not in text:
+              raise SystemExit('range copy anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = '''        val message = "Can't paste: copied measure ${problem.sourceMeasureNumber} has an event " +\n            "${pasteBeatLabel(problem.onsetWithinMeasure)} beats into it, but destination measure " +\n            "${problem.sourceMeasureNumber} is only ${pasteBeatLabel(problem.destinationMeasureLength)} beats long."\n        Toast.makeText(context, message, Toast.LENGTH_LONG).show()\n'''
+          new = '''        val message = "Can't paste: copied measure ${problem.sourceMeasureNumber} has an event at beat " +\n            "${pasteBeatLabel(problem.onsetWithinMeasure)}; destination measure " +\n            "${problem.sourceMeasureNumber} is only ${pasteBeatLabel(problem.destinationMeasureLength)} beats."\n        measurePasteMessage = message\n'''
+          if old not in text:
+              raise SystemExit('toast message anchor not found')
+          text = text.replace(old, new, 1)
+
+          old = '''        val track = currentTrack()\n        if (explainPasteProblem(clipboard, track.cursorBeat)) return\n        stopPlayback()\n'''
+          new = '''        val track = currentTrack()\n        if (explainPasteProblem(clipboard, track.cursorBeat)) return\n        measurePasteMessage = null\n        stopPlayback()\n'''
+          if text.count(old) != 2:
+              raise SystemExit(f'expected two valid-paste anchors, found {text.count(old)}')
+          text = text.replace(old, new)
+
+          old = '''                    onDuplicateMeasure8 = { duplicateActiveMeasure(8) },\n                )\n\n                when (editorMode) {\n'''
+          new = '''                    onDuplicateMeasure8 = { duplicateActiveMeasure(8) },\n                )\n\n                measurePasteMessage?.let { message ->\n                    Surface(\n                        modifier = Modifier\n                            .fillMaxWidth()\n                            .padding(horizontal = 12.dp, vertical = 2.dp),\n                        color = MaterialTheme.colorScheme.errorContainer,\n                    ) {\n                        Text(\n                            text = message,\n                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),\n                            color = MaterialTheme.colorScheme.onErrorContainer,\n                            style = MaterialTheme.typography.bodyMedium,\n                        )\n                    }\n                }\n\n                when (editorMode) {\n'''
+          if old not in text:
+              raise SystemExit('toolbar/banner insertion anchor not found')
+          text = text.replace(old, new, 1)
+          path.write_text(text)
+
+          build = Path('app/build.gradle.kts')
+          b = build.read_text()
+          if 'versionCode = 55' not in b or 'versionName = "0.2.52"' not in b:
+              raise SystemExit('unexpected version before banner bump')
+          b = b.replace('versionCode = 55', 'versionCode = 56', 1)
+          b = b.replace('versionName = "0.2.52"', 'versionName = "0.2.53"', 1)
+          build.write_text(b)
+          PY
+      - name: Commit banner refinement
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/com/scoreforge/app/ui/ComposerScreen.kt app/build.gradle.kts
+          git rm .github/workflows/pr39-message-banner.yml
+          git commit -m "Use in-app paste error banner"
+          git push origin HEAD:feature/measure-range-tools
