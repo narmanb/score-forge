@@ -57,12 +57,14 @@ import com.scoreforge.app.music.NoteDuration
 import com.scoreforge.app.music.PitchNames
 import com.scoreforge.app.music.ScoreClef
 import com.scoreforge.app.music.ScoreClefMode
+import com.scoreforge.app.music.ScoreAllTracksMeasureClipboard
 import com.scoreforge.app.music.ScoreClefs
 import com.scoreforge.app.music.ScoreEditHistory
 import com.scoreforge.app.music.ScoreEditState
 import com.scoreforge.app.music.ScoreKeySignatures
 import com.scoreforge.app.music.ScoreMeasureClipboard
 import com.scoreforge.app.music.ScoreMeasureEdits
+import com.scoreforge.app.music.ScoreMeasureTrackEdits
 import com.scoreforge.app.music.ScoreNote
 import com.scoreforge.app.music.ScoreProjectRepository
 import com.scoreforge.app.music.ScoreProjectSnapshot
@@ -114,6 +116,22 @@ private data class LiveHeldInput(
     val startedAtMs: Long,
     val bpmAtPress: Int,
 )
+
+private sealed interface MeasureClipboardPayload {
+    val scope: MeasureEditScope
+
+    data class CurrentTrack(
+        val clipboard: ScoreMeasureClipboard,
+    ) : MeasureClipboardPayload {
+        override val scope: MeasureEditScope = MeasureEditScope.CURRENT_TRACK
+    }
+
+    data class AllTracks(
+        val clipboard: ScoreAllTracksMeasureClipboard,
+    ) : MeasureClipboardPayload {
+        override val scope: MeasureEditScope = MeasureEditScope.ALL_TRACKS
+    }
+}
 
 @Composable
 fun ScoreForgeComposerScreen(
@@ -171,7 +189,8 @@ fun ScoreForgeComposerScreen(
     var canUndo by remember { mutableStateOf(false) }
     var canRedo by remember { mutableStateOf(false) }
     var mixerGestureHistoryRecorded by remember { mutableStateOf(false) }
-    var measureClipboard by remember { mutableStateOf<ScoreMeasureClipboard?>(null) }
+    var measureEditScope by rememberSaveable { mutableStateOf(MeasureEditScope.CURRENT_TRACK) }
+    var measureClipboard by remember { mutableStateOf<MeasureClipboardPayload?>(null) }
     var measurePasteMessage by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(measurePasteMessage) {
@@ -1240,79 +1259,136 @@ fun ScoreForgeComposerScreen(
         replaceActiveTrack { it.copy(presetBank = bank, presetProgram = program) }
     }
 
-    fun copyActiveMeasure() {
+    fun copyMeasureSelection(measureCount: Int) {
         measurePasteMessage = null
-        measureClipboard = ScoreMeasureEdits.copyMeasure(
-            events = currentTrack().events,
-            timeSignatures = timeSignatures,
-            beat = currentTrack().cursorBeat,
-        )
+        val track = currentTrack()
+        measureClipboard = when (measureEditScope) {
+            MeasureEditScope.CURRENT_TRACK -> MeasureClipboardPayload.CurrentTrack(
+                ScoreMeasureEdits.copyMeasures(
+                    events = track.events,
+                    timeSignatures = timeSignatures,
+                    beat = track.cursorBeat,
+                    measureCount = measureCount,
+                )
+            )
+            MeasureEditScope.ALL_TRACKS -> MeasureClipboardPayload.AllTracks(
+                ScoreMeasureTrackEdits.copyAllTracks(
+                    tracks = tracks.toList(),
+                    timeSignatures = timeSignatures,
+                    beat = track.cursorBeat,
+                    measureCount = measureCount,
+                )
+            )
+        }
     }
 
-    fun copyActiveMeasureRange(measureCount: Int) {
-        measurePasteMessage = null
-        measureClipboard = ScoreMeasureEdits.copyMeasures(
-            events = currentTrack().events,
-            timeSignatures = timeSignatures,
-            beat = currentTrack().cursorBeat,
-            measureCount = measureCount,
-        )
-    }
+    fun copyActiveMeasure() = copyMeasureSelection(1)
+
+    fun copyActiveMeasureRange(measureCount: Int) = copyMeasureSelection(measureCount)
 
     fun pasteBeatLabel(value: Float): String =
         if (kotlin.math.abs(value - value.toInt()) <= 0.001f) value.toInt().toString() else value.toString()
 
-    fun explainPasteProblem(clipboard: ScoreMeasureClipboard, destinationBeat: Float): Boolean {
-        val problem = ScoreMeasureEdits.pasteProblemAt(
-            timeSignatures = timeSignatures,
-            destinationBeat = destinationBeat,
-            clipboard = clipboard,
-        ) ?: return false
-        val message = "Can't paste: copied measure ${problem.sourceMeasureNumber} has an event at beat " +
-            "${pasteBeatLabel(problem.onsetWithinMeasure)}; destination measure " +
-            "${problem.sourceMeasureNumber} is only ${pasteBeatLabel(problem.destinationMeasureLength)} beats."
+    fun explainPasteProblem(payload: MeasureClipboardPayload, destinationBeat: Float): Boolean {
+        if (payload.scope != measureEditScope) {
+            measurePasteMessage = "Clipboard was copied in ${payload.scope.label} mode. " +
+                "Switch back to ${payload.scope.label} or copy again."
+            return true
+        }
+
+        val message = when (payload) {
+            is MeasureClipboardPayload.CurrentTrack -> {
+                val problem = ScoreMeasureEdits.pasteProblemAt(
+                    timeSignatures = timeSignatures,
+                    destinationBeat = destinationBeat,
+                    clipboard = payload.clipboard,
+                ) ?: return false
+                "Can't paste: copied measure ${problem.sourceMeasureNumber} has an event at beat " +
+                    "${pasteBeatLabel(problem.onsetWithinMeasure)}; destination measure " +
+                    "${problem.sourceMeasureNumber} is only ${pasteBeatLabel(problem.destinationMeasureLength)} beats."
+            }
+            is MeasureClipboardPayload.AllTracks -> {
+                val allTracksProblem = ScoreMeasureTrackEdits.pasteProblemAt(
+                    timeSignatures = timeSignatures,
+                    destinationBeat = destinationBeat,
+                    clipboard = payload.clipboard,
+                ) ?: return false
+                val problem = allTracksProblem.problem
+                val trackName = tracks.firstOrNull { it.id == allTracksProblem.trackId }?.name
+                    ?: "Track ${allTracksProblem.trackId}"
+                "Can't paste all tracks: $trackName, copied measure ${problem.sourceMeasureNumber} " +
+                    "has an event at beat ${pasteBeatLabel(problem.onsetWithinMeasure)}; destination measure " +
+                    "${problem.sourceMeasureNumber} is only ${pasteBeatLabel(problem.destinationMeasureLength)} beats."
+            }
+        }
         measurePasteMessage = message
         return true
     }
 
     fun pasteActiveMeasure() {
-        val clipboard = measureClipboard ?: return
+        val payload = measureClipboard ?: return
         val track = currentTrack()
-        if (explainPasteProblem(clipboard, track.cursorBeat)) return
+        if (explainPasteProblem(payload, track.cursorBeat)) return
         measurePasteMessage = null
         stopPlayback()
         stopLiveRecording()
         cancelNaturalEntryGroup()
         LiveInstrumentBus.allNotesOff()
         recordBeforeScoreEdit()
-        val updatedEvents = ScoreMeasureEdits.pasteReplace(
-            events = track.events,
-            timeSignatures = timeSignatures,
-            destinationBeat = track.cursorBeat,
-            clipboard = clipboard,
-        )
-        replaceActiveTrack { it.copy(events = updatedEvents) }
+        when (payload) {
+            is MeasureClipboardPayload.CurrentTrack -> {
+                val updatedEvents = ScoreMeasureEdits.pasteReplace(
+                    events = track.events,
+                    timeSignatures = timeSignatures,
+                    destinationBeat = track.cursorBeat,
+                    clipboard = payload.clipboard,
+                )
+                replaceActiveTrack { it.copy(events = updatedEvents) }
+            }
+            is MeasureClipboardPayload.AllTracks -> {
+                val updatedTracks = ScoreMeasureTrackEdits.pasteReplaceAllTracks(
+                    tracks = tracks.toList(),
+                    timeSignatures = timeSignatures,
+                    destinationBeat = track.cursorBeat,
+                    clipboard = payload.clipboard,
+                )
+                updatedTracks.forEachIndexed { index, updated -> replaceTrack(index, updated) }
+            }
+        }
         selectedEventIndex = -1
         syncHistoryButtons()
     }
 
     fun insertActiveMeasure() {
-        val clipboard = measureClipboard ?: return
+        val payload = measureClipboard ?: return
         val track = currentTrack()
-        if (explainPasteProblem(clipboard, track.cursorBeat)) return
+        if (explainPasteProblem(payload, track.cursorBeat)) return
         measurePasteMessage = null
         stopPlayback()
         stopLiveRecording()
         cancelNaturalEntryGroup()
         LiveInstrumentBus.allNotesOff()
         recordBeforeScoreEdit()
-        val updatedEvents = ScoreMeasureEdits.pasteInsert(
-            events = track.events,
-            timeSignatures = timeSignatures,
-            destinationBeat = track.cursorBeat,
-            clipboard = clipboard,
-        )
-        replaceActiveTrack { it.copy(events = updatedEvents) }
+        when (payload) {
+            is MeasureClipboardPayload.CurrentTrack -> {
+                val updatedEvents = ScoreMeasureEdits.pasteInsert(
+                    events = track.events,
+                    timeSignatures = timeSignatures,
+                    destinationBeat = track.cursorBeat,
+                    clipboard = payload.clipboard,
+                )
+                replaceActiveTrack { it.copy(events = updatedEvents) }
+            }
+            is MeasureClipboardPayload.AllTracks -> {
+                val updatedTracks = ScoreMeasureTrackEdits.pasteInsertAllTracks(
+                    tracks = tracks.toList(),
+                    timeSignatures = timeSignatures,
+                    destinationBeat = track.cursorBeat,
+                    clipboard = payload.clipboard,
+                )
+                updatedTracks.forEachIndexed { index, updated -> replaceTrack(index, updated) }
+            }
+        }
         selectedEventIndex = -1
         syncHistoryButtons()
     }
@@ -1324,22 +1400,36 @@ fun ScoreForgeComposerScreen(
         LiveInstrumentBus.allNotesOff()
         val track = currentTrack()
         recordBeforeScoreEdit()
-        val updatedEvents = ScoreMeasureEdits.duplicateMeasure(
-            events = track.events,
-            timeSignatures = timeSignatures,
-            beat = track.cursorBeat,
-            copies = copies,
-        )
         val newCursorBeat = ScoreMeasureEdits.duplicateCursorBeat(
             timeSignatures = timeSignatures,
             beat = track.cursorBeat,
             copies = copies,
         )
-        replaceActiveTrack {
-            it.copy(
-                events = updatedEvents,
-                cursorBeat = newCursorBeat,
-            )
+        when (measureEditScope) {
+            MeasureEditScope.CURRENT_TRACK -> {
+                val updatedEvents = ScoreMeasureEdits.duplicateMeasure(
+                    events = track.events,
+                    timeSignatures = timeSignatures,
+                    beat = track.cursorBeat,
+                    copies = copies,
+                )
+                replaceActiveTrack {
+                    it.copy(
+                        events = updatedEvents,
+                        cursorBeat = newCursorBeat,
+                    )
+                }
+            }
+            MeasureEditScope.ALL_TRACKS -> {
+                val updatedTracks = ScoreMeasureTrackEdits.duplicateMeasureAllTracks(
+                    tracks = tracks.toList(),
+                    timeSignatures = timeSignatures,
+                    beat = track.cursorBeat,
+                    copies = copies,
+                )
+                updatedTracks.forEachIndexed { index, updated -> replaceTrack(index, updated) }
+                replaceActiveTrack { it.copy(cursorBeat = newCursorBeat) }
+            }
         }
         selectedEventIndex = -1
         syncHistoryButtons()
@@ -1532,6 +1622,11 @@ fun ScoreForgeComposerScreen(
                         showPianoKeyboard = !showPianoKeyboard
                     },
                     measurePasteEnabled = measureClipboard != null,
+                    measureEditScope = measureEditScope,
+                    onMeasureEditScopeChanged = { scope ->
+                        measureEditScope = scope
+                        measurePasteMessage = null
+                    },
                     onCopyMeasure = ::copyActiveMeasure,
                     onCopyMeasureRange = ::copyActiveMeasureRange,
                     onPasteMeasure = ::pasteActiveMeasure,

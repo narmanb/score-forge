@@ -43,6 +43,17 @@ enum class ComposerToolbarSection {
     MEASURE,
 }
 
+enum class MeasureEditScope(val label: String) {
+    CURRENT_TRACK("Current Track"),
+    ALL_TRACKS("All Tracks"),
+    ;
+
+    fun next(): MeasureEditScope = when (this) {
+        CURRENT_TRACK -> ALL_TRACKS
+        ALL_TRACKS -> CURRENT_TRACK
+    }
+}
+
 /**
  * One-row composer toolbar that replaces several always-visible control rows.
  * Opening a category transforms the same row instead of pushing the editor down.
@@ -86,6 +97,8 @@ fun ComposerTransformToolbar(
     onEditorModeChanged: (ScoreEditorMode) -> Unit,
     onTogglePianoKeyboard: () -> Unit,
     measurePasteEnabled: Boolean = false,
+    measureEditScope: MeasureEditScope = MeasureEditScope.CURRENT_TRACK,
+    onMeasureEditScopeChanged: (MeasureEditScope) -> Unit = {},
     onCopyMeasure: () -> Unit = {},
     onCopyMeasureRange: (Int) -> Unit = {},
     onPasteMeasure: () -> Unit = {},
@@ -382,6 +395,11 @@ fun ComposerTransformToolbar(
             ComposerToolbarSection.MEASURE -> {
                 BackButton { section = ComposerToolbarSection.ROOT }
                 Text("Measure ${measureNumber.coerceAtLeast(1)}", style = MaterialTheme.typography.labelLarge)
+                ComposerSubmenuButton(
+                    label = measureEditScope.label,
+                    onClick = { onMeasureEditScopeChanged(measureEditScope.next()) },
+                    selected = measureEditScope == MeasureEditScope.ALL_TRACKS,
+                )
                 ComposerSubmenuButton(
                     label = "−",
                     onClick = { measureRangeCount = (measureRangeCount - 1).coerceAtLeast(1) },
