@@ -1240,6 +1240,15 @@ fun ScoreForgeComposerScreen(
         )
     }
 
+    fun copyActiveMeasureRange(measureCount: Int) {
+        measureClipboard = ScoreMeasureEdits.copyMeasures(
+            events = currentTrack().events,
+            timeSignatures = timeSignatures,
+            beat = currentTrack().cursorBeat,
+            measureCount = measureCount,
+        )
+    }
+
     fun pasteActiveMeasure() {
         val clipboard = measureClipboard ?: return
         stopPlayback()
@@ -1475,6 +1484,7 @@ fun ScoreForgeComposerScreen(
                     },
                     measurePasteEnabled = measureClipboard?.let { ScoreMeasureEdits.canPasteAt(timeSignatures, activeCursorBeat, it) } == true,
                     onCopyMeasure = ::copyActiveMeasure,
+                    onCopyMeasureRange = ::copyActiveMeasureRange,
                     onPasteMeasure = ::pasteActiveMeasure,
                     onDuplicateMeasure = { duplicateActiveMeasure(1) },
                     onDuplicateMeasure2 = { duplicateActiveMeasure(2) },
