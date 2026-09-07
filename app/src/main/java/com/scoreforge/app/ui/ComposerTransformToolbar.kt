@@ -84,6 +84,13 @@ fun ComposerTransformToolbar(
     onToggleTie: () -> Unit,
     onEditorModeChanged: (ScoreEditorMode) -> Unit,
     onTogglePianoKeyboard: () -> Unit,
+    measurePasteEnabled: Boolean = false,
+    onCopyMeasure: () -> Unit = {},
+    onPasteMeasure: () -> Unit = {},
+    onDuplicateMeasure: () -> Unit = {},
+    onDuplicateMeasure2: () -> Unit = {},
+    onDuplicateMeasure4: () -> Unit = {},
+    onDuplicateMeasure8: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var section by rememberSaveable { mutableStateOf(ComposerToolbarSection.ROOT) }
@@ -371,7 +378,16 @@ fun ComposerTransformToolbar(
             ComposerToolbarSection.MEASURE -> {
                 BackButton { section = ComposerToolbarSection.ROOT }
                 Text("Measure ${measureNumber.coerceAtLeast(1)}", style = MaterialTheme.typography.labelLarge)
-                Text("Copy / paste / duplicate tools go here next", style = MaterialTheme.typography.bodySmall)
+                ComposerSubmenuButton(label = "Copy", onClick = onCopyMeasure)
+                ComposerSubmenuButton(
+                    label = "Paste",
+                    onClick = onPasteMeasure,
+                    enabled = measurePasteEnabled,
+                )
+                ComposerSubmenuButton(label = "Duplicate", onClick = onDuplicateMeasure)
+                ComposerSubmenuButton(label = "×2", onClick = onDuplicateMeasure2)
+                ComposerSubmenuButton(label = "×4", onClick = onDuplicateMeasure4)
+                ComposerSubmenuButton(label = "×8", onClick = onDuplicateMeasure8)
             }
         }
     }
