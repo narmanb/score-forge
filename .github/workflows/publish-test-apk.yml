@@ -1,0 +1,28 @@
+name: Publish Test APK
+
+on:
+  push:
+    branches:
+      - test-apk-publisher
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download verified CI artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p apk
+          gh run download 34079780728 --repo narmanb/score-forge --name score-forge-debug-apk --dir apk
+          mv apk/app-debug.apk apk/Score-Forge-0.2.51-PR39.apk
+      - name: Publish browser-download prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete score-forge-pr39-test --repo narmanb/score-forge --yes --cleanup-tag || true
+          gh release create score-forge-pr39-test apk/Score-Forge-0.2.51-PR39.apk --repo narmanb/score-forge --target 8bda7112a6173554cbfdec9200afecfafb027d42 --prerelease --title "Score Forge 0.2.51 PR #39 Test" --notes "Phone-test APK for PR #39. Do not treat this prerelease as merged or final until device verification passes."
